@@ -1,0 +1,1896 @@
+
+<script>
+  /* ============================================================
+   * ふり返りジャーナル — クライアントサイド JavaScript (js.html)
+   * ============================================================
+   * SPA（Single Page Application）構成で、画面遷移はDOMの
+   * 表示切り替えで行い、ページ全体のリロードを防止する。
+   *
+   * 主な機能:
+   *   - google.script.run ラッパー（リトライ・エラーハンドリング）
+   *   - SweetAlert2 による通知
+   *   - 児童画面（ジャーナル入力・カレンダー・過去との対話）
+   *   - 教員画面（ダッシュボード・フィードバック・AI連携）
+   *   - ハイライト機能
+   * ============================================================ */
+
+  // =============================================================
+  // ■ 1. グローバル変数・初期データ
+  // =============================================================
+
+  // ※ userData, todayTheme, journalsData, classRoster は
+  //    index.html のテンプレートタグで定義済み（グローバル変数）
+
+  /** 状態管理用の変数 */
+  let selectedEmotion = null;   // 選択中の「気持ち」
+  let selectedFile = null;   // 選択された画像ファイル
+  let currentDate = new Date(); // カレンダー表示月
+  let currentHighlights = [];     // 編集中のハイライト情報
+  let activeJournalId = null;   // 現在開いているジャーナルID
+  let selectionRange = null;   // テキスト選択範囲
+
+
+  // =============================================================
+  // ■ 2. google.script.run ラッパー（リトライ・エラーハンドリング）
+  // =============================================================
+
+  /**
+   * google.script.run を Promise でカプセル化するラッパー
+   * - 最大3回の自動リトライ
+   * - エラー時は SweetAlert2 で通知
+   * - 通信中はスピナーを表示
+   *
+   * @param {string} functionName - GAS側の関数名
+   * @param {...*} args - 関数に渡す引数
+   * @returns {Promise<*>} GAS関数の戻り値
+   */
+  function callGas(functionName, ...args) {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1500; // ms
+
+    return new Promise((resolve, reject) => {
+      let attempt = 0;
+
+      function tryCall() {
+        attempt++;
+        const runner = google.script.run
+          .withSuccessHandler(result => resolve(result))
+          .withFailureHandler(error => {
+            if (attempt < MAX_RETRIES) {
+              console.warn(`[callGas] ${functionName} リトライ ${attempt}/${MAX_RETRIES}: ${error.message}`);
+              setTimeout(tryCall, RETRY_DELAY);
+            } else {
+              reject(error);
+            }
+          });
+        runner[functionName](...args);
+      }
+
+      tryCall();
+    });
+  }
+
+  /**
+   * callGas をスピナー付きで呼び出す便利関数
+   * @param {string} functionName
+   * @param {...*} args
+   * @returns {Promise<*>}
+   */
+  async function callGasWithSpinner(functionName, ...args) {
+    showSpinner();
+    try {
+      const result = await callGas(functionName, ...args);
+      return result;
+    } catch (error) {
+      Swal.fire({
+        icon: 'error',
+        title: 'エラー',
+        text: error.message || '通信中にエラーが発生しました。',
+        confirmButtonText: 'OK'
+      });
+      throw error;
+    } finally {
+      hideSpinner();
+    }
+  }
+
+
+  // =============================================================
+  // ■ 3. スピナー制御
+  // =============================================================
+
+  /** スピナーを表示する */
+  function showSpinner() {
+    const el = document.getElementById('loading-overlay');
+    if (el) el.classList.remove('d-none');
+  }
+
+  /** スピナーを非表示にする */
+  function hideSpinner() {
+    const el = document.getElementById('loading-overlay');
+    if (el) el.classList.add('d-none');
+  }
+
+
+  // =============================================================
+  // ■ 4. 初期化処理
+  // =============================================================
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // ユーザーの役割に応じて画面を表示
+    if (userData.role === '担任') {
+      renderTeacherView();
+    } else {
+      renderStudentView();
+    }
+
+    // 画像全画面表示の閉じる処理
+    const fsOverlay = document.getElementById('fullscreen-image-overlay');
+    if (fsOverlay) {
+      fsOverlay.addEventListener('click', () => {
+        fsOverlay.classList.remove('show');
+      });
+    }
+
+    // スピナーを非表示
+    hideSpinner();
+  });
+
+
+  // =============================================================
+  // ■ 5. SPA ページ切替
+  // =============================================================
+
+  /**
+   * 指定したページセクションを表示し、他を非表示にする
+   * @param {string} pageId - 表示するセクションの ID
+   */
+  function showPage(pageId) {
+    document.querySelectorAll('.page-section').forEach(sec => {
+      sec.classList.remove('active');
+    });
+    const target = document.getElementById(pageId);
+    if (target) target.classList.add('active');
+  }
+
+
+  // =============================================================
+  // ■ 6. 児童画面の描画とイベント
+  // =============================================================
+
+  /** 児童画面を描画する */
+  function renderStudentView() {
+    const app = document.getElementById('app-content');
+
+    app.innerHTML = `
+    <div class="student-layout">
+      <!-- 左サイド：ミニカレンダー -->
+      <aside class="side-calendar">
+        <div class="calendar-container mini-calendar" id="calendar"></div>
+        <button class="past-dialogue-mini" id="past-dialogue-btn">
+          <i class="bi bi-clock-history"></i> <ruby>過去<rt>かこ</rt></ruby>の<ruby>自分<rt>じぶん</rt></ruby>
+        </button>
+      </aside>
+      <!-- メイン：ノートブック -->
+      <div class="notebook-container">
+        <!-- 左ページ：記入エリア -->
+        <div class="notebook-page page-left">
+          <div class="theme-display">
+            <strong><i class="bi bi-chat-quote-fill"></i> <ruby>今日<rt>きょう</rt></ruby>のテーマ:</strong>
+            ${escapeHtml(todayTheme)}
+          </div>
+          <textarea id="journal-content" placeholder="ここに入力してください"></textarea>
+          <div class="char-counter" id="char-counter">0 <ruby>文字<rt>もじ</rt></ruby></div>
+        </div>
+        <!-- 右ページ：ツール + 感情 + 提出 -->
+        <div class="notebook-page page-right">
+          <div class="support-tools">
+            <p><i class="bi bi-list-check"></i> テンプレート:</p>
+            <div class="support-tools-grid">
+              <button class="template-btn" id="template-ywt">📋 YWT<ruby>法<rt>ほう</rt></ruby></button>
+              <button class="template-btn" id="template-kpt">📋 KPT<ruby>法<rt>ほう</rt></ruby></button>
+              <button class="template-btn" id="template-5w1h">📋 5W1H</button>
+              <button class="template-btn" id="template-3notice">📋 3つのきづき</button>
+            </div>
+          </div>
+          <div class="support-tools">
+            <p><i class="bi bi-pencil"></i> <ruby>書<rt>か</rt></ruby>き<ruby>出<rt>だ</rt></ruby>し:</p>
+            <button class="starter-btn" id="starter-btn">🎯 きょうの<ruby>一文<rt>いちぶん</rt></ruby></button>
+          </div>
+          <div class="support-tools">
+            <p><i class="bi bi-lightbulb"></i> ヒント:</p>
+            <button class="hint-btn" id="hint-btn">💡 ヒントを<ruby>開<rt>ひら</rt></ruby>く</button>
+          </div>
+          <hr class="tools-divider">
+          <div class="emotion-stamps">
+            <span class="label"><ruby>気持<rt>きも</rt></ruby>ち:</span>
+            <button class="emotion-btn" data-emotion="うれしい">😊</button>
+            <button class="emotion-btn" data-emotion="くやしい">😠</button>
+            <button class="emotion-btn" data-emotion="なるほど">💡</button>
+            <button class="emotion-btn" data-emotion="もやもや">🤔</button>
+          </div>
+          <div class="file-upload-wrapper">
+            <label class="file-upload-label">
+              <i class="bi bi-image"></i> <ruby>画像<rt>がぞう</rt></ruby>をえらぶ
+              <input type="file" id="image-upload" accept="image/*">
+            </label>
+            <div id="preview-area" class="image-preview"></div>
+          </div>
+          <div style="margin-top: auto; text-align: right;">
+            <button class="btn-primary-kid" id="submit-journal" style="font-size: 1.1rem; padding: 12px 28px;">
+              <i class="bi bi-send-fill"></i> <ruby>提出<rt>ていしゅつ</rt></ruby>する
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ヒントサイドパネル -->
+    <div class="hint-side-panel" id="hint-side-panel">
+      <div class="hint-panel-header">
+        <span class="hint-panel-title">💡 <ruby>書<rt>か</rt></ruby>くときのヒント</span>
+        <button class="hint-panel-close" id="hint-panel-close"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="hint-panel-body">
+        <div class="hint-card" style="background:linear-gradient(135deg,#fff8e1,#fff3e0);">
+          <div class="hint-card-title">😊 <ruby>気持<rt>きも</rt></ruby>ち</div>
+          <ul>
+            <li><ruby>今日<rt>きょう</rt></ruby>、いちばんうれしかったことは？</li>
+            <li>くやしかったこと・かなしかったことは？</li>
+            <li>ドキドキ・ワクワクした<ruby>瞬間<rt>しゅんかん</rt></ruby>は？</li>
+          </ul>
+        </div>
+        <div class="hint-card" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);">
+          <div class="hint-card-title">📚 <ruby>学<rt>まな</rt></ruby>び</div>
+          <ul>
+            <li><ruby>新<rt>あたら</rt></ruby>しくわかったこと・できたことは？</li>
+            <li>「なぜだろう？」と<ruby>思<rt>おも</rt></ruby>ったことは？</li>
+            <li>もっと<ruby>調<rt>しら</rt></ruby>べたい・<ruby>知<rt>し</rt></ruby>りたいことは？</li>
+          </ul>
+        </div>
+        <div class="hint-card" style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);">
+          <div class="hint-card-title">🤝 <ruby>人<rt>ひと</rt></ruby>とのつながり</div>
+          <ul>
+            <li><ruby>友<rt>とも</rt></ruby>だちに「ありがとう」と<ruby>言<rt>い</rt></ruby>いたいことは？</li>
+            <li>だれかの「すごいな」と<ruby>思<rt>おも</rt></ruby>ったところは？</li>
+            <li>みんなで<ruby>協力<rt>きょうりょく</rt></ruby>してできたことは？</li>
+          </ul>
+        </div>
+        <div class="hint-card" style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);">
+          <div class="hint-card-title">🔄 ふりかえり</div>
+          <ul>
+            <li><ruby>明日<rt>あした</rt></ruby>がんばりたいことは？</li>
+            <li>もう<ruby>一度<rt>いちど</rt></ruby>やるなら、どうする？</li>
+            <li><ruby>今日<rt>きょう</rt></ruby>の<ruby>自分<rt>じぶん</rt></ruby>にひとこと<ruby>言<rt>い</rt></ruby>うなら？</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+
+    // イベントリスナー設定
+    addStudentEventListeners();
+    renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+  }
+
+  /** 児童画面のイベントリスナーを設定する */
+  function addStudentEventListeners() {
+    // 提出ボタン
+    document.getElementById('submit-journal').addEventListener('click', handleSubmit);
+
+    // 気持ちボタン
+    document.querySelectorAll('.emotion-btn').forEach(btn =>
+      btn.addEventListener('click', handleEmotionSelect)
+    );
+
+    // 画像アップロード
+    document.getElementById('image-upload').addEventListener('change', handleFileSelect);
+
+    // テンプレート
+    document.getElementById('template-ywt').addEventListener('click', () => insertTemplate('ywt'));
+    document.getElementById('template-kpt').addEventListener('click', () => insertTemplate('kpt'));
+    document.getElementById('template-5w1h').addEventListener('click', () => insertTemplate('5w1h'));
+    document.getElementById('template-3notice').addEventListener('click', () => insertTemplate('3notice'));
+
+    // きょうの一文（ランダム書き出し）
+    document.getElementById('starter-btn').addEventListener('click', insertStarter);
+
+    // ヒント
+    document.getElementById('hint-btn').addEventListener('click', showHint);
+    document.getElementById('hint-panel-close').addEventListener('click', showHint);
+
+    // 文字カウンター
+    const journalTextarea = document.getElementById('journal-content');
+    journalTextarea.addEventListener('input', updateCharCounter);
+    updateCharCounter(); // 初期表示
+
+    // 過去の自分
+    document.getElementById('past-dialogue-btn').addEventListener('click', showPastJournal);
+  }
+
+
+  // =============================================================
+  // ■ 7. 教師画面の描画とイベント
+  // =============================================================
+
+  /** 教師画面を描画する */
+  function renderTeacherView() {
+    const app = document.getElementById('app-content');
+
+    // テーブル行を生成
+    const sortedJournals = [...journalsData].sort((a, b) =>
+      new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    const tableRows = sortedJournals.map(j => renderJournalRow(j)).join('');
+
+    // 児童セレクタのオプション
+    const rosterOptions = classRoster.map(s =>
+      `<option value="${s.email}">${escapeHtml(s.name)}</option>`
+    ).join('');
+
+    // 管理タブ（管理者のみ表示）
+    const adminTab = isAdmin ? `
+      <button class="view-tab-btn" id="tab-admin">
+        <i class="bi bi-gear-fill"></i> 設定
+      </button>` : '';
+
+    app.innerHTML = `
+    <!-- ビュー切替タブ -->
+    <div class="view-tabs">
+      <button class="view-tab-btn active" id="tab-dashboard">
+        <i class="bi bi-speedometer2"></i> ダッシュボード
+      </button>
+      ${adminTab}
+    </div>
+
+    <!-- ダッシュボードセクション -->
+    <div class="page-section active" id="page-dashboard">
+      <!-- テーマ設定 -->
+      <div class="giga-card teacher-section">
+        <div class="giga-card-title"><i class="bi bi-chat-square-text-fill"></i> 今日のテーマ設定</div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <input type="text" class="theme-setter-input" id="new-theme-input"
+                 placeholder="テーマを入力" value="${escapeHtml(todayTheme)}">
+          <button class="btn-teacher" id="set-theme-btn">
+            <i class="bi bi-check-lg"></i> テーマを設定
+          </button>
+        </div>
+        <details class="weekly-theme-details" id="weekly-theme-section">
+          <summary class="weekly-theme-summary">
+            <i class="bi bi-calendar-week"></i> 週間スケジュール
+          </summary>
+          <div class="weekly-theme-grid" id="weekly-theme-grid">
+            <div class="weekly-theme-row"><label>月</label><input type="text" id="theme-mon" placeholder="月曜のテーマ"></div>
+            <div class="weekly-theme-row"><label>火</label><input type="text" id="theme-tue" placeholder="火曜のテーマ"></div>
+            <div class="weekly-theme-row"><label>水</label><input type="text" id="theme-wed" placeholder="水曜のテーマ"></div>
+            <div class="weekly-theme-row"><label>木</label><input type="text" id="theme-thu" placeholder="木曜のテーマ"></div>
+            <div class="weekly-theme-row"><label>金</label><input type="text" id="theme-fri" placeholder="金曜のテーマ"></div>
+          </div>
+          <button class="btn-teacher btn-sm" id="save-weekly-themes-btn">
+            <i class="bi bi-save"></i> 週間テーマを保存
+          </button>
+        </details>
+      </div>
+
+      <!-- 今日のサマリー -->
+      <div class="giga-card teacher-section summary-card" id="today-summary">
+        <div class="giga-card-title"><i class="bi bi-bar-chart-fill"></i> 今日のサマリー</div>
+        <div class="summary-content" id="summary-content">
+          <div style="text-align:center;padding:8px;"><i class="bi bi-arrow-repeat spin-icon"></i> 読み込み中...</div>
+        </div>
+      </div>
+
+
+      <!-- フィードバック支援 -->
+      <div class="giga-card teacher-section">
+        <div class="giga-card-title"><i class="bi bi-robot"></i> フィードバック支援（AI）</div>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn-teacher" id="ai-simple-comment-btn">
+            <i class="bi bi-chat-dots-fill"></i> AIコメント案作成（シンプル）
+          </button>
+          <button class="btn-teacher" id="ai-full-feedback-btn">
+            <i class="bi bi-stars"></i> AIフィードバック案作成（高度）
+          </button>
+          <button class="btn-teacher" id="batch-return-btn" style="background: linear-gradient(135deg, #43a047, #66bb6a); border-color: #43a047;">
+            <i class="bi bi-check2-all"></i> コメント付きを一括返却
+          </button>
+        </div>
+      </div>
+
+      <!-- ジャーナル一覧 -->
+      <div class="giga-card teacher-section">
+        <div class="giga-card-title"><i class="bi bi-journal-text"></i> 提出ジャーナル一覧</div>
+        <div class="filter-bar">
+          <label for="student-filter">児童:</label>
+          <select id="student-filter">
+            <option value="all">すべての児童</option>
+            ${rosterOptions}
+          </select>
+          <label for="date-filter">日付:</label>
+          <input type="date" id="date-filter">
+          <label for="status-filter">状況:</label>
+          <select id="status-filter">
+            <option value="all">すべて</option>
+            <option value="未返却">未返却</option>
+            <option value="返却済み">返却済み</option>
+          </select>
+          <button class="btn-secondary btn-sm" id="filter-reset-btn">
+            <i class="bi bi-arrow-counterclockwise"></i> リセット
+          </button>
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="journal-table" id="journal-table">
+            <thead>
+              <tr>
+                <th>日付</th>
+                <th>氏名</th>
+                <th>テーマ</th>
+                <th>状況</th>
+                <th>アクション</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- エクスポート -->
+      <div class="giga-card teacher-section">
+        <div class="giga-card-title"><i class="bi bi-download"></i> エクスポート</div>
+        <div class="export-form">
+          <div class="export-filters">
+            <div class="export-filter-item">
+              <label for="export-start-date">開始日:</label>
+              <input type="date" id="export-start-date">
+            </div>
+            <div class="export-filter-item">
+              <label for="export-end-date">終了日:</label>
+              <input type="date" id="export-end-date">
+            </div>
+            <div class="export-filter-item">
+              <label for="export-student">児童:</label>
+              <select id="export-student">
+                <option value="all">すべての児童</option>
+                ${rosterOptions}
+              </select>
+            </div>
+          </div>
+          <div class="export-actions">
+            <button class="btn-secondary" id="export-csv-btn">
+              <i class="bi bi-file-earmark-spreadsheet"></i> CSV出力
+            </button>
+            <button class="btn-teacher" id="export-pdf-btn">
+              <i class="bi bi-file-earmark-pdf-fill"></i> PDF出力
+            </button>
+          </div>
+          <div id="export-result" class="export-result"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 管理画面セクション（管理者のみ） -->
+    ${isAdmin ? '<div class="page-section" id="page-admin"><div id="admin-content">読み込み中...</div></div>' : ''}
+  `;
+
+    addTeacherEventListeners();
+
+
+
+    // エクスポートイベント
+    document.getElementById('export-csv-btn').addEventListener('click', () => handleExport('csv'));
+    document.getElementById('export-pdf-btn').addEventListener('click', () => handleExport('pdf'));
+
+    // 管理タブのイベント
+    if (isAdmin) {
+      document.getElementById('tab-dashboard').addEventListener('click', () => {
+        document.getElementById('tab-dashboard').classList.add('active');
+        document.getElementById('tab-admin').classList.remove('active');
+        showPage('page-dashboard');
+      });
+      document.getElementById('tab-admin').addEventListener('click', () => {
+        document.getElementById('tab-admin').classList.add('active');
+        document.getElementById('tab-dashboard').classList.remove('active');
+        showPage('page-admin');
+        renderAdminPanel();
+      });
+    }
+  }
+
+  /** 教師用テーブルの行を生成する */
+  function renderJournalRow(journal) {
+    const statusClass = journal.status === '返却済み' ? 'status-returned' : 'status-unreturned';
+    const d = new Date(journal.timestamp);
+    const formattedDate = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    const revertBtn = journal.status === '返却済み'
+      ? `<button class="btn-danger revert-status-btn" data-journal-id="${journal.journalId}">返却を取り消す</button>`
+      : '';
+
+    // 未返却時のクイックスタンプボタン
+    const quickStamps = journal.status !== '返却済み'
+      ? `<span class="quick-stamp-group" data-journal-id="${journal.journalId}">
+                 <button class="quick-stamp-btn" data-stamp="😊" title="うれしい">😊</button>
+                 <button class="quick-stamp-btn" data-stamp="👏" title="がんばった">👏</button>
+                 <button class="quick-stamp-btn" data-stamp="💪" title="ちょうせん">💪</button>
+                 <button class="quick-stamp-btn" data-stamp="⭐" title="すばらしい">⭐</button>
+               </span>`
+      : '';
+
+    return `
+    <tr data-journal-id="${journal.journalId}" data-email="${journal.email}"
+        data-date="${formattedDate}" data-status="${journal.status}">
+      <td>${formattedDate}</td>
+      <td>${escapeHtml(journal.studentName)}</td>
+      <td>${escapeHtml((journal.theme || '').substring(0, 20))}${(journal.theme || '').length > 20 ? '...' : ''}</td>
+      <td><span class="status-badge ${statusClass}">${journal.status}</span></td>
+      <td>
+        ${quickStamps}
+        <button class="btn-teacher btn-sm view-journal-btn" data-journal-id="${journal.journalId}">
+          <i class="bi bi-chat-left-text-fill"></i> フィードバック
+        </button>
+        ${revertBtn}
+      </td>
+    </tr>
+  `;
+  }
+
+  /** 教師画面のイベントリスナーを設定する */
+  function addTeacherEventListeners() {
+    // テーマ設定
+    document.getElementById('set-theme-btn').addEventListener('click', handleSetTheme);
+
+    // 週間テーマ
+    document.getElementById('save-weekly-themes-btn').addEventListener('click', handleSaveWeeklyThemes);
+    loadWeeklyThemes();
+
+    // AI機能
+    document.getElementById('ai-simple-comment-btn').addEventListener('click', handleAiSimpleComment);
+    document.getElementById('ai-full-feedback-btn').addEventListener('click', handleAiFullFeedback);
+
+    // 一括返却
+    document.getElementById('batch-return-btn').addEventListener('click', handleBatchReturn);
+
+    // テーブルのイベント委任
+    document.getElementById('journal-table').addEventListener('click', (e) => {
+      const viewBtn = e.target.closest('.view-journal-btn');
+      if (viewBtn) {
+        const jId = viewBtn.dataset.journalId;
+        const journal = journalsData.find(j => j.journalId === jId);
+        if (journal) showTeacherJournalModal(journal);
+      }
+
+      const revertBtn = e.target.closest('.revert-status-btn');
+      if (revertBtn) {
+        handleRevertStatus(revertBtn.dataset.journalId);
+      }
+
+      // クイックスタンプ返却
+      const stampBtn = e.target.closest('.quick-stamp-btn');
+      if (stampBtn) {
+        const group = stampBtn.closest('.quick-stamp-group');
+        const journalId = group.dataset.journalId;
+        const stamp = stampBtn.dataset.stamp;
+        handleQuickReturn(journalId, stamp);
+      }
+    });
+
+    // フィルター
+    document.getElementById('student-filter').addEventListener('change', filterJournals);
+    document.getElementById('date-filter').addEventListener('change', filterJournals);
+    document.getElementById('status-filter').addEventListener('change', filterJournals);
+    document.getElementById('filter-reset-btn').addEventListener('click', () => {
+      document.getElementById('student-filter').value = 'all';
+      document.getElementById('date-filter').value = '';
+      document.getElementById('status-filter').value = 'all';
+      filterJournals();
+    });
+
+    // サマリー表示
+    renderTodaySummary();
+  }
+
+
+  // =============================================================
+  // ■ 8. カレンダー描画
+  // =============================================================
+
+  /** カレンダーを描画する */
+  function renderCalendar(year, month) {
+    const el = document.getElementById('calendar');
+    if (!el) return;
+
+    const journalDates = new Set(
+      journalsData.map(j => new Date(j.timestamp).toLocaleDateString('ja-JP'))
+    );
+
+    let html = `
+    <div class="calendar-header">
+      <button class="btn-secondary btn-sm" id="prev-month"><i class="bi bi-chevron-left"></i></button>
+      <h3>${year}<ruby>年<rt>ねん</rt></ruby> ${month + 1}<ruby>月<rt>がつ</rt></ruby></h3>
+      <button class="btn-secondary btn-sm" id="next-month"><i class="bi bi-chevron-right"></i></button>
+    </div>
+    <div class="calendar-grid">
+  `;
+
+    ['日', '月', '火', '水', '木', '金', '土'].forEach(d => {
+      html += `<div class="day-name">${d}</div>`;
+    });
+
+    const firstDay = new Date(year, month, 1).getDay();
+    const lastDate = new Date(year, month + 1, 0).getDate();
+
+    for (let i = 0; i < firstDay; i++) html += '<div></div>';
+
+    for (let i = 1; i <= lastDate; i++) {
+      const ds = new Date(year, month, i).toLocaleDateString('ja-JP');
+      const has = journalDates.has(ds);
+      html += `<div class="calendar-day ${has ? 'has-journal' : ''}" data-date="${ds}">${i}</div>`;
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+
+    // ナビゲーション
+    document.getElementById('prev-month').onclick = () => {
+      currentDate.setMonth(currentDate.getMonth() - 1);
+      renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+    };
+    document.getElementById('next-month').onclick = () => {
+      currentDate.setMonth(currentDate.getMonth() + 1);
+      renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+    };
+
+    // 日付クリック
+    document.querySelectorAll('.has-journal').forEach(day => {
+      day.onclick = (e) => {
+        const clickedDate = e.target.dataset.date;
+        const matched = journalsData.filter(j =>
+          new Date(j.timestamp).toLocaleDateString('ja-JP') === clickedDate
+        );
+        if (matched.length > 0) showStudentJournalModal(matched, 0, false);
+      };
+    });
+  }
+
+
+  // =============================================================
+  // ■ 9. 児童用イベントハンドラ
+  // =============================================================
+
+  /** ジャーナル提出処理 */
+  async function handleSubmit() {
+    const content = document.getElementById('journal-content').value;
+    if (!content.trim()) {
+      Swal.fire({
+        icon: 'warning',
+        title: '<ruby>入力<rt>にゅうりょく</rt></ruby>してください',
+        text: 'ジャーナルの本文を書いてから提出してください。',
+        confirmButtonText: 'OK'
+      });
+      return;
+    }
+
+    const journalData = {
+      email: userData.email,
+      theme: todayTheme,
+      content: content,
+      emotion: selectedEmotion
+    };
+
+    try {
+      // 画像がある場合は先にアップロード
+      if (selectedFile) {
+        const fileData = await readFileAsBase64(selectedFile);
+        const uploadResult = await callGasWithSpinner('uploadImage', fileData);
+        if (!uploadResult.success) {
+          Swal.fire({ icon: 'error', title: 'エラー', text: uploadResult.message });
+          return;
+        }
+        journalData.imageFileId = uploadResult.fileId;
+      }
+
+      // ジャーナル保存
+      const result = await callGasWithSpinner('saveJournal', journalData);
+      if (result.success) {
+        await Swal.fire({
+          icon: 'success',
+          title: '<ruby>提出<rt>ていしゅつ</rt></ruby>できました！',
+          text: result.message,
+          confirmButtonText: 'OK'
+        });
+        reloadPage();
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) {
+      // callGasWithSpinner 内でエラー表示済み
+    }
+  }
+
+  /** ファイルを Base64 として読み取る Promise */
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        resolve({
+          fileName: file.name,
+          mimeType: file.type,
+          data: e.target.result.split(',')[1]
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /** 気持ち選択 */
+  function handleEmotionSelect(e) {
+    document.querySelectorAll('.emotion-btn').forEach(b => b.classList.remove('selected'));
+    e.target.classList.add('selected');
+    selectedEmotion = e.target.dataset.emotion;
+  }
+
+  /** 画像ファイル選択 */
+  function handleFileSelect(e) {
+    selectedFile = e.target.files[0];
+    if (selectedFile) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        document.getElementById('preview-area').innerHTML =
+          `<img src="${ev.target.result}" alt="プレビュー">`;
+      };
+      reader.readAsDataURL(selectedFile);
+    }
+  }
+
+  /** テンプレート挿入 */
+  function insertTemplate(type) {
+    const ta = document.getElementById('journal-content');
+    const templates = {
+      ywt: '【Y: やったこと】\n\n【W: わかったこと】\n\n【T: つぎにやること】\n',
+      kpt: '【K: Keep よかったこと・つづけること】\n\n【P: Problem こまったこと・やめること】\n\n【T: Try つぎにためすこと】\n',
+      '5w1h': '【いつ】\n\n【どこで】\n\n【だれが】\n\n【なにを】\n\n【なぜ】\n\n【どのように】\n',
+      '3notice': '【わかったこと】\n\n【おどろいたこと】\n\n【もっとしりたいこと】\n'
+    };
+    ta.value += templates[type] || '';
+    ta.focus();
+    updateCharCounter();
+  }
+
+  /** ランダム書き出し文を挿入 */
+  function insertStarter() {
+    const starters = [
+      '今日いちばん心にのこったのは、',
+      '今日、はじめてできたことは、',
+      '今日うれしかったのは、',
+      '今日ちょっとむずかしかったのは、',
+      '友だちのすごいなと思ったところは、',
+      '今日の学びで大切だと思ったことは、',
+      'もしもう一度やるなら、',
+      '今日の自分にひとこと言うなら、',
+      '明日がんばりたいことは、',
+      '今日、「なるほど！」と思ったのは、',
+      '今日のじゅぎょうで気づいたことは、',
+      '今日、友だちと協力してできたことは、'
+    ];
+    const ta = document.getElementById('journal-content');
+    const random = starters[Math.floor(Math.random() * starters.length)];
+    ta.value += random;
+    ta.focus();
+    updateCharCounter();
+  }
+
+  /** 文字カウンター更新 */
+  function updateCharCounter() {
+    const ta = document.getElementById('journal-content');
+    const counter = document.getElementById('char-counter');
+    if (!ta || !counter) return;
+    const len = ta.value.length;
+    counter.textContent = len + ' 文字';
+    counter.classList.toggle('active', len > 0);
+  }
+
+  /** ヒントサイドパネルの開閉トグル */
+  function showHint() {
+    const panel = document.getElementById('hint-side-panel');
+    const btn = document.getElementById('hint-btn');
+    const isOpen = panel.classList.toggle('open');
+    btn.textContent = isOpen ? '💡 ヒントをとじる' : '💡 ヒントを開く';
+  }
+
+  /** 過去のジャーナルを表示 */
+  function showPastJournal() {
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+
+    const pastJournals = journalsData.filter(j => new Date(j.timestamp) < oneMonthAgo);
+    if (pastJournals.length === 0) {
+      Swal.fire({
+        icon: 'info',
+        title: 'まだありません',
+        text: '1ヶ月以上前のジャーナルがありません。',
+        confirmButtonText: 'OK'
+      });
+      return;
+    }
+
+    const random = pastJournals[Math.floor(Math.random() * pastJournals.length)];
+    showStudentJournalModal([random], 0, true);
+  }
+
+
+  // =============================================================
+  // ■ 10. 教師用イベントハンドラ
+  // =============================================================
+
+  /** テーマ設定 */
+  async function handleSetTheme() {
+    const newTheme = document.getElementById('new-theme-input').value;
+    if (!newTheme.trim()) {
+      Swal.fire({ icon: 'warning', title: '入力が必要です', text: 'テーマを入力してください。' });
+      return;
+    }
+    try {
+      const result = await callGasWithSpinner('setTodayTheme', newTheme);
+      if (result.success) {
+        await Swal.fire({ icon: 'success', title: '設定完了', text: result.message });
+        reloadPage();
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) { /* エラーは callGasWithSpinner で表示済み */ }
+  }
+
+  /** AIシンプルコメント */
+  async function handleAiSimpleComment() {
+    const confirm = await Swal.fire({
+      title: 'AIコメント案を作成しますか？',
+      html: '未返却のジャーナルすべてにAIでコメント案を作成します。<br>（既存のコメントは上書きされます）',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'はい',
+      cancelButtonText: 'キャンセル',
+      customClass: { popup: 'teacher-swal' }
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+      const result = await callGasWithSpinner('generateAiSimpleCommentsForAll');
+      await Swal.fire({ icon: 'success', title: '完了', text: result.message });
+      reloadPage();
+    } catch (e) { /* エラーは callGasWithSpinner で表示済み */ }
+  }
+
+  /** AI高度フィードバック */
+  async function handleAiFullFeedback() {
+    const confirm = await Swal.fire({
+      title: 'AIフィードバック案を作成しますか？',
+      html: '未返却のジャーナルすべてにAIでフィードバック案を作成します。<br>（既存のコメントとハイライトは上書きされます）',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'はい',
+      cancelButtonText: 'キャンセル',
+      customClass: { popup: 'teacher-swal' }
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+      const result = await callGasWithSpinner('generateAiFullFeedbackForAll');
+      await Swal.fire({ icon: 'success', title: '完了', text: result.message });
+      reloadPage();
+    } catch (e) { /* エラーは callGasWithSpinner で表示済み */ }
+  }
+
+  /** フィードバック保存 */
+  async function handleSaveFeedback(journalId) {
+    const comment = document.getElementById(`teacher-comment-${journalId}`).value;
+    const feedbackData = {
+      journalId: journalId,
+      comment: comment,
+      highlights: JSON.stringify(currentHighlights)
+    };
+
+    try {
+      const result = await callGasWithSpinner('saveFeedback', feedbackData);
+      if (result.success) {
+        // ローカルデータ更新
+        const idx = journalsData.findIndex(j => j.journalId === journalId);
+        if (idx > -1) {
+          journalsData[idx].teacherComment = feedbackData.comment;
+          journalsData[idx].highlights = feedbackData.highlights;
+          journalsData[idx].status = '返却済み';
+        }
+
+        // テーブルUI更新
+        const row = document.querySelector(`tr[data-journal-id="${journalId}"]`);
+        if (row) {
+          const badge = row.querySelector('.status-badge');
+          badge.textContent = '返却済み';
+          badge.className = 'status-badge status-returned';
+          row.dataset.status = '返却済み';
+
+          // 「返却を取り消す」ボタンを追加
+          const actionCell = row.querySelector('td:last-child');
+          if (actionCell && !actionCell.querySelector('.revert-status-btn')) {
+            const btn = document.createElement('button');
+            btn.className = 'btn-danger revert-status-btn';
+            btn.dataset.journalId = journalId;
+            btn.textContent = '返却を取り消す';
+            actionCell.appendChild(btn);
+          }
+        }
+
+        Swal.close(); // モーダルを閉じる
+        const toast = Swal.mixin({
+          toast: true, position: 'top-end', showConfirmButton: false, timer: 2500,
+          timerProgressBar: true
+        });
+        toast.fire({ icon: 'success', title: result.message });
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) { /* エラーは callGasWithSpinner で表示済み */ }
+  }
+
+  /** フィルタリング */
+  function filterJournals() {
+    const emailVal = document.getElementById('student-filter').value;
+    const dateVal = document.getElementById('date-filter').value;
+    const statusVal = document.getElementById('status-filter').value;
+
+    document.querySelectorAll('#journal-table tbody tr').forEach(row => {
+      const matchEmail = (emailVal === 'all' || row.dataset.email === emailVal);
+      const matchDate = (!dateVal || row.dataset.date === dateVal.replace(/-/g, '/'));
+      const matchStatus = (statusVal === 'all' || row.dataset.status === statusVal);
+      row.style.display = (matchEmail && matchDate && matchStatus) ? '' : 'none';
+    });
+  }
+
+  /** 返却取消（楽観的UI更新） */
+  async function handleRevertStatus(journalId) {
+    const row = document.querySelector(`tr[data-journal-id="${journalId}"]`);
+    if (!row) return;
+
+    // 楽観的にUIを即時更新
+    const badge = row.querySelector('.status-badge');
+    badge.textContent = '未返却';
+    badge.className = 'status-badge status-unreturned';
+    row.dataset.status = '未返却';
+
+    const revertBtn = row.querySelector('.revert-status-btn');
+    if (revertBtn) revertBtn.remove();
+
+    const idx = journalsData.findIndex(j => j.journalId === journalId);
+    if (idx > -1) journalsData[idx].status = '未返却';
+
+    // バックグラウンドでサーバーに送信
+    try {
+      await callGas('revertJournalStatus', journalId);
+      const toast = Swal.mixin({
+        toast: true, position: 'top-end', showConfirmButton: false, timer: 2000,
+        timerProgressBar: true
+      });
+      toast.fire({ icon: 'success', title: '返却を取り消しました' });
+    } catch (e) {
+      // 失敗時はUIを元に戻す
+      Swal.fire({ icon: 'error', title: 'エラー', text: '返却の取り消しに失敗しました。' });
+      badge.textContent = '返却済み';
+      badge.className = 'status-badge status-returned';
+      row.dataset.status = '返却済み';
+
+      const actionCell = row.querySelector('td:last-child');
+      if (actionCell && !actionCell.querySelector('.revert-status-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-danger revert-status-btn';
+        btn.dataset.journalId = journalId;
+        btn.textContent = '返却を取り消す';
+        actionCell.appendChild(btn);
+      }
+      if (idx > -1) journalsData[idx].status = '返却済み';
+    }
+  }
+
+
+  // =============================================================
+  // ■ 10.5 クイック返却・一括返却・週間テーマ・サマリー
+  // =============================================================
+
+  /** クイックスタンプ返却 */
+  async function handleQuickReturn(journalId, stamp) {
+    // 楽観的UI更新
+    const row = document.querySelector(`tr[data-journal-id="${journalId}"]`);
+    if (row) {
+      const badge = row.querySelector('.status-badge');
+      badge.textContent = '返却済み';
+      badge.className = 'status-badge status-returned';
+      row.dataset.status = '返却済み';
+      const group = row.querySelector('.quick-stamp-group');
+      if (group) group.remove();
+    }
+    const idx = journalsData.findIndex(j => j.journalId === journalId);
+    if (idx > -1) journalsData[idx].status = '返却済み';
+
+    try {
+      await callGas('quickReturn', journalId, stamp);
+      const toast = Swal.mixin({
+        toast: true, position: 'top-end', showConfirmButton: false, timer: 2000,
+        timerProgressBar: true
+      });
+      toast.fire({ icon: 'success', title: `${stamp} で返却しました` });
+      renderTodaySummary();
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: 'エラー', text: 'クイック返却に失敗しました。' });
+      // 失敗時は画面をリロード
+      location.reload();
+    }
+  }
+
+  /** 一括返却 */
+  async function handleBatchReturn() {
+    const result = await Swal.fire({
+      title: 'コメント付きを一括返却',
+      text: 'AIコメントまたは手動コメントが付いている未返却ジャーナルをすべて返却済みにします。',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: '一括返却する',
+      cancelButtonText: 'キャンセル'
+    });
+    if (!result.isConfirmed) return;
+
+    try {
+      const res = await callGasWithSpinner('batchReturnAll');
+      if (res.success) {
+        Swal.fire({ icon: 'success', title: '完了', text: res.message });
+        // ジャーナルデータをリロード
+        const newData = await callGas('getJournalsForTeacher');
+        journalsData = newData;
+        renderTeacherView();
+        addTeacherEventListeners();
+
+      } else {
+        Swal.fire({ icon: 'info', title: '情報', text: res.message });
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: 'エラー', text: '一括返却に失敗しました。' });
+    }
+  }
+
+  /** 週間テーマを読み込む */
+  async function loadWeeklyThemes() {
+    try {
+      const res = await callGas('getWeeklyThemes');
+      if (res.success && res.data) {
+        const days = ['mon', 'tue', 'wed', 'thu', 'fri'];
+        days.forEach(d => {
+          const el = document.getElementById('theme-' + d);
+          if (el) el.value = res.data[d] || '';
+        });
+      }
+    } catch (e) {
+      console.log('週間テーマ読み込みエラー:', e);
+    }
+  }
+
+  /** 週間テーマを保存 */
+  async function handleSaveWeeklyThemes() {
+    const themes = {
+      mon: document.getElementById('theme-mon').value.trim(),
+      tue: document.getElementById('theme-tue').value.trim(),
+      wed: document.getElementById('theme-wed').value.trim(),
+      thu: document.getElementById('theme-thu').value.trim(),
+      fri: document.getElementById('theme-fri').value.trim()
+    };
+    try {
+      const res = await callGasWithSpinner('saveWeeklyThemes', themes);
+      if (res.success) {
+        Swal.fire({ icon: 'success', title: '保存しました', text: res.message, timer: 2000 });
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: res.message });
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: 'エラー', text: '週間テーマの保存に失敗しました。' });
+    }
+  }
+
+  /** サマリーダッシュボードを描画 */
+  function renderTodaySummary() {
+    const container = document.getElementById('summary-content');
+    if (!container) return;
+
+    // 今日のジャーナルを集計
+    const todayStr = new Date().toLocaleDateString('ja-JP');
+    const todayJournals = journalsData.filter(j => {
+      const d = new Date(j.timestamp);
+      return d.toLocaleDateString('ja-JP') === todayStr;
+    });
+
+    const totalStudents = classRoster.length;
+    const submittedStudents = new Set(todayJournals.map(j => j.email));
+    const submittedCount = submittedStudents.size;
+    const unreturned = todayJournals.filter(j => j.status === '未返却').length;
+    const returned = todayJournals.filter(j => j.status === '返却済み').length;
+    const pct = totalStudents > 0 ? Math.round((submittedCount / totalStudents) * 100) : 0;
+
+    // 未提出者名
+    const unsubmitted = classRoster.filter(s => !submittedStudents.has(s.email));
+    const unsubNames = unsubmitted.map(s => s.name).join(', ') || 'なし';
+
+    container.innerHTML = `
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-value">${submittedCount}/${totalStudents}</div>
+          <div class="summary-label">提出</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" style="color: var(--accent-color);">${unreturned}</div>
+          <div class="summary-label">未返却</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" style="color: #43a047;">${returned}</div>
+          <div class="summary-label">返却済み</div>
+        </div>
+      </div>
+      <div class="summary-progress">
+        <div class="summary-progress-bar" style="width: ${pct}%"></div>
+      </div>
+      ${unsubmitted.length > 0 ? `<div class="summary-alert">⚠️ 未提出: ${escapeHtml(unsubNames)}</div>` : '<div class="summary-alert" style="color:#43a047;">✅ 全員提出済み</div>'}
+    `;
+  }
+
+
+  // =============================================================
+  // ■ 11. モーダル表示（SweetAlert2）
+  // =============================================================
+
+  /** 児童用モーダル : ジャーナル詳細 */
+  function showStudentJournalModal(journalsOnDate, indexToShow, isPastDialogue = false) {
+    const journal = isPastDialogue ? journalsOnDate[0] : journalsOnDate[indexToShow];
+    if (!journal) return;
+
+    const imageHtml = journal.imageUrl
+      ? `<img src="${journal.imageUrl}" class="journal-image" alt="<ruby>添付<rt>てんぷ</rt></ruby><ruby>画像<rt>がぞう</rt></ruby>">`
+      : '';
+
+    // ハイライト解析
+    const highlights = (typeof journal.highlights === 'string' && journal.highlights.startsWith('['))
+      ? JSON.parse(journal.highlights) : [];
+    const contentHtml = renderContentWithHighlights(journal.content, highlights, false);
+
+    // 返却状況に応じたコメント表示
+    const teacherComment = journal.status === '返却済み'
+      ? escapeHtml(journal.teacherComment).replace(/\n/g, '<br>')
+      : 'まだコメントはありません';
+
+    // 過去との対話HTML
+    let dialogueHtml = '';
+    if (isPastDialogue) {
+      dialogueHtml = `
+      <div class="feedback-section">
+        <h4><i class="bi bi-chat-heart-fill"></i> <ruby>今<rt>いま</rt></ruby>の<ruby>自分<rt>じぶん</rt></ruby>からコメントを<ruby>送<rt>おく</rt></ruby>ろう</h4>
+        <textarea id="past-comment-input" rows="4" class="form-control" style="font-family:var(--font-family);"
+          placeholder="1ヶ<ruby>月前<rt>げつまえ</rt></ruby>の<ruby>自分<rt>じぶん</rt></ruby>へ...">${escapeHtml(journal.pastComment || '')}</textarea>
+        <button class="btn-primary-kid btn-sm" style="margin-top:8px;" onclick="savePastComment('${journal.journalId}')">
+          <i class="bi bi-send"></i> <ruby>保存<rt>ほぞん</rt></ruby>する
+        </button>
+      </div>`;
+    }
+
+    // ページネーション
+    let paginationHtml = '';
+    if (!isPastDialogue && journalsOnDate.length > 1) {
+      paginationHtml = '<div class="pagination-controls">' +
+        journalsOnDate.map((_, i) =>
+          `<button class="page-btn ${i === indexToShow ? 'active' : ''}" data-index="${i}">${i + 1}</button>`
+        ).join('') +
+        '</div>';
+    }
+
+    const modalContent = `
+    <div class="modal-notebook-container">
+      <div class="modal-notebook-page modal-page-left" id="student-journal-page-left">
+        <div class="theme-display">
+          <strong><ruby>日付<rt>ひづけ</rt></ruby>:</strong> ${new Date(journal.timestamp).toLocaleDateString()}<br>
+          <strong>テーマ:</strong> ${escapeHtml(journal.theme || '')}
+        </div>
+        <div class="journal-content-display">${contentHtml}</div>
+        <div style="margin-top:auto;">
+          <div class="emotion-stamps"><strong><ruby>気持<rt>きも</rt></ruby>ち:</strong> ${escapeHtml(journal.emotion || '（えらんでいません）')}</div>
+          <div style="margin-top:8px;">${imageHtml}</div>
+        </div>
+      </div>
+      <div class="modal-notebook-page">
+        ${paginationHtml}
+        <div class="feedback-section">
+          <h4><i class="bi bi-chat-left-dots-fill"></i> <ruby>先生<rt>せんせい</rt></ruby>からのコメント</h4>
+          <p class="teacher-feedback-text">${teacherComment}</p>
+        </div>
+        <div class="feedback-section">
+          <h4><i class="bi bi-arrow-through-heart-fill"></i> <ruby>未来<rt>みらい</rt></ruby>の<ruby>自分<rt>じぶん</rt></ruby>からのコメント</h4>
+          <p class="teacher-feedback-text">${escapeHtml(journal.pastComment || 'まだコメントはありません').replace(/\n/g, '<br>')}</p>
+        </div>
+        ${dialogueHtml}
+      </div>
+    </div>
+  `;
+
+    Swal.fire({
+      html: modalContent,
+      showConfirmButton: false,
+      showCloseButton: true,
+      width: '90%',
+      customClass: { popup: 'notebook-modal' },
+      didOpen: () => {
+        // ハイライトイベント
+        addStudentHighlightEventListeners(highlights);
+        // ページネーション
+        document.querySelectorAll('.page-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const newIdx = parseInt(e.target.dataset.index, 10);
+            Swal.close();
+            showStudentJournalModal(journalsOnDate, newIdx, false);
+          });
+        });
+        // 画像全画面表示
+        document.querySelectorAll('.journal-image').forEach(img => {
+          img.addEventListener('click', (e) => showFullscreenImage(e.target.src));
+        });
+      }
+    });
+  }
+
+  /** 教師用モーダル : フィードバック入力 */
+  function showTeacherJournalModal(journal) {
+    activeJournalId = journal.journalId;
+    currentHighlights = (typeof journal.highlights === 'string' && journal.highlights.startsWith('['))
+      ? JSON.parse(journal.highlights) : [];
+
+    const imageHtml = journal.imageUrl
+      ? `<img src="${journal.imageUrl}" class="journal-image" alt="添付画像">`
+      : '';
+
+    const contentHtml = renderContentWithHighlights(journal.content, currentHighlights, true);
+
+    const modalContent = `
+    <div class="modal-notebook-container">
+      <div class="modal-notebook-page modal-page-left">
+        <div class="theme-display">
+          <strong>日付:</strong> ${journal.date}<br>
+          <strong>氏名:</strong> ${escapeHtml(journal.studentName)}<br>
+          <strong>テーマ:</strong> ${escapeHtml(journal.theme || '')}
+        </div>
+        <div class="journal-content-display" id="teacher-journal-content">${contentHtml}</div>
+        <div style="margin-top:auto;">
+          <div class="emotion-stamps"><strong>気持ち:</strong> ${escapeHtml(journal.emotion || '（えらんでいません）')}</div>
+          <div style="margin-top:8px;">${imageHtml}</div>
+        </div>
+      </div>
+      <div class="modal-notebook-page">
+        <h4><i class="bi bi-pencil-square"></i> フィードバック入力</h4>
+        <textarea id="teacher-comment-${journal.journalId}" rows="12"
+          class="form-control" style="flex-grow:1; font-family:var(--font-family); font-size:1rem;"
+          placeholder="コメントを入力してください...">${escapeHtml(journal.teacherComment || '')}</textarea>
+        <div style="margin-top:12px; text-align:right;">
+          <button class="btn-teacher" onclick="handleSaveFeedback('${journal.journalId}')">
+            <i class="bi bi-check-circle-fill"></i> コメントとハイライトを保存して返却する
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+    Swal.fire({
+      html: modalContent,
+      showConfirmButton: false,
+      showCloseButton: true,
+      width: '90%',
+      customClass: { popup: 'notebook-modal teacher-swal' },
+      didOpen: () => {
+        const contentArea = document.getElementById('teacher-journal-content');
+        contentArea.addEventListener('mouseup', handleTextSelection);
+        contentArea.addEventListener('click', handleHighlightClick);
+        // 画像全画面表示
+        document.querySelectorAll('.journal-image').forEach(img => {
+          img.addEventListener('click', (e) => showFullscreenImage(e.target.src));
+        });
+      },
+      willClose: () => {
+        currentHighlights = [];
+        activeJournalId = null;
+        document.getElementById('selection-popover').style.display = 'none';
+        document.getElementById('highlight-editor').style.display = 'none';
+      }
+    });
+  }
+
+
+  // =============================================================
+  // ■ 12. 過去コメント保存
+  // =============================================================
+
+  /** 過去の自分へのコメントを保存する */
+  async function savePastComment(journalId) {
+    const input = document.getElementById('past-comment-input');
+    const comment = input ? input.value : '';
+    if (!comment.trim()) {
+      Swal.fire({
+        icon: 'warning',
+        title: '<ruby>入力<rt>にゅうりょく</rt></ruby>してください',
+        text: 'コメントを入力してから保存してください。',
+        confirmButtonText: 'OK'
+      });
+      return;
+    }
+
+    try {
+      const result = await callGasWithSpinner('addPastComment', journalId, comment);
+      if (result.success) {
+        // ローカルデータ更新
+        const j = journalsData.find(j => j.journalId === journalId);
+        if (j) j.pastComment = comment;
+
+        const toast = Swal.mixin({
+          toast: true, position: 'top-end', showConfirmButton: false, timer: 2500,
+          timerProgressBar: true
+        });
+        toast.fire({ icon: 'success', title: result.message });
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) { /* エラーは callGasWithSpinner で表示済み */ }
+  }
+
+
+  // =============================================================
+  // ■ 13. 画像全画面表示
+  // =============================================================
+
+  /** 画像を全画面表示する */
+  function showFullscreenImage(url) {
+    const overlay = document.getElementById('fullscreen-image-overlay');
+    const img = document.getElementById('fullscreen-image');
+    img.src = url;
+    overlay.classList.add('show');
+  }
+
+
+  // =============================================================
+  // ■ 14. ハイライト機能
+  // =============================================================
+
+  /** テキスト選択時にハイライトボタンを表示する */
+  function handleTextSelection(e) {
+    const popover = document.getElementById('selection-popover');
+    if (document.getElementById('highlight-editor').style.display === 'block') return;
+
+    const selection = window.getSelection();
+    if (!selection.isCollapsed && selection.rangeCount > 0) {
+      selectionRange = selection.getRangeAt(0);
+      popover.style.left = `${e.clientX}px`;
+      popover.style.top = `${e.clientY - 40}px`;
+      popover.style.display = 'block';
+      document.getElementById('add-highlight-btn').onclick = createHighlight;
+    } else {
+      popover.style.display = 'none';
+    }
+  }
+
+  /** ハイライトを作成する */
+  function createHighlight() {
+    const contentArea = document.getElementById('teacher-journal-content');
+    document.getElementById('selection-popover').style.display = 'none';
+    if (!selectionRange) return;
+
+    const newHighlight = {
+      id: 'hl-' + Date.now(),
+      text: selectionRange.toString(),
+      comment: '',
+      stamp: '',
+      startOffset: getCharOffset(contentArea, selectionRange.startContainer, selectionRange.startOffset),
+      endOffset: getCharOffset(contentArea, selectionRange.endContainer, selectionRange.endOffset)
+    };
+
+    currentHighlights.push(newHighlight);
+    redrawTeacherContent();
+    showHighlightEditor(newHighlight.id, document.querySelector(`[data-highlight-id="${newHighlight.id}"]`));
+  }
+
+  /** ハイライトクリック */
+  function handleHighlightClick(e) {
+    if (e.target.classList.contains('highlight-marker')) {
+      showHighlightEditor(e.target.dataset.highlightId, e.target);
+    }
+  }
+
+  /** ハイライト編集パネルを表示する */
+  function showHighlightEditor(highlightId, targetEl) {
+    const editor = document.getElementById('highlight-editor');
+    const hl = currentHighlights.find(h => h.id === highlightId);
+    if (!hl) return;
+
+    const rect = targetEl.getBoundingClientRect();
+    editor.style.top = `${rect.bottom + 5}px`;
+    editor.style.left = `${rect.left}px`;
+
+    const stamps = ['😄', '😂', '🤔', '😭', '😱', '💯', '❤', '👍', '🎉', '✨', '💪', '🌱'];
+    editor.innerHTML = `
+    <textarea id="highlight-comment-input" rows="4" placeholder="コメントを入力...">${hl.comment}</textarea>
+    <div class="stamps">
+      ${stamps.map(s => `<button class="stamp-btn ${hl.stamp === s ? 'selected' : ''}" data-stamp="${s}">${s}</button>`).join('')}
+    </div>
+    <div style="margin-top:10px; display:flex; justify-content:space-between;">
+      <button class="btn-teacher btn-sm" id="save-highlight-btn">保存</button>
+      <button class="btn-danger" id="delete-highlight-btn">削除</button>
+    </div>
+  `;
+    editor.style.display = 'block';
+
+    document.getElementById('save-highlight-btn').onclick = () => saveHighlight(highlightId);
+    document.getElementById('delete-highlight-btn').onclick = () => deleteHighlight(highlightId);
+
+    editor.querySelectorAll('.stamp-btn').forEach(btn => {
+      btn.onclick = () => {
+        editor.querySelectorAll('.stamp-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      };
+    });
+  }
+
+  /** ハイライトの編集内容を保存する */
+  function saveHighlight(id) {
+    const hl = currentHighlights.find(h => h.id === id);
+    if (hl) {
+      hl.comment = document.getElementById('highlight-comment-input').value;
+      const sel = document.querySelector('#highlight-editor .stamp-btn.selected');
+      hl.stamp = sel ? sel.dataset.stamp : '';
+    }
+    document.getElementById('highlight-editor').style.display = 'none';
+    redrawTeacherContent();
+  }
+
+  /** ハイライトを削除する */
+  function deleteHighlight(id) {
+    currentHighlights = currentHighlights.filter(h => h.id !== id);
+    document.getElementById('highlight-editor').style.display = 'none';
+    redrawTeacherContent();
+  }
+
+  /** 教師用コンテンツを再描画する */
+  function redrawTeacherContent() {
+    const journal = journalsData.find(j => j.journalId === activeJournalId);
+    const el = document.getElementById('teacher-journal-content');
+    if (journal && el) {
+      el.innerHTML = renderContentWithHighlights(journal.content, currentHighlights, true);
+    }
+  }
+
+  /** ハイライト付きHTMLを生成する */
+  function renderContentWithHighlights(content, highlights, isTeacher) {
+    let html = '';
+    let lastIdx = 0;
+    const sorted = [...highlights].sort((a, b) => a.startOffset - b.startOffset);
+
+    sorted.forEach(h => {
+      html += escapeHtml(content.substring(lastIdx, h.startOffset));
+      const text = escapeHtml(content.substring(h.startOffset, h.endOffset));
+      html += `<mark class="highlight-marker" data-highlight-id="${h.id}">${text}</mark>`;
+      lastIdx = h.endOffset;
+    });
+    html += escapeHtml(content.substring(lastIdx));
+
+    return html.replace(/\n/g, '<br>');
+  }
+
+  /** 児童用ハイライトのツールチップイベント */
+  function addStudentHighlightEventListeners(highlights) {
+    const markers = document.querySelectorAll('#student-journal-page-left .highlight-marker');
+    markers.forEach(marker => {
+      const hlId = marker.dataset.highlightId;
+      const hlData = highlights.find(h => h.id === hlId);
+      if (hlData && (hlData.comment || hlData.stamp)) {
+        marker.addEventListener('mouseenter', e => showHighlightTooltip(e, hlData));
+        marker.addEventListener('mouseleave', hideHighlightTooltip);
+        marker.addEventListener('click', e => showHighlightTooltip(e, hlData));
+      }
+    });
+
+    const leftPage = document.getElementById('student-journal-page-left');
+    if (leftPage) {
+      leftPage.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('highlight-marker')) hideHighlightTooltip();
+      }, true);
+    }
+  }
+
+  /** ハイライトツールチップを表示する */
+  function showHighlightTooltip(event, hl) {
+    const tooltip = document.getElementById('highlight-tooltip');
+    if (!hl || (!hl.comment && !hl.stamp)) return;
+
+    tooltip.innerHTML = `<span class="stamp">${hl.stamp || ''}</span> ${escapeHtml(hl.comment)}`;
+    const rect = event.target.getBoundingClientRect();
+    tooltip.style.left = `${rect.left}px`;
+    tooltip.style.top = `${rect.bottom + 5}px`;
+    tooltip.style.display = 'block';
+  }
+
+  /** ハイライトツールチップを非表示にする */
+  function hideHighlightTooltip() {
+    document.getElementById('highlight-tooltip').style.display = 'none';
+  }
+
+
+  // =============================================================
+  // ■ 15. ユーティリティ関数
+  // =============================================================
+
+  /** ページを再読み込みする */
+  function reloadPage() {
+    showSpinner();
+    google.script.run
+      .withSuccessHandler(url => { window.top.location.href = url; })
+      .withFailureHandler(err => {
+        hideSpinner();
+        Swal.fire({ icon: 'error', title: 'エラー', text: 'ページの再読み込みに失敗しました。' });
+      })
+      .getScriptUrl();
+  }
+
+  /** テキストのオフセットを計算する */
+  function getCharOffset(container, node, offset) {
+    let charCount = 0;
+    let found = false;
+
+    function traverse(n) {
+      if (found) return;
+      if (n === node) {
+        charCount += offset;
+        found = true;
+        return;
+      }
+      if (n.nodeType === Node.TEXT_NODE) {
+        charCount += n.textContent.length;
+      } else if (n.nodeType === Node.ELEMENT_NODE && n.tagName !== 'RT') {
+        for (let child of n.childNodes) {
+          traverse(child);
+          if (found) return;
+        }
+      }
+    }
+    traverse(container);
+    return charCount;
+  }
+
+  /** HTML エスケープ */
+  function escapeHtml(str) {
+    if (typeof str !== 'string') return '';
+    return str.replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[m]));
+  }
+
+
+  // =============================================================
+  // ■ 16. 管理画面（Admin Panel）
+  // =============================================================
+
+  let adminPanelLoaded = false;
+
+  /** 管理画面を描画する */
+  async function renderAdminPanel() {
+    const container = document.getElementById('admin-content');
+    if (!container) return;
+
+    // 既に描画済みなら再描画しない（設定保存後にリフレッシュしたい場合は強制描画）
+    if (adminPanelLoaded) return;
+
+    container.innerHTML = '<div style="text-align:center;padding:40px;"><i class="bi bi-arrow-repeat spin-icon"></i> 読み込み中...</div>';
+
+    try {
+      // サーバーから名簿と設定を並行取得
+      const [rosterResult, settingsResult] = await Promise.all([
+        callGas('getRosterAll'),
+        callGas('getAdminSettings')
+      ]);
+
+      const roster = rosterResult.success ? rosterResult.data : [];
+      const settings = settingsResult.success ? settingsResult : {};
+
+      // 名簿テキストを生成（担任行は先頭に、児童行はタブ区切り）
+      const rosterLines = roster.map(r => {
+        if (r.role === '担任') return `担任\t${r.name}\t${r.email}`;
+        return `${r.name}\t${r.email}`;
+      }).join('\n');
+
+      // APIキー状態表示
+      const apiKeyStatus = settings.hasApiKey
+        ? `<span class="admin-status-ok"><i class="bi bi-check-circle-fill"></i> 設定済み（${escapeHtml(settings.apiKeyMasked)}）</span>`
+        : '<span class="admin-status-warn"><i class="bi bi-exclamation-triangle-fill"></i> 未設定</span>';
+
+      container.innerHTML = `
+        <!-- ① 名簿管理 -->
+        <div class="giga-card admin-section">
+          <div class="giga-card-title"><i class="bi bi-people-fill"></i> 名簿管理</div>
+          <p class="admin-help">1行に1人ずつ入力してください。Excel や Sheets からそのままコピー＆ペーストできます。</p>
+          <div class="admin-format-hint">
+            <code>氏名&lt;Tab&gt;メールアドレス</code>（児童）<br>
+            <code>担任&lt;Tab&gt;氏名&lt;Tab&gt;メールアドレス</code>（担任を追加する場合）
+          </div>
+          <textarea id="admin-roster-textarea" class="admin-textarea" rows="10"
+                    placeholder="山田太郎&#9;taro@school.ed.jp&#10;佐藤花子&#9;hanako@school.ed.jp">${escapeHtml(rosterLines)}</textarea>
+          <div class="admin-actions">
+            <span class="admin-count" id="admin-roster-count">${roster.length} 件</span>
+            <button class="btn-teacher" id="admin-save-roster-btn">
+              <i class="bi bi-save"></i> 名簿を保存
+            </button>
+          </div>
+        </div>
+
+        <!-- ② Gemini API設定 -->
+        <div class="giga-card admin-section">
+          <div class="giga-card-title"><i class="bi bi-key-fill"></i> Gemini API 設定</div>
+          <div class="admin-status-row">現在の状態: ${apiKeyStatus}</div>
+          <div class="admin-api-form">
+            <input type="password" id="admin-api-key-input" class="admin-input"
+                   placeholder="APIキーを入力（例: AIzaSy...）">
+            <button class="btn-secondary" id="admin-toggle-key-btn" title="表示/非表示">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+          <div class="admin-actions">
+            <button class="btn-secondary" id="admin-test-api-btn">
+              <i class="bi bi-play-circle"></i> テスト送信
+            </button>
+            <button class="btn-teacher" id="admin-save-api-btn" disabled>
+              <i class="bi bi-save"></i> APIキーを保存
+            </button>
+          </div>
+          <div id="admin-api-test-result" class="admin-test-result"></div>
+        </div>
+
+        <!-- ③ データベース情報 -->
+        <div class="giga-card admin-section">
+          <div class="giga-card-title"><i class="bi bi-database-fill"></i> データベース情報</div>
+          <div class="admin-info-grid">
+            ${settings.spreadsheetUrl ? `
+            <div class="admin-info-item">
+              <span class="admin-info-label"><i class="bi bi-table"></i> スプレッドシート</span>
+              <a href="${settings.spreadsheetUrl}" target="_blank" class="admin-info-link">
+                <i class="bi bi-box-arrow-up-right"></i> 開く
+              </a>
+            </div>` : ''}
+            ${settings.imageFolderUrl ? `
+            <div class="admin-info-item">
+              <span class="admin-info-label"><i class="bi bi-folder-fill"></i> 画像フォルダ</span>
+              <a href="${settings.imageFolderUrl}" target="_blank" class="admin-info-link">
+                <i class="bi bi-box-arrow-up-right"></i> 開く
+              </a>
+            </div>` : ''}
+          </div>
+        </div>
+
+        <!-- ④ データリセット -->
+        <div class="giga-card admin-section admin-danger-zone">
+          <div class="giga-card-title"><i class="bi bi-exclamation-triangle-fill"></i> データリセット</div>
+          <p class="admin-help">ジャーナルデータをすべて削除します。この操作は取り消せません。</p>
+          <button class="btn-danger" id="admin-reset-data-btn">
+            <i class="bi bi-trash3-fill"></i> ジャーナルデータを全削除
+          </button>
+        </div>
+      `;
+
+      addAdminEventListeners();
+      adminPanelLoaded = true;
+
+    } catch (e) {
+      container.innerHTML = '<div class="giga-card"><p>管理画面の読み込みに失敗しました。</p></div>';
+    }
+  }
+
+  /** 名簿テキストのリアルタイムカウント更新 */
+  function updateRosterCount() {
+    const textarea = document.getElementById('admin-roster-textarea');
+    const countEl = document.getElementById('admin-roster-count');
+    if (!textarea || !countEl) return;
+
+    const lines = textarea.value.split('\n').filter(line => line.trim());
+    countEl.textContent = `${lines.length} 件`;
+  }
+
+  /** 管理画面のイベントリスナーを設定する */
+  function addAdminEventListeners() {
+    // 名簿のリアルタイムカウント
+    document.getElementById('admin-roster-textarea').addEventListener('input', updateRosterCount);
+
+    // 名簿保存
+    document.getElementById('admin-save-roster-btn').addEventListener('click', handleSaveRoster);
+
+    // APIキー表示/非表示トグル
+    document.getElementById('admin-toggle-key-btn').addEventListener('click', () => {
+      const input = document.getElementById('admin-api-key-input');
+      const icon = document.querySelector('#admin-toggle-key-btn i');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'bi bi-eye-slash';
+      } else {
+        input.type = 'password';
+        icon.className = 'bi bi-eye';
+      }
+    });
+
+    // APIキーテスト
+    document.getElementById('admin-test-api-btn').addEventListener('click', handleTestApiKey);
+
+    // APIキー保存
+    document.getElementById('admin-save-api-btn').addEventListener('click', handleSaveApiKey);
+
+    // データリセット
+    document.getElementById('admin-reset-data-btn').addEventListener('click', handleResetData);
+  }
+
+  /** 名簿を一括保存する */
+  async function handleSaveRoster() {
+    const textarea = document.getElementById('admin-roster-textarea');
+    const lines = textarea.value.split('\n').filter(line => line.trim());
+
+    const rows = lines.map(line => {
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        // 「担任<Tab>氏名<Tab>メールアドレス」形式
+        return { role: parts[0].trim(), name: parts[1].trim(), email: parts[2].trim() };
+      } else if (parts.length === 2) {
+        // 「氏名<Tab>メールアドレス」形式 → 児童
+        return { role: '児童', name: parts[0].trim(), email: parts[1].trim() };
+      } else {
+        return null; // 無効な行
+      }
+    }).filter(r => r && r.name && r.email);
+
+    if (rows.length === 0) {
+      Swal.fire({ icon: 'warning', title: '入力が必要です', text: '有効なデータがありません。' });
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      title: '名簿を保存しますか？',
+      html: `<b>${rows.length}件</b>のデータで名簿を上書き保存します。`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: '保存する',
+      cancelButtonText: 'キャンセル'
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+      const result = await callGasWithSpinner('saveRosterAll', rows);
+      if (result.success) {
+        Swal.fire({ icon: 'success', title: '保存完了', text: result.message });
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) { /* callGasWithSpinner内でエラー表示済み */ }
+  }
+
+  /** APIキーをテストする */
+  async function handleTestApiKey() {
+    const input = document.getElementById('admin-api-key-input');
+    const apiKey = input.value.trim();
+    if (!apiKey) {
+      Swal.fire({ icon: 'warning', title: '入力が必要です', text: 'APIキーを入力してください。' });
+      return;
+    }
+
+    const resultEl = document.getElementById('admin-api-test-result');
+    resultEl.innerHTML = '<i class="bi bi-arrow-repeat spin-icon"></i> テスト中...';
+    resultEl.className = 'admin-test-result testing';
+
+    try {
+      const result = await callGas('testGeminiApiKey', apiKey);
+      if (result.success) {
+        resultEl.innerHTML = `<i class="bi bi-check-circle-fill"></i> ${escapeHtml(result.message)}`;
+        resultEl.className = 'admin-test-result success';
+        // テスト成功 → 保存ボタン有効化
+        document.getElementById('admin-save-api-btn').disabled = false;
+      } else {
+        resultEl.innerHTML = `<i class="bi bi-x-circle-fill"></i> ${escapeHtml(result.message)}`;
+        resultEl.className = 'admin-test-result error';
+        document.getElementById('admin-save-api-btn').disabled = true;
+      }
+    } catch (e) {
+      resultEl.innerHTML = '<i class="bi bi-x-circle-fill"></i> テストに失敗しました。';
+      resultEl.className = 'admin-test-result error';
+    }
+  }
+
+  /** APIキーを保存する */
+  async function handleSaveApiKey() {
+    const apiKey = document.getElementById('admin-api-key-input').value.trim();
+    if (!apiKey) return;
+
+    try {
+      const result = await callGasWithSpinner('saveAdminSettings', { apiKey: apiKey });
+      if (result.success) {
+        await Swal.fire({ icon: 'success', title: '保存完了', text: result.message });
+        // 管理画面を再描画
+        adminPanelLoaded = false;
+        renderAdminPanel();
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) { /* callGasWithSpinner内でエラー表示済み */ }
+  }
+
+  /** ジャーナルデータを全削除する */
+  async function handleResetData() {
+    const first = await Swal.fire({
+      title: '⚠️ 本当に削除しますか？',
+      text: 'すべてのジャーナルデータが完全に削除されます。',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: '削除する',
+      cancelButtonText: 'キャンセル',
+      confirmButtonColor: '#d33'
+    });
+    if (!first.isConfirmed) return;
+
+    // 二重確認
+    const second = await Swal.fire({
+      title: '最終確認',
+      html: '本当にすべてのジャーナルデータを<b>完全に削除</b>しますか？<br>この操作は取り消せません。',
+      icon: 'error',
+      showCancelButton: true,
+      confirmButtonText: 'はい、削除します',
+      cancelButtonText: 'やめる',
+      confirmButtonColor: '#d33'
+    });
+    if (!second.isConfirmed) return;
+
+    try {
+      const result = await callGasWithSpinner('resetAllData');
+      if (result.success) {
+        await Swal.fire({ icon: 'success', title: '削除完了', text: result.message });
+        reloadPage();
+      } else {
+        Swal.fire({ icon: 'error', title: 'エラー', text: result.message });
+      }
+    } catch (e) { /* callGasWithSpinner内でエラー表示済み */ }
+  }
+
+
+  // =============================================================
+  // ■ 17. エクスポート
+  // =============================================================
+
+  /** エクスポートを実行する */
+  async function handleExport(format) {
+    const startDate = document.getElementById('export-start-date').value;
+    const endDate = document.getElementById('export-end-date').value;
+    const email = document.getElementById('export-student').value;
+    const resultEl = document.getElementById('export-result');
+
+    const params = { startDate, endDate, email };
+    const funcName = format === 'csv' ? 'exportJournalsCsv' : 'exportJournalsPdf';
+    const formatLabel = format === 'csv' ? 'CSV' : 'PDF';
+
+    resultEl.innerHTML = `<i class="bi bi-arrow-repeat spin-icon"></i> ${formatLabel}を生成中... しばらくお待ちください`;
+    resultEl.className = 'export-result loading';
+
+    try {
+      const result = await callGas(funcName, params);
+      if (result.success) {
+        resultEl.innerHTML = `
+          <i class="bi bi-check-circle-fill"></i> ${escapeHtml(result.message)}
+          <a href="${result.fileUrl}" target="_blank" class="export-download-link">
+            <i class="bi bi-box-arrow-up-right"></i> ファイルを開く
+          </a>`;
+        resultEl.className = 'export-result success';
+      } else {
+        resultEl.innerHTML = `<i class="bi bi-x-circle-fill"></i> ${escapeHtml(result.message)}`;
+        resultEl.className = 'export-result error';
+      }
+    } catch (e) {
+      resultEl.innerHTML = '<i class="bi bi-x-circle-fill"></i> エクスポートに失敗しました。';
+      resultEl.className = 'export-result error';
+    }
+  }
+
+</script>
