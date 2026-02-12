@@ -1,0 +1,1937 @@
+
+<style>
+    /* ============================================================
+ * ふり返りジャーナル — スタイル定義 (css.html)
+ * ============================================================
+ * "Modern Google Style for Kids" テーマ
+ * Bootstrap 5 をベースに、児童・教員が使いやすい
+ * 温かみのあるデザインを実現する。
+ * ============================================================ */
+
+    /* ----------------------------------------------------------
+ * 1. CSS カスタムプロパティ（変数定義）
+ * ---------------------------------------------------------- */
+    :root {
+        /* ── 配色（既存カラー維持） ── */
+        --main-bg-color: #fdfaf4;
+        --accent-color: #e65100;
+        --accent-color-light: #ff8a50;
+        --accent-color-hover: #bf360c;
+        --teacher-accent-color: #1565C0;
+        --teacher-accent-hover: #0D47A1;
+        --font-color: #333333;
+        --highlight-color: #FFF59D;
+        --card-bg: #ffffff;
+        --border-color: #e0e0e0;
+        --muted-text: #888888;
+        --success-color: #2e7d32;
+        --danger-color: #c62828;
+
+        /* ── フォント ── */
+        --font-family: 'Zen Maru Gothic', 'Rounded Mplus 1c', sans-serif;
+    }
+
+    /* ----------------------------------------------------------
+ * 2. ベーススタイル
+ * ---------------------------------------------------------- */
+    html,
+    body {
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        font-family: var(--font-family);
+        font-weight: 500;
+        background-color: var(--main-bg-color);
+        color: var(--font-color);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+    }
+
+    body {
+        display: flex;
+        flex-direction: column;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        font-family: var(--font-family);
+        font-weight: 700;
+    }
+
+    /* メインコンテンツがフッターを押し下げるように */
+    #app-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        /* overflow-y: auto; */
+        min-height: 0;
+        overflow: hidden;  /* 画面全体のスクロールを禁止 */
+        height: 100vh;
+        /* ▼▼▼ 追加：フッターの高さ分（約50〜60px）の余白を確保 ▼▼▼ */
+        min-height: 0;
+    }
+
+    /* ----------------------------------------------------------
+ * 3. 全画面スピナー（ローディングオーバーレイ）
+ * ---------------------------------------------------------- */
+    #loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(4px);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.3s ease;
+    }
+
+    #loading-overlay.d-none {
+        display: none !important;
+    }
+
+    .spinner-ring {
+        width: 56px;
+        height: 56px;
+        border: 5px solid #e0e0e0;
+        border-top: 5px solid var(--accent-color);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+    }
+
+    .spinner-text {
+        margin-top: 16px;
+        font-size: 1rem;
+        color: var(--muted-text);
+        font-weight: 500;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* ----------------------------------------------------------
+ * 4. ヘッダー
+ * ---------------------------------------------------------- */
+    .app-header {
+        background: var(--card-bg);
+        border-bottom: 3px solid var(--accent-color);
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+
+    .app-header.teacher-header {
+        border-bottom-color: var(--teacher-accent-color);
+    }
+
+    .app-header-title {
+        font-size: 1.5rem;
+        margin: 0;
+        color: var(--accent-color);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .app-header-title i {
+        font-size: 1.3rem;
+    }
+
+    .teacher-header .app-header-title {
+        color: var(--teacher-accent-color);
+    }
+
+    .user-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #f5f5f5;
+        border-radius: 20px;
+        padding: 6px 16px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--font-color);
+    }
+
+    .user-badge i {
+        font-size: 1.1rem;
+        color: var(--accent-color);
+    }
+
+    .teacher-header .user-badge i {
+        color: var(--teacher-accent-color);
+    }
+
+    /* ----------------------------------------------------------
+ * 5. メインコンテンツエリア
+ * ---------------------------------------------------------- */
+    .main-content {
+        flex: 1;                 /* 余った縦幅を全部使う */
+        display: flex;           /* 子要素（page-section）を広げるため */
+        flex-direction: column;
+        width: 100%;
+        max-width: 1200px;
+        margin: 0 auto;
+        box-sizing: border-box;
+        padding: 8px 12px 0 12px; /* 上・横の余白 */
+        
+        /* ▼▼▼ フッターの高さ分（約40〜50px）空ける ▼▼▼ */
+        padding-bottom: 50px;    
+        overflow: hidden;
+    }
+
+    /* ページ（SPA セクション）の表示切替 */
+    .page-section {
+        display: none;
+        animation: fadeIn 0.3s ease;
+    }
+
+    .page-section.active {
+        display: flex;           /* ★ block から flex に変更 */
+        flex-direction: column;  /* 縦並び */
+        flex: 1;                 /* 親(.main-content)の高さ一杯に広げる */
+        min-height: 0;           /* 縮小許容 */
+        overflow: hidden;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* ----------------------------------------------------------
+ * 6. カード（汎用コンポーネント）
+ * ---------------------------------------------------------- */
+    .giga-card {
+        background: var(--card-bg);
+        border-radius: 16px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+        padding: 24px;
+        margin-bottom: 20px;
+        border: 1px solid var(--border-color);
+        transition: box-shadow 0.2s ease;
+    }
+
+    .giga-card:hover {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .giga-card-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--font-color);
+    }
+
+    .giga-card-title i {
+        color: var(--accent-color);
+    }
+
+    .teacher-section .giga-card-title i {
+        color: var(--teacher-accent-color);
+    }
+
+    /* ----------------------------------------------------------
+ * 7. ボタンスタイル
+ * ---------------------------------------------------------- */
+    .btn-primary-kid {
+        background: var(--accent-color);
+        color: #fff;
+        border: none;
+        border-radius: 12px;
+        padding: 10px 24px;
+        font-size: 1rem;
+        font-weight: 700;
+        font-family: var(--font-family);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .btn-primary-kid:hover {
+        background: var(--accent-color-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(230, 81, 0, 0.3);
+    }
+
+    .btn-primary-kid:active {
+        transform: translateY(0);
+    }
+
+    .btn-teacher {
+        background: var(--teacher-accent-color);
+        color: #fff;
+        border: none;
+        border-radius: 12px;
+        padding: 10px 24px;
+        font-size: 1rem;
+        font-weight: 700;
+        font-family: var(--font-family);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .btn-teacher:hover {
+        background: var(--teacher-accent-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(21, 101, 192, 0.3);
+    }
+
+    .btn-secondary {
+        background: #e0e0e0;
+        color: var(--font-color);
+        border: none;
+        border-radius: 12px;
+        padding: 10px 24px;
+        font-size: 1rem;
+        font-weight: 700;
+        font-family: var(--font-family);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .btn-secondary:hover {
+        background: #bdbdbd;
+    }
+
+    .btn-secondary.active {
+        background: var(--accent-color);
+        color: #fff;
+    }
+
+    .btn-sm {
+        padding: 6px 14px;
+        font-size: 0.85rem;
+        border-radius: 8px;
+    }
+
+    .btn-danger {
+        background: #757575;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 6px 14px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        font-family: var(--font-family);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .btn-danger:hover {
+        background: #616161;
+    }
+
+    /* ----------------------------------------------------------
+ * 8. ビュー切替タブ
+ * ---------------------------------------------------------- */
+    .view-tabs {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin-bottom: 20px;
+    }
+
+    .view-tab-btn {
+        background: #e0e0e0;
+        color: var(--font-color);
+        border: none;
+        border-radius: 24px;
+        padding: 10px 28px;
+        font-size: 1rem;
+        font-weight: 700;
+        font-family: var(--font-family);
+        cursor: pointer;
+        transition: all 0.25s ease;
+    }
+
+    .view-tab-btn:hover {
+        background: #bdbdbd;
+    }
+
+    .view-tab-btn.active {
+        background: var(--accent-color);
+        color: #fff;
+        box-shadow: 0 3px 10px rgba(230, 81, 0, 0.25);
+    }
+
+    /* ----------------------------------------------------------
+ * 9. ノートブック風レイアウト
+ * ---------------------------------------------------------- */
+    /* 児童画面全体レイアウト */
+    .student-layout {
+        display: flex;
+        flex: 1;          /* ★親(.page-section)一杯に広げる */
+        height: 100%;     /* 高さ確保 */
+        gap: 10px;
+        align-items: stretch;
+        min-height: 0;
+        overflow: hidden;
+    }
+    /* 左サイド：ミニカレンダー */
+    .side-calendar {
+        flex-shrink: 0;
+        width: 180px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 4px;
+    }
+
+    .notebook-container {
+        display: flex;
+        flex: 1;          /* ★横幅だけでなく縦幅も埋める */
+        flex-direction: row; /* 左右ページ並び */
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        overflow: hidden;
+        background: var(--card-bg);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+        
+        /* ▼▼▼ 下の隙間を消すためにマージンを0にする ▼▼▼ */
+        margin-bottom: 0; 
+        height: auto;     /* flex:1 が効くようにautoまたは100% */
+    }
+
+    .notebook-page {
+        padding: 12px 16px;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        min-height: 0;
+        /* ▼▼▼ 追加：ページ自体も高さを確保 ▼▼▼ */
+        height: 100%;
+        box-sizing: border-box;
+    }
+
+    /* 左側（メニュー・カレンダー側） */
+    .page-left {
+        flex: 3;
+        border-right: 2px dashed #ddd;
+        /* ▼▼▼ 追加：中身が多い場合にここだけスクロールさせる ▼▼▼ */
+        overflow-y: auto; 
+    }
+
+    /* 右側（本文入力エリア側） */
+    .page-right {
+        flex: 2;
+        /* overflow-y: auto; ← 元の設定（維持） */
+        overflow-y: auto; 
+        display: flex;        /* 中身を整列させる */
+        flex-direction: column;
+    }
+
+    /* テーマ表示 */
+    .theme-display {
+        background: linear-gradient(135deg, #fff8e1, #fff3e0);
+        border-radius: 10px;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: var(--accent-color);
+        flex-shrink: 0;
+    }
+
+    /* テキストエリア */
+    #journal-content {
+        width: 100%;
+        flex: 1;
+        box-sizing: border-box;
+        font-family: var(--font-family);
+        font-size: 1.05rem;
+        line-height: 2.2;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 12px 14px;
+        resize: none;
+        outline: none;
+        transition: border-color 0.2s ease;
+        background-image:
+            repeating-linear-gradient(transparent,
+                transparent 2.3em,
+                #e8e8e8 2.3em,
+                #e8e8e8 2.32em);
+        height: auto;
+        min-height: 200px;
+    }
+
+    #journal-content:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 3px rgba(230, 81, 0, 0.1);
+    }
+
+    /* ツール区切り線 */
+    .tools-divider {
+        border: none;
+        border-top: 1px dashed var(--border-color);
+        margin: 6px 0;
+    }
+
+    /* 過去の自分ミニボタン */
+    .past-dialogue-mini {
+        background: none;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 3px 8px;
+        font-size: 0.7rem;
+        font-family: var(--font-family);
+        cursor: pointer;
+        color: var(--muted-text);
+        white-space: nowrap;
+        margin-top: 6px;
+        transition: all 0.2s;
+    }
+
+    .past-dialogue-mini:hover {
+        background: #fff3e0;
+        color: var(--accent-color);
+        border-color: var(--accent-color);
+    }
+
+    /* 閲覧用の本文表示 */
+    .journal-content-display {
+        flex-grow: 1;
+        font-family: var(--font-family);
+        font-size: 1.1rem;
+        line-height: 2.4;
+        white-space: pre-wrap;
+        padding: 16px;
+        background-image:
+            repeating-linear-gradient(transparent,
+                transparent 2.54em,
+                #e8e8e8 2.54em,
+                #e8e8e8 2.56em);
+    }
+
+    /* ----------------------------------------------------------
+ * 10. 気持ちスタンプ
+ * ---------------------------------------------------------- */
+    .emotion-stamps {
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .emotion-stamps .label {
+        font-weight: 700;
+        font-size: 0.85rem;
+        margin-right: 4px;
+        white-space: nowrap;
+    }
+
+    .emotion-btn {
+        background: #f5f5f5;
+        border: 2px solid transparent;
+        border-radius: 10px;
+        padding: 5px 8px;
+        font-size: 1.1rem;
+        font-family: var(--font-family);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+    }
+
+    .emotion-btn:hover {
+        background: #eeeeee;
+        transform: scale(1.05);
+    }
+
+    .emotion-btn.selected {
+        background: var(--accent-color);
+        color: #fff;
+        border-color: var(--accent-color-hover);
+        box-shadow: 0 2px 8px rgba(230, 81, 0, 0.3);
+    }
+
+    /* ----------------------------------------------------------
+ * 11. 画像プレビュー & 全画面表示
+ * ---------------------------------------------------------- */
+    .image-preview {
+        margin-top: 12px;
+    }
+
+    .image-preview img {
+        max-width: 100%;
+        max-height: 120px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: transform 0.2s ease;
+    }
+
+    .image-preview img:hover {
+        transform: scale(1.03);
+    }
+
+    .journal-image {
+        max-width: 200px;
+        margin-top: 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: transform 0.2s ease;
+    }
+
+    .journal-image:hover {
+        transform: scale(1.05);
+    }
+
+    .fullscreen-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.88);
+        z-index: 10000;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+    }
+
+    .fullscreen-overlay.show {
+        display: flex;
+    }
+
+    .fullscreen-content {
+        max-width: 90%;
+        max-height: 90%;
+        object-fit: contain;
+        border-radius: 8px;
+    }
+
+    .fullscreen-close-btn {
+        position: absolute;
+        top: 20px;
+        right: 30px;
+        color: #fff;
+        font-size: 2.5rem;
+        font-weight: bold;
+        cursor: pointer;
+        line-height: 1;
+        transition: opacity 0.2s;
+    }
+
+    .fullscreen-close-btn:hover {
+        opacity: 0.7;
+    }
+
+    /* ----------------------------------------------------------
+ * 12. カレンダー
+ * ---------------------------------------------------------- */
+    .calendar-container {
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .mini-calendar {
+        width: 180px;
+        max-width: 180px;
+    }
+
+    .mini-calendar .calendar-header {
+        margin-bottom: 4px;
+    }
+
+    .mini-calendar .calendar-header h3 {
+        font-size: 0.75rem;
+    }
+
+    .mini-calendar .calendar-header .btn-sm {
+        padding: 2px 6px;
+        font-size: 0.7rem;
+    }
+
+    .mini-calendar .day-name {
+        font-size: 0.6rem;
+        padding: 2px 0;
+    }
+
+    .mini-calendar .calendar-day {
+        padding: 3px 0;
+        font-size: 0.65rem;
+        border-radius: 6px;
+    }
+
+    .mini-calendar .calendar-grid {
+        gap: 1px;
+    }
+
+    .calendar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+    }
+
+    .calendar-header h3 {
+        margin: 0;
+        font-size: 1.2rem;
+    }
+
+    .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+    }
+
+    .day-name {
+        text-align: center;
+        font-weight: 700;
+        font-size: 0.85rem;
+        color: var(--muted-text);
+        padding: 8px 0;
+    }
+
+    .calendar-day {
+        text-align: center;
+        padding: 10px 0;
+        border-radius: 12px;
+        font-size: 0.95rem;
+        position: relative;
+        transition: all 0.2s ease;
+    }
+
+    .calendar-day.has-journal {
+        background: #fff3e0;
+        cursor: pointer;
+        font-weight: 700;
+        color: var(--accent-color);
+    }
+
+    .calendar-day.has-journal:hover {
+        background: #ffe0b2;
+        transform: scale(1.08);
+    }
+
+    .calendar-day.has-journal::after {
+        content: '📝';
+        position: absolute;
+        bottom: 2px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.7rem;
+    }
+
+    /* ----------------------------------------------------------
+ * 13. サポートツール（テンプレート・ヒント）
+ * ---------------------------------------------------------- */
+    .support-tools {
+        margin-bottom: 16px;
+    }
+
+    .support-tools-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+
+    .starter-btn {
+        background: #fce4ec;
+        color: #c62828;
+        border: 1px solid #f8bbd0;
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-size: 0.95rem;
+        font-family: var(--font-family);
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin: 4px;
+    }
+
+    .starter-btn:hover {
+        background: #f8bbd0;
+        transform: translateY(-1px);
+    }
+
+    .char-counter {
+        text-align: right;
+        font-size: 0.8rem;
+        color: var(--muted-text);
+        padding: 4px 8px 0 0;
+        font-weight: 700;
+        transition: color 0.2s;
+    }
+
+    .char-counter.active {
+        color: var(--accent-color);
+    }
+
+    .support-tools p {
+        font-weight: 700;
+        margin-bottom: 8px;
+        font-size: 0.95rem;
+    }
+
+    .template-btn {
+        background: #e8f5e9;
+        color: #2e7d32;
+        border: 1px solid #c8e6c9;
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-size: 0.95rem;
+        font-family: var(--font-family);
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin: 4px;
+    }
+
+    .template-btn:hover {
+        background: #c8e6c9;
+        transform: translateY(-1px);
+    }
+
+    .hint-btn {
+        background: #e3f2fd;
+        color: #1565C0;
+        border: 1px solid #bbdefb;
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-size: 0.95rem;
+        font-family: var(--font-family);
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .hint-btn:hover {
+        background: #bbdefb;
+        transform: translateY(-1px);
+    }
+
+    /* ヒントサイドパネル */
+    .hint-side-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 280px;
+        height: 100vh;
+        background: #ffffff;
+        box-shadow: -4px 0 20px rgba(0, 0, 0, 0.12);
+        transform: translateX(100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        z-index: 90;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .hint-side-panel.open {
+        transform: translateX(0);
+    }
+
+    .hint-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 2px solid var(--border-color);
+        flex-shrink: 0;
+        background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+    }
+
+    .hint-panel-title {
+        font-weight: 900;
+        font-size: 1rem;
+    }
+
+    .hint-panel-close {
+        background: none;
+        border: none;
+        font-size: 1.2rem;
+        cursor: pointer;
+        color: var(--muted-text);
+        padding: 4px;
+        border-radius: 8px;
+        transition: all 0.2s;
+    }
+
+    .hint-panel-close:hover {
+        background: rgba(0, 0, 0, 0.08);
+        color: var(--font-color);
+    }
+
+    .hint-panel-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .hint-card {
+        border-radius: 12px;
+        padding: 12px 14px;
+    }
+
+    .hint-card-title {
+        font-weight: 900;
+        font-size: 0.95rem;
+        margin-bottom: 6px;
+    }
+
+    .hint-card ul {
+        margin: 0;
+        padding-left: 18px;
+        line-height: 1.8;
+        font-size: 0.85rem;
+    }
+
+    /* ----------------------------------------------------------
+ * 14. 教師ダッシュボード
+ * ---------------------------------------------------------- */
+    .teacher-section {
+        margin-bottom: 20px;
+    }
+
+    /* フィルター */
+    .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .filter-bar label {
+        font-weight: 700;
+        font-size: 0.9rem;
+        color: var(--muted-text);
+    }
+
+    .filter-bar select,
+    .filter-bar input[type="date"] {
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.9rem;
+        font-family: var(--font-family);
+        outline: none;
+        transition: border-color 0.2s;
+    }
+
+    .filter-bar select:focus,
+    .filter-bar input[type="date"]:focus {
+        border-color: var(--teacher-accent-color);
+    }
+
+    /* ジャーナル一覧テーブル */
+    .journal-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .journal-table thead th {
+        background: #f5f5f5;
+        padding: 12px 16px;
+        text-align: left;
+        font-size: 0.85rem;
+        color: var(--muted-text);
+        font-weight: 700;
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    .journal-table tbody tr {
+        transition: background 0.15s ease;
+    }
+
+    .journal-table tbody tr:hover {
+        background: #fafafa;
+    }
+
+    .journal-table tbody td {
+        padding: 12px 16px;
+        font-size: 0.95rem;
+        border-bottom: 1px solid #f0f0f0;
+        vertical-align: middle;
+    }
+
+    /* ステータスバッジ */
+    .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    .status-unreturned {
+        background: #fff3e0;
+        color: var(--accent-color);
+    }
+
+    .status-returned {
+        background: #e8f5e9;
+        color: var(--success-color);
+    }
+
+    /* テーマ設定入力 */
+    .theme-setter-input {
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-size: 1rem;
+        font-family: var(--font-family);
+        flex: 1;
+        min-width: 200px;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+
+    .theme-setter-input:focus {
+        border-color: var(--teacher-accent-color);
+        box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+    }
+
+    /* クイックスタンプ返却ボタン */
+    .quick-stamp-group {
+        display: inline-flex;
+        gap: 2px;
+        margin-right: 6px;
+    }
+
+    .quick-stamp-btn {
+        background: none;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 4px 6px;
+        font-size: 1.1rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        line-height: 1;
+    }
+
+    .quick-stamp-btn:hover {
+        background: #e3f2fd;
+        transform: scale(1.2);
+        border-color: var(--teacher-accent-color);
+    }
+
+    /* 週間テーマスケジュール */
+    .weekly-theme-details {
+        margin-top: 12px;
+    }
+
+    .weekly-theme-summary {
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 0.9rem;
+        color: var(--teacher-accent-color);
+        padding: 6px 0;
+        user-select: none;
+    }
+
+    .weekly-theme-summary:hover {
+        text-decoration: underline;
+    }
+
+    .weekly-theme-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px 0 8px;
+    }
+
+    .weekly-theme-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .weekly-theme-row label {
+        font-weight: 700;
+        font-size: 0.9rem;
+        width: 24px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+
+    .weekly-theme-row input {
+        flex: 1;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 0.9rem;
+        font-family: var(--font-family);
+        outline: none;
+    }
+
+    .weekly-theme-row input:focus {
+        border-color: var(--teacher-accent-color);
+    }
+
+    /* サマリーダッシュボード */
+    .summary-card {
+        background: linear-gradient(135deg, #e8f5e9, #e3f2fd) !important;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        text-align: center;
+        margin-bottom: 12px;
+    }
+
+    .summary-item {
+        padding: 8px;
+    }
+
+    .summary-value {
+        font-size: 1.8rem;
+        font-weight: 900;
+        line-height: 1.2;
+    }
+
+    .summary-label {
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: var(--muted-text);
+    }
+
+    .summary-progress {
+        height: 10px;
+        background: rgba(0, 0, 0, 0.08);
+        border-radius: 5px;
+        overflow: hidden;
+        margin-bottom: 8px;
+    }
+
+    .summary-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #43a047, #66bb6a);
+        border-radius: 5px;
+        transition: width 0.5s ease;
+    }
+
+    .summary-alert {
+        font-size: 0.85rem;
+        font-weight: 700;
+        padding: 4px 0;
+        color: var(--accent-color);
+    }
+
+    /* ----------------------------------------------------------
+ * 15. ハイライト機能
+ * ---------------------------------------------------------- */
+    .highlight-marker {
+        background-color: var(--highlight-color);
+        cursor: pointer;
+        position: relative;
+        border-radius: 3px;
+        padding: 1px 2px;
+        transition: background-color 0.2s ease;
+    }
+
+    .highlight-marker:hover {
+        background-color: #FFF176;
+    }
+
+    /* テキスト選択時のポップオーバー */
+    #selection-popover {
+        position: fixed;
+        z-index: 1200;
+        display: none;
+    }
+
+    #selection-popover button {
+        background: var(--teacher-accent-color);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 6px 14px;
+        font-size: 0.85rem;
+        font-family: var(--font-family);
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    /* ハイライト編集パネル */
+    #highlight-editor {
+        position: fixed;
+        width: 260px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        z-index: 1200;
+        padding: 16px;
+        display: none;
+    }
+
+    #highlight-editor textarea {
+        width: 100%;
+        box-sizing: border-box;
+        margin-bottom: 10px;
+        font-family: var(--font-family);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px;
+        font-size: 0.9rem;
+        outline: none;
+        resize: vertical;
+    }
+
+    #highlight-editor .stamps {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 10px;
+    }
+
+    #highlight-editor .stamps button {
+        font-size: 1.2em;
+        padding: 4px 6px;
+        background: #f5f5f5;
+        color: #333;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    #highlight-editor .stamps button:hover {
+        background: #e0e0e0;
+    }
+
+    #highlight-editor .stamps button.selected {
+        background: var(--teacher-accent-color);
+        color: #fff;
+        border-color: var(--teacher-accent-color);
+    }
+
+    /* ハイライトツールチップ */
+    #highlight-tooltip {
+        position: fixed;
+        background: #333;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 10px;
+        z-index: 1300;
+        display: none;
+        max-width: 250px;
+        pointer-events: none;
+        font-size: 0.9rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    #highlight-tooltip .stamp {
+        font-size: 1.4em;
+        margin-right: 6px;
+        vertical-align: middle;
+    }
+
+    /* ----------------------------------------------------------
+ * 16. モーダル用ノートブック（SweetAlert2 カスタム）
+ * ---------------------------------------------------------- */
+    .swal2-popup.notebook-modal {
+        max-width: 95vw !important;
+        width: 900px !important;
+        padding: 0 !important;
+        border-radius: 16px !important;
+        overflow: hidden;
+    }
+
+    .swal2-html-container {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .modal-notebook-container {
+        display: flex;
+        gap: 0;
+        min-height: 500px;
+        max-height: 80vh;
+    }
+
+    .modal-notebook-page {
+        flex: 1;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .modal-page-left {
+        border-right: 2px dashed #ddd;
+    }
+
+    /* フィードバック表示 */
+    .feedback-section {
+        margin-bottom: 16px;
+    }
+
+    .feedback-section h4 {
+        font-size: 1rem;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .teacher-feedback-text {
+        white-space: pre-wrap;
+        line-height: 1.8;
+        font-size: 1rem;
+        background: #f9f9f9;
+        border-radius: 10px;
+        padding: 12px 16px;
+    }
+
+    /* ページネーション */
+    .pagination-controls {
+        text-align: center;
+        margin-bottom: 12px;
+    }
+
+    .page-btn {
+        background: #e0e0e0;
+        border: none;
+        border-radius: 50%;
+        width: 32px;
+        height: 32px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        font-family: var(--font-family);
+        cursor: pointer;
+        margin: 0 4px;
+        transition: all 0.2s ease;
+    }
+
+    .page-btn.active {
+        background: var(--accent-color);
+        color: #fff;
+    }
+
+    /* ----------------------------------------------------------
+ * 17. ファイルアップロード（カスタム）
+ * ---------------------------------------------------------- */
+    .file-upload-wrapper {
+        margin-top: 12px;
+    }
+
+    .file-upload-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #f5f5f5;
+        border: 2px dashed var(--border-color);
+        border-radius: 12px;
+        padding: 10px 20px;
+        font-size: 0.95rem;
+        font-family: var(--font-family);
+        font-weight: 700;
+        color: var(--muted-text);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .file-upload-label:hover {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+        background: #fff3e0;
+    }
+
+    .file-upload-label input[type="file"] {
+        display: none;
+    }
+
+    /* ----------------------------------------------------------
+ * 18. フッター（常時固定表示）
+ * ---------------------------------------------------------- */
+    footer {
+        /* ▼▼▼ 変更・追加ここから ▼▼▼ */
+        position: fixed;      /* 画面に対して位置を固定 */
+        bottom: 0;            /* 下端に配置 */
+        left: 0;              /* 左端に配置 */
+        width: 100%;          /* 横幅を画面いっぱいに */
+        z-index: 1000;        /* 他の要素より手前に表示 */
+        
+        /* 既存のスタイル */
+        background: var(--main-bg-color);
+        border-top: 1px solid var(--border-color);
+        padding: 6px 0 !important;
+        margin: 0 !important;
+        
+        /* 影をつけると浮いている感じが出て見やすくなります（お好みで） */
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.05); 
+        /* ▲▲▲ 変更・追加ここまで ▲▲▲ */
+    }
+
+    /* ----------------------------------------------------------
+ * 19. レスポンシブ対応
+ * ---------------------------------------------------------- */
+
+    /* タブレット以下 */
+    @media (max-width: 768px) {
+
+        .notebook-container,
+        .modal-notebook-container {
+            flex-direction: column;
+        }
+
+        .page-left,
+        .modal-page-left {
+            border-right: none;
+            border-bottom: 2px dashed #ddd;
+        }
+
+        .app-header {
+            padding: 12px 16px;
+        }
+
+        .app-header-title {
+            font-size: 1.2rem;
+        }
+
+        .main-content {
+            padding: 12px 8px 0 8px;
+        }
+
+        .giga-card {
+            padding: 16px;
+        }
+
+        .journal-table thead {
+            display: none;
+        }
+
+        .journal-table tbody tr {
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            background: var(--card-bg);
+        }
+
+        .journal-table tbody td {
+            padding: 4px 0;
+            border-bottom: none;
+            font-size: 0.9rem;
+        }
+
+        .journal-table tbody td::before {
+            font-weight: 700;
+            color: var(--muted-text);
+            font-size: 0.8rem;
+        }
+
+        .filter-bar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+    }
+
+    /* スマートフォン */
+    @media (max-width: 480px) {
+        .view-tabs {
+            flex-direction: column;
+        }
+
+        .view-tab-btn {
+            width: 100%;
+        }
+
+        .emotion-btn {
+            font-size: 0.9rem;
+            padding: 6px 12px;
+        }
+    }
+
+    /* ----------------------------------------------------------
+ * 20. SweetAlert2 テーマカスタマイズ
+ * ---------------------------------------------------------- */
+    .swal2-popup {
+        font-family: var(--font-family) !important;
+        border-radius: 16px !important;
+    }
+
+    .swal2-title {
+        font-family: var(--font-family) !important;
+        font-weight: 700 !important;
+    }
+
+    .swal2-html-container {
+        font-family: var(--font-family) !important;
+    }
+
+    .swal2-confirm {
+        background: var(--accent-color) !important;
+        border-radius: 10px !important;
+        font-family: var(--font-family) !important;
+        font-weight: 700 !important;
+    }
+
+    .swal2-cancel {
+        border-radius: 10px !important;
+        font-family: var(--font-family) !important;
+        font-weight: 700 !important;
+    }
+
+    /* Teacher用のSweetAlert2 */
+    .teacher-swal .swal2-confirm {
+        background: var(--teacher-accent-color) !important;
+    }
+
+    /* ----------------------------------------------------------
+ * 21. 管理画面（Admin Panel）
+ * ---------------------------------------------------------- */
+    .admin-section {
+        margin-bottom: 20px;
+    }
+
+    .admin-section .giga-card-title i {
+        color: var(--teacher-accent-color);
+    }
+
+    .admin-help {
+        font-size: 0.9rem;
+        color: var(--muted-text);
+        margin-bottom: 12px;
+        line-height: 1.6;
+    }
+
+    .admin-format-hint {
+        background: #f5f5f5;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 0.85rem;
+        margin-bottom: 12px;
+        border-left: 3px solid var(--teacher-accent-color);
+        line-height: 1.8;
+    }
+
+    .admin-format-hint code {
+        background: #e0e0e0;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.85rem;
+    }
+
+    .admin-textarea {
+        width: 100%;
+        box-sizing: border-box;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 0.9rem;
+        line-height: 1.8;
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 12px 16px;
+        resize: vertical;
+        outline: none;
+        transition: border-color 0.2s ease;
+        background: #fafafa;
+        tab-size: 4;
+    }
+
+    .admin-textarea:focus {
+        border-color: var(--teacher-accent-color);
+        box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+        background: #fff;
+    }
+
+    .admin-actions {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+    }
+
+    .admin-count {
+        font-size: 0.85rem;
+        color: var(--muted-text);
+        font-weight: 700;
+        margin-right: auto;
+    }
+
+    .admin-input {
+        flex: 1;
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-size: 0.95rem;
+        font-family: var(--font-family);
+        outline: none;
+        transition: border-color 0.2s;
+        min-width: 0;
+    }
+
+    .admin-input:focus {
+        border-color: var(--teacher-accent-color);
+        box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+    }
+
+    .admin-api-form {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 12px;
+        margin-top: 12px;
+    }
+
+    .admin-status-row {
+        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .admin-status-ok {
+        color: var(--success-color);
+        font-weight: 700;
+    }
+
+    .admin-status-ok i {
+        color: var(--success-color) !important;
+    }
+
+    .admin-status-warn {
+        color: #f57c00;
+        font-weight: 700;
+    }
+
+    .admin-status-warn i {
+        color: #f57c00 !important;
+    }
+
+    .admin-test-result {
+        font-size: 0.9rem;
+        padding: 10px 14px;
+        border-radius: 8px;
+        margin-top: 8px;
+        min-height: 20px;
+    }
+
+    .admin-test-result:empty {
+        display: none;
+    }
+
+    .admin-test-result.testing {
+        background: #e3f2fd;
+        color: var(--teacher-accent-color);
+    }
+
+    .admin-test-result.success {
+        background: #e8f5e9;
+        color: var(--success-color);
+        font-weight: 700;
+    }
+
+    .admin-test-result.error {
+        background: #fce4ec;
+        color: #c62828;
+        font-weight: 700;
+    }
+
+    .admin-info-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .admin-info-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        background: #f5f5f5;
+        border-radius: 10px;
+    }
+
+    .admin-info-label {
+        font-weight: 700;
+        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .admin-info-link {
+        color: var(--teacher-accent-color);
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: color 0.2s;
+    }
+
+    .admin-info-link:hover {
+        color: var(--teacher-accent-hover);
+    }
+
+    .admin-danger-zone {
+        border: 1px solid #ffcdd2;
+        background: #fff8f8;
+    }
+
+    .admin-danger-zone .giga-card-title {
+        color: #c62828;
+    }
+
+    .admin-danger-zone .giga-card-title i {
+        color: #c62828 !important;
+    }
+
+    .admin-danger-zone .btn-danger {
+        background: #c62828;
+        padding: 10px 24px;
+        font-size: 0.95rem;
+        border-radius: 10px;
+    }
+
+    .admin-danger-zone .btn-danger:hover {
+        background: #b71c1c;
+    }
+
+    /* スピンアニメーション（ローディングアイコン用） */
+    @keyframes spin {
+        from {
+            transform: rotate(0deg);
+        }
+
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .spin-icon {
+        display: inline-block;
+        animation: spin 1s linear infinite;
+    }
+
+    /* 管理タブ：教員特有のアクティブ色を使用 */
+    .view-tab-btn.active[id="tab-admin"],
+    .view-tab-btn.active[id="tab-dashboard"] {
+        background: var(--teacher-accent-color);
+        box-shadow: 0 3px 10px rgba(21, 101, 192, 0.25);
+    }
+
+    /* ボタンの disabled 状態 */
+    button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* ----------------------------------------------------------
+ * 22. 提出状況グリッド
+ * ---------------------------------------------------------- */
+    .submission-summary {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .submission-bar-container {
+        flex: 1;
+        height: 10px;
+        background: #e0e0e0;
+        border-radius: 5px;
+        overflow: hidden;
+    }
+
+    .submission-bar {
+        height: 100%;
+        background: linear-gradient(90deg, var(--teacher-accent-color), #42a5f5);
+        border-radius: 5px;
+        transition: width 0.5s ease;
+    }
+
+    .submission-count {
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--muted-text);
+        white-space: nowrap;
+    }
+
+    .submission-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        gap: 8px;
+    }
+
+    .submission-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        transition: transform 0.15s ease;
+    }
+
+    .submission-item:hover {
+        transform: scale(1.03);
+    }
+
+    .submission-item.submitted {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .submission-item.not-submitted {
+        background: #fce4ec;
+        color: #c62828;
+    }
+
+    .submission-icon {
+        font-size: 1rem;
+    }
+
+    .submission-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* ----------------------------------------------------------
+ * 23. エクスポートセクション
+ * ---------------------------------------------------------- */
+    .export-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .export-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-end;
+    }
+
+    .export-filter-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .export-filter-item label {
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--muted-text);
+    }
+
+    .export-filter-item input[type="date"],
+    .export-filter-item select {
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 0.9rem;
+        font-family: var(--font-family);
+        outline: none;
+        transition: border-color 0.2s;
+    }
+
+    .export-filter-item input[type="date"]:focus,
+    .export-filter-item select:focus {
+        border-color: var(--teacher-accent-color);
+    }
+
+    .export-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .export-result {
+        font-size: 0.9rem;
+        padding: 12px 14px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .export-result:empty {
+        display: none;
+    }
+
+    .export-result.loading {
+        background: #e3f2fd;
+        color: var(--teacher-accent-color);
+    }
+
+    .export-result.success {
+        background: #e8f5e9;
+        color: var(--success-color);
+        font-weight: 700;
+    }
+
+    .export-result.error {
+        background: #fce4ec;
+        color: #c62828;
+        font-weight: 700;
+    }
+
+    .export-download-link {
+        color: var(--teacher-accent-color);
+        font-weight: 700;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 8px;
+        padding: 4px 12px;
+        background: #e3f2fd;
+        border-radius: 8px;
+        transition: background 0.2s;
+    }
+
+    .export-download-link:hover {
+        background: #bbdefb;
+    }
+</style>
