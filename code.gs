@@ -589,7 +589,7 @@ function getTodayTheme() {
   const sheet = ss.getSheetByName(THEME_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) {
     // テーマシートがなくても曜日スケジュールを確認
-    return getWeeklyThemeForToday_() || 'Today, let\'s reflect on our day.';
+    return getWeeklyThemeForToday_() || '今日のふり返りをしましょう';
   }
 
   const todayStr = Utilities.formatDate(new Date(), 'JST', 'yyyy/MM/dd');
