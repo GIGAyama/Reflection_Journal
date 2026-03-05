@@ -1,121 +1,964 @@
-
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
-  <base target="_top">
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ふり返りジャーナル</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ふりかえりジャーナル</title>
+  
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+  
+  <style>
+    body { font-family: 'Zen Maru Gothic', sans-serif; background-color: #f8fafc; overflow: hidden; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f8fafc; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    
+    .lined-paper { 
+      line-height: 40px; 
+      background-image: linear-gradient(transparent, transparent 39px, #e2e8f0 39px, #e2e8f0 40px);
+      background-size: 100% 40px;
+      background-attachment: local; 
+    }
+    
+    .highlight-marker { background-color: #fef08a; padding: 0.1rem 0; border-radius: 0.2rem; cursor: pointer; transition: all 0.2s; }
+    .highlight-marker:hover { background-color: #fde047; box-shadow: 0 0 8px rgba(253, 224, 71, 0.8); }
+    .shadow-premium { box-shadow: 0 4px 25px -2px rgba(0, 0, 0, 0.04), 0 0 5px rgba(0,0,0,0.01); }
+    
+    @keyframes fadeInScale { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+    .animate-fade-in { animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    
+    @keyframes slideDownBounce {
+      0% { opacity: 0; transform: translateY(-20px); }
+      70% { transform: translateY(5px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .animate-notification { animation: slideDownBounce 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
-  <!-- ── Google Fonts: Zen Maru Gothic (wght@500;700) ── -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+    @keyframes dash { to { stroke-dashoffset: 0; } }
+    .circle-chart-circle { animation: dash 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    .tooltip-content { opacity: 0; visibility: hidden; transform: translateY(5px); transition: all 0.2s ease; }
+    .group:hover .tooltip-content { opacity: 1; visibility: visible; transform: translateY(0); }
+  </style>
 
-  <!-- ── Bootstrap 5 CSS (CDN) ── -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-
-  <!-- ── Bootstrap Icons (CDN) ── -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-
-  <!-- ── SweetAlert2 CSS (CDN) ── -->
-  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
-
-  <!-- ── アプリ固有CSS（css.html） ── -->
-  <?!= include('css') ?>
-</head>
-
-<body>
-
-  <!-- ============================================================
-       全画面スピナー（ローディングオーバーレイ）
-       通信中は全画面を覆い、重複操作を完全にブロックする
-       ============================================================ -->
-  <div id="loading-overlay">
-    <div class="spinner-ring"></div>
-    <p class="spinner-text">データを<ruby>読<rt>よ</rt></ruby>み<ruby>込<rt>こ</rt></ruby>んでいます...</p>
-  </div>
-
-  <!-- ============================================================
-       アプリ本体ラッパー
-       ============================================================ -->
-  <div id="app-wrapper">
-
-    <!-- ── ヘッダー ── -->
-    <? if (user.role === '担任') { ?>
-    <header class="app-header teacher-header">
-      <h1 class="app-header-title">
-        <i class="bi bi-clipboard2-data-fill"></i> 教員ダッシュボード
-      </h1>
-      <span class="user-badge">
-        <i class="bi bi-person-circle"></i>
-        <?= user.name ?> 先生
-      </span>
-    </header>
-    <? } else { ?>
-    <header class="app-header">
-      <h1 class="app-header-title">
-        <i class="bi bi-journal-richtext"></i> ふり<ruby>返<rt>かえ</rt></ruby>りジャーナル
-      </h1>
-      <span class="user-badge">
-        <i class="bi bi-person-circle"></i>
-        <?= user.name ?> さん
-      </span>
-    </header>
-    <? } ?>
-
-    <!-- ── メインコンテンツ ── -->
-    <div class="main-content">
-      <!-- ※ js.html の renderStudentView() / renderTeacherView() がここに描画する -->
-      <div id="app-content"></div>
-    </div>
-
-    <!-- ── 固定フッター ── -->
-    <footer class="text-center text-muted py-3 mt-4 border-top">
-      <small>© 2026 ふり返りジャーナル <a href="https://note.com/cute_borage86" target="_blank"
-          class="text-decoration-none text-muted">GIGA山</a></small>
-    </footer>
-
-  </div><!-- /app-wrapper -->
-
-  <!-- ============================================================
-       画像全画面表示オーバーレイ
-       ============================================================ -->
-  <div id="fullscreen-image-overlay" class="fullscreen-overlay">
-    <span class="fullscreen-close-btn">&times;</span>
-    <img class="fullscreen-content" id="fullscreen-image" alt="">
-  </div>
-
-  <!-- ============================================================
-       ハイライト機能用 UI 要素
-       ============================================================ -->
-  <div id="selection-popover"><button id="add-highlight-btn"><i class="bi bi-highlighter"></i> ハイライト</button></div>
-  <div id="highlight-editor"></div>
-  <div id="highlight-tooltip"></div>
-
-  <!-- ── Bootstrap 5 JS (CDN) ── -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-  <!-- ── SweetAlert2 JS (CDN) ── -->
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-  <!-- ── サーバーサイドデータの注入（テンプレートタグはここでのみ使用） ── -->
   <script>
-    const userData = <?!= JSON.stringify(user) ?>;
-    const todayTheme = <?!= JSON.stringify(todayTheme) ?>;
-    let journalsData = <?!= JSON.stringify(journals) ?>;
-    const isAdmin = <?!= JSON.stringify(isAdmin) ?>;
-    <? if (user.role === '担任') { ?>
-      const classRoster = <?!= JSON.stringify(classRoster) ?>;
-    <? } else { ?>
-      const classRoster = [];
-    <? } ?>
+    try {
+      window.APP_DATA = <?!= typeof initialData !== 'undefined' ? initialData : 'null' ?>;
+      if (!window.APP_DATA) {
+        window.APP_DATA = {
+          user: { name: 'テスト先生', role: '担任', email: 'teacher@example.com' }, isAdmin: true, todayTheme: '今日の学びをふり返ろう',
+          journals: [
+            { journalId: '1', timestamp: new Date(Date.now() - 86400000*0).toISOString(), date: '今日', email: 'yamada@example.com', studentName: '山田 太郎', status: '未返却', content: '今日は算数が難しかったけど、がんばりました！', emotion: '😊 うれしい', teacherComment: '', highlights: '[]' },
+            { journalId: '2', timestamp: new Date(Date.now() - 86400000*1).toISOString(), date: '昨日', email: 'yamada@example.com', studentName: '山田 太郎', status: '返却済み', content: '国語の発表で緊張した。', emotion: '🤔 もやもや', teacherComment: '', highlights: '[]' }
+          ],
+          classRoster: [{name: '山田 太郎', email: 'yamada@example.com', role: '児童'}]
+        };
+      }
+    } catch(e) { console.error(e); }
   </script>
+</head>
+<body>
+  <div id="root"></div>
 
-  <!-- ── アプリ固有JS（js.html） ── -->
-  <?!= include('js') ?>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
 
+    const RubyText = ({ text, kana }) => (
+      <ruby className="align-baseline">
+        {text}
+        <rt className="text-[0.6em] text-gray-500 font-medium select-none leading-none">{kana}</rt>
+      </ruby>
+    );
+
+    const Icon = ({ path, className="w-5 h-5" }) => (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={path} /></svg>
+    );
+    const Icons = {
+      Book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13z M4 19.5v-13", Send: "M22 2L11 13 M22 2L15 22L11 13L2 9L22 2z",
+      Image: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12", Check: "M20 6L9 17l-5-5", User: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", Close: "M18 6L6 18 M6 6l12 12",
+      Trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2", Sparkles: "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 5.6l2.1 2.1", Info: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 16v-4 M12 8h.01", Settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z", Search: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z", Pulse: "M4.318 16.318a4.5 4.5 0 000 6.364L12 20.364l7.682 2.318a4.5 4.5 0 000-6.364M12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0M12 7.636l1.318-1.318a4.5 4.5 0 016.364 0M12 7.636v-6",
+      Pen: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z", Save: "M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4",
+      Plus: "M12 4v16m8-8H4", Download: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+    };
+
+    const Toast = ({ message, type, onClose }) => {
+      useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, []);
+      const bg = type === 'error' ? 'bg-red-500' : 'bg-emerald-500';
+      return <div className={`fixed bottom-6 left-1/2 transform -translate-x-1/2 ${bg} text-white px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-2 z-50 animate-bounce font-bold tracking-wide`}><Icon path={type === 'error' ? Icons.Close : Icons.Check} /> <span>{message}</span></div>;
+    };
+
+    const ConfirmDialog = ({ isOpen, title, text, onConfirm, onCancel, confirmText="はい", cancelText="キャンセル", isDanger=false }) => {
+      if (!isOpen) return null;
+      return (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity">
+          <div className="bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 max-w-sm w-full animate-fade-in text-center transform transition-all">
+            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${isDanger ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}><Icon path={isDanger ? Icons.Trash : Icons.Info} className="w-10 h-10" /></div>
+            <h3 className="text-2xl font-black text-gray-800 mb-3">{title}</h3>
+            <p className="text-gray-500 mb-8 text-sm whitespace-pre-wrap leading-relaxed">{text}</p>
+            <div className="flex gap-3">
+              <button onClick={onCancel} className="flex-1 py-3.5 rounded-2xl font-bold bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors">{cancelText}</button>
+              <button onClick={onConfirm} className={`flex-1 py-3.5 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-95 ${isDanger ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'}`}>{confirmText}</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const useGas = () => {
+      const [isLoading, setIsLoading] = useState(false);
+      const [toast, setToast] = useState(null);
+      const call = (funcName, ...args) => {
+        setIsLoading(true);
+        return new Promise((resolve, reject) => {
+          if (typeof google === 'undefined' || !google.script) { setTimeout(() => { setIsLoading(false); resolve({ success: true, message: "テスト成功", data: args[0] }); }, 800); return; }
+          google.script.run.withSuccessHandler(res => { setIsLoading(false); resolve(res); }).withFailureHandler(err => { setIsLoading(false); setToast({ message: "通信エラー", type: "error" }); reject(err); })[funcName](...args);
+        });
+      };
+      return { call, isLoading, toast, setToast, showToast: (msg, type="success") => setToast({ message: msg, type }) };
+    };
+
+    // ==========================================
+    // 🎒 児童用画面 (Student App)
+    // ==========================================
+    const StudentApp = ({ data }) => {
+      const { call, isLoading, toast, setToast, showToast } = useGas();
+      const [content, setContent] = useState("");
+      const [emotion, setEmotion] = useState("");
+      const [imageFile, setImageFile] = useState(null);
+      const [showHints, setShowHints] = useState(false);
+      const [activePastJournal, setActivePastJournal] = useState(null);
+      const [pastCommentInput, setPastCommentInput] = useState("");
+      const [currentMonth, setCurrentMonth] = useState(new Date());
+      const textareaRef = useRef(null);
+
+      const [readJournals, setReadJournals] = useState([]);
+      const [unreadJournals, setUnreadJournals] = useState([]);
+
+      useEffect(() => {
+        const savedDraft = localStorage.getItem(`draft_${data.user.email}`);
+        if (savedDraft && !content) setContent(savedDraft);
+        const savedRead = JSON.parse(localStorage.getItem(`read_journals_${data.user.email}`) || "[]");
+        setReadJournals(savedRead);
+        const unreads = data.journals.filter(j => j.status === '返却済み' && !savedRead.includes(j.journalId));
+        setUnreadJournals(unreads);
+      }, []);
+
+      const handleContentChange = (e) => {
+        const val = e.target.value;
+        setContent(val);
+        localStorage.setItem(`draft_${data.user.email}`, val);
+      };
+
+      const emotions = ["😊 うれしい", "😠 くやしい", "💡 なるほど", "🤔 もやもや"];
+      const templates = { ywt: "【Y: やったこと】\n\n【W: わかったこと】\n\n【T: つぎにやること】\n", kpt: "【K: Keep よかったこと・つづけること】\n\n【P: Problem こまったこと・やめること】\n\n【T: Try つぎにためすこと】\n", '5w1h': "【いつ】\n\n【どこで】\n\n【だれが】\n\n【なにを】\n\n【なぜ】\n\n【どのように】\n", '3notice': "【わかったこと】\n\n【おどろいたこと】\n\n【もっとしりたいこと】\n" };
+      const starters = ["今日いちばん心にのこったのは、", "今日、はじめてできたことは、", "今日うれしかったのは、", "明日がんばりたいことは、"];
+
+      const hintDictionary = [
+        { icon: "😊", title: <><RubyText text="気持" kana="きも"/>ち</>, items: [
+          { text: "今日、いちばんうれしかったことは、", display: <><RubyText text="今日" kana="きょう"/>、いちばんうれしかったことは、</> },
+          { text: "くやしかったこと・かなしかったことは、", display: <>くやしかったこと・かなしかったことは、</> },
+          { text: "ドキドキ・ワクワクした瞬間は、", display: <>ドキドキ・ワクワクした<RubyText text="瞬間" kana="しゅんかん"/>は、</> }
+        ]},
+        { icon: "📚", title: <><RubyText text="学" kana="まな"/>び</>, items: [
+          { text: "新しくわかったこと・できたことは、", display: <><RubyText text="新" kana="あたら"/>しくわかったこと・できたことは、</> },
+          { text: "「なぜだろう？」と思ったことは、", display: <>「なぜだろう？」と<RubyText text="思" kana="おも"/>ったことは、</> },
+          { text: "もっと調べたい・知りたいことは、", display: <>もっと<RubyText text="調" kana="しら"/>べたい・<RubyText text="知" kana="し"/>りたいことは、</> }
+        ]},
+        { icon: "🤝", title: "つながり", items: [
+          { text: "友だちに「ありがとう」と言いたいことは、", display: <><RubyText text="友" kana="とも"/>だちに「ありがとう」と<RubyText text="言" kana="い"/>いたいことは、</> },
+          { text: "だれかの「すごいな」と思ったところは、", display: <>だれかの「すごいな」と<RubyText text="思" kana="おも"/>ったところは、</> },
+          { text: "みんなで協力してできたことは、", display: <>みんなで<RubyText text="協力" kana="きょうりょく"/>してできたことは、</> }
+        ]},
+        { icon: "🚀", title: <><RubyText text="次" kana="つぎ"/>へ</>, items: [
+          { text: "明日がんばりたいことは、", display: <><RubyText text="明日" kana="あした"/>がんばりたいことは、</> },
+          { text: "もう一度やるなら、どうする？", display: <>もう<RubyText text="一度" kana="いちど"/>やるなら、どうする？</> },
+          { text: "今日の自分にひとこと言うなら、", display: <><RubyText text="今日" kana="きょう"/>の<RubyText text="自分" kana="じぶん"/>にひとこと<RubyText text="言" kana="い"/>うなら、</> }
+        ]}
+      ];
+
+      const insertTextAtCursor = (textToInsert) => {
+        const ta = textareaRef.current;
+        if (ta) {
+          const startPos = ta.selectionStart;
+          const endPos = ta.selectionEnd;
+          const newContent = content.substring(0, startPos) + textToInsert + content.substring(endPos);
+          setContent(newContent);
+          localStorage.setItem(`draft_${data.user.email}`, newContent);
+          setTimeout(() => { ta.focus(); ta.setSelectionRange(startPos + textToInsert.length, startPos + textToInsert.length); }, 0);
+        } else {
+          setContent(prev => prev + textToInsert);
+        }
+        setShowHints(false);
+      };
+
+      const handleImage = (e) => {
+        const file = e.target.files[0];
+        if (file) { const reader = new FileReader(); reader.onload = (ev) => setImageFile({ name: file.name, type: file.type, data: ev.target.result.split(',')[1], preview: ev.target.result }); reader.readAsDataURL(file); }
+      };
+
+      const handleSubmit = async () => {
+        if (!content.trim()) return showToast("本文を書いてね！", "error");
+        let imageFileId = "";
+        if (imageFile) {
+          const res = await call('uploadImage', { fileName: imageFile.name, mimeType: imageFile.type, data: imageFile.data });
+          if (res.success) imageFileId = res.fileId;
+        }
+        const res = await call('saveJournal', { email: data.user.email, theme: data.todayTheme, content, emotion, imageFileId });
+        if (res.success) {
+          localStorage.removeItem(`draft_${data.user.email}`); 
+          if (typeof confetti === 'function') confetti({ particleCount: 200, spread: 90, origin: { y: 0.6 }, colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981'] });
+          showToast("先生に提出できたよ！");
+          setContent(""); setEmotion(""); setImageFile(null);
+          setTimeout(() => window.top.location && window.top.location.reload(), 2500);
+        }
+      };
+
+      const openJournalModal = (journal) => {
+        setActivePastJournal(journal);
+        setPastCommentInput(journal.pastComment || "");
+        if (journal.status === '返却済み' && !readJournals.includes(journal.journalId)) {
+          const newRead = [...readJournals, journal.journalId];
+          setReadJournals(newRead);
+          localStorage.setItem(`read_journals_${data.user.email}`, JSON.stringify(newRead));
+          setUnreadJournals(prev => prev.filter(j => j.journalId !== journal.journalId));
+        }
+      };
+
+      const showRandomPastJournal = () => {
+        const oneMonthAgo = new Date(); oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        const pasts = data.journals.filter(j => new Date(j.timestamp) < oneMonthAgo);
+        if (pasts.length === 0) return showToast("1ヶ月以上前の記録がまだないよ", "error");
+        openJournalModal(pasts[Math.floor(Math.random() * pasts.length)]);
+      };
+
+      const handleSavePastComment = async () => {
+        if(!pastCommentInput.trim()) return;
+        const res = await call('addPastComment', activePastJournal.journalId, pastCommentInput);
+        if(res.success) { showToast("過去の自分にメッセージを送りました！"); setActivePastJournal(null); }
+      };
+
+      const renderCalendarDays = () => {
+        const y = currentMonth.getFullYear(), m = currentMonth.getMonth();
+        const firstDay = new Date(y, m, 1).getDay(), lastDate = new Date(y, m + 1, 0).getDate();
+        
+        let days = [];
+        for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2"></div>);
+        for (let i = 1; i <= lastDate; i++) {
+          const ds = new Date(y, m, i).toLocaleDateString('ja-JP');
+          const matchedJournals = data.journals.filter(j => new Date(j.timestamp).toLocaleDateString('ja-JP') === ds);
+          const hasJournal = matchedJournals.length > 0;
+          const isReturned = matchedJournals.some(j => j.status === '返却済み'); 
+          
+          days.push(
+            <div key={i} className={`p-2 text-center rounded-xl text-sm font-bold transition-all relative ${hasJournal ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200 cursor-pointer hover:bg-orange-200 hover:-translate-y-0.5' : 'text-gray-400'}`}
+                 onClick={() => { if(hasJournal) { openJournalModal(matchedJournals[0]); } }}>
+              {i}
+              {isReturned && <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[8px] text-white animate-pulse">💬</div>}
+            </div>
+          );
+        }
+        return days;
+      };
+
+      return (
+        <div className="flex flex-col h-full gap-6 relative animate-fade-in">
+          {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
+          
+          {unreadJournals.length > 0 && (
+            <div className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 p-4 rounded-[2rem] shadow-lg shadow-blue-500/30 flex justify-between items-center animate-notification border border-blue-400">
+              <div className="flex items-center gap-4 text-white">
+                <div className="text-3xl animate-bounce">💌</div>
+                <div>
+                  <h3 className="font-black text-lg"><RubyText text="先生" kana="せんせい"/>からのおへんじが<RubyText text="届" kana="とど"/>いてるよ！</h3>
+                  <p className="text-sm font-bold opacity-90">{unreadJournals.length}件のあたらしいおへんじ</p>
+                </div>
+              </div>
+              <button onClick={() => openJournalModal(unreadJournals[0])} className="bg-white text-blue-600 hover:bg-blue-50 font-black px-6 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all">
+                <RubyText text="読" kana="よ"/>む
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col lg:flex-row h-full gap-6">
+            <div className="w-full lg:w-[280px] flex flex-col gap-5">
+               <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5">
+                  <div className="flex justify-between items-center mb-5">
+                    <button onClick={()=>setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth()-1)))} className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-orange-500 hover:bg-orange-50 transition-colors"><Icon path="M15 18l-6-6 6-6" className="w-4 h-4" /></button>
+                    <h3 className="font-black text-gray-700">{currentMonth.getFullYear()}<RubyText text="年" kana="ねん"/> {currentMonth.getMonth()+1}<RubyText text="月" kana="がつ"/></h3>
+                    <button onClick={()=>setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth()+1)))} className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-orange-500 hover:bg-orange-50 transition-colors"><Icon path="M9 18l6-6-6-6" className="w-4 h-4"/></button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 text-xs text-center text-gray-400 font-bold mb-3"><div className="text-red-400">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div className="text-blue-400">土</div></div>
+                  <div className="grid grid-cols-7 gap-1.5">{renderCalendarDays()}</div>
+               </div>
+               <button onClick={showRandomPastJournal} className="bg-gradient-to-br from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 text-indigo-600 border border-indigo-100 font-black py-4 px-4 rounded-[2rem] shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95 group">
+                 <Icon path="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" className="group-hover:rotate-12 transition-transform" /> <span><RubyText text="過去" kana="かこ"/>の<RubyText text="自分" kana="じぶん"/>と<RubyText text="対話" kana="たいわ"/>する</span>
+               </button>
+            </div>
+
+            <div className="flex-1 flex flex-col relative transition-all">
+              
+              <div className="flex-1 bg-white rounded-[2rem] shadow-premium border border-orange-100 flex flex-col overflow-hidden hover:shadow-lg transition-shadow relative">
+                <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-5 border-b border-orange-100 flex items-center gap-4">
+                  <span className="bg-gradient-to-br from-orange-400 to-orange-600 text-white p-3 rounded-2xl shadow-sm shadow-orange-500/30"><Icon path={Icons.Book} className="w-6 h-6"/></span>
+                  <div className="flex-1">
+                    <p className="text-xs text-orange-600 font-black tracking-wider mb-1"><span><RubyText text="今日" kana="きょう" />のテーマ</span></p>
+                    <h2 className="text-xl font-black text-gray-800">{data.todayTheme}</h2>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    {content.length > 0 && <span className="text-xs text-emerald-500 font-bold flex items-center gap-1"><Icon path={Icons.Save} className="w-3 h-3"/> <RubyText text="自動" kana="じどう"/><RubyText text="保存済" kana="ほぞんず"/>み</span>}
+                  </div>
+                </div>
+                
+                <textarea 
+                  ref={textareaRef}
+                  value={content} 
+                  onChange={handleContentChange}
+                  placeholder="ここをタップしてかきはじめよう..." 
+                  className="flex-1 w-full px-8 pt-[40px] pb-8 text-lg lined-paper resize-none outline-none text-gray-800 font-medium tracking-wide" 
+                />
+
+                {showHints && (
+                  <div className="absolute inset-x-0 bottom-0 bg-white/95 backdrop-blur-md border-t-2 border-yellow-200 p-6 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] rounded-t-[2rem] z-20 animate-[fadeInScale_0.3s_ease-out]">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-black text-yellow-800 text-lg flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-5 h-5"/> <RubyText text="書" kana="か"/>くことを<RubyText text="見" kana="み"/>つける<RubyText text="魔法" kana="まほう"/>のヒント</h3>
+                      <button onClick={() => setShowHints(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-600 p-2 rounded-full font-bold transition-colors"><Icon path={Icons.Close} className="w-5 h-5"/></button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {hintDictionary.map((cat, idx) => (
+                        <div key={idx} className="bg-yellow-50/50 rounded-2xl p-3 border border-yellow-100">
+                          <h4 className="font-bold text-yellow-700 text-sm mb-2">{cat.icon} {cat.title}</h4>
+                          <div className="space-y-2">
+                            {cat.items.map((item, i) => (
+                              <button key={i} onClick={() => insertTextAtCursor(item.text)} className="w-full text-left text-xs bg-white hover:bg-yellow-100 border border-yellow-200 p-2.5 rounded-xl text-gray-700 font-medium transition-colors shadow-sm hover:shadow active:scale-95 leading-snug">
+                                {item.display} <span className="text-yellow-500 float-right">＋</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-center text-xs text-gray-400 mt-4">ボタンを<RubyText text="押" kana="お"/>すと、そのままノートに<RubyText text="入" kana="はい"/>るよ！</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="w-full lg:w-[280px] flex flex-col gap-5">
+              <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5">
+                <p className="font-black text-gray-700 mb-3 text-sm flex items-center gap-2"><span className="p-1.5 bg-gray-100 rounded-lg"><Icon path={Icons.Pen} className="w-4 h-4 text-gray-600"/></span> <span>サポートツール</span></p>
+                <div className="grid grid-cols-1 gap-2 mb-4">
+                   <button onClick={() => setShowHints(true)} className="w-full py-3.5 bg-gradient-to-r from-yellow-50 to-amber-50 text-yellow-700 border border-yellow-200 rounded-xl hover:shadow-md transition-all font-black active:scale-95 flex items-center justify-center gap-2">
+                     <Icon path={Icons.Sparkles} className="w-5 h-5"/> 💡 ヒントを<RubyText text="開" kana="ひら"/>く
+                   </button>
+                </div>
+                <p className="text-xs font-bold text-gray-400 mb-2">▼ テンプレート（<RubyText text="形" kana="かたち"/>）を<RubyText text="使" kana="つか"/>う</p>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {Object.keys(templates).map(k => <button key={k} onClick={() => insertTextAtCursor(templates[k])} className="text-xs py-2.5 px-2 bg-gray-50 text-gray-600 border border-gray-200 rounded-xl hover:bg-white hover:border-gray-300 hover:shadow-sm transition-all font-bold active:scale-95">{k === 'ywt' ? <><RubyText text="YWT法" kana="ほう"/></> : k === 'kpt' ? <><RubyText text="KPT法" kana="ほう"/></> : k === '5w1h' ? '5W1H' : '3つのきづき'}</button>)}
+                </div>
+                <p className="text-xs font-bold text-gray-400 mb-2">▼ ランダムな<RubyText text="書" kana="か"/>き<RubyText text="出" kana="だ"/>し</p>
+                <div className="flex gap-2">
+                   <button onClick={() => insertTextAtCursor(starters[Math.floor(Math.random() * starters.length)])} className="flex-1 text-xs py-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors font-bold active:scale-95">🎯 <RubyText text="書" kana="か"/>き<RubyText text="出" kana="だ"/>しを追加(ついか)</button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5">
+                <p className="font-black text-gray-700 mb-3 text-sm flex items-center gap-2"><span className="p-1.5 bg-gray-100 rounded-lg text-base leading-none">😊</span> <span><RubyText text="気持" kana="きも" />ちをえらぼう</span></p>
+                <div className="grid grid-cols-2 gap-2">
+                  {emotions.map(e => <button key={e} onClick={() => setEmotion(e)} className={`py-3 px-2 text-sm rounded-xl border-2 transition-all active:scale-95 ${emotion === e ? 'border-orange-500 bg-orange-50 font-black text-orange-600 shadow-sm shadow-orange-500/20' : 'border-gray-100 hover:border-orange-200 text-gray-600 hover:bg-orange-50/50'}`}>{e}</button>)}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5">
+                <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 hover:border-gray-400 transition-colors text-gray-500 font-bold text-sm">
+                  <Icon path={Icons.Image} /> <span>{imageFile ? imageFile.name : <><RubyText text="画像" kana="がぞう" />をのせる</>}</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImage} />
+                </label>
+                {imageFile && <img src={imageFile.preview} className="mt-3 rounded-xl max-h-32 mx-auto object-cover shadow-sm"/>}
+              </div>
+
+              <button onClick={handleSubmit} className="mt-auto bg-gradient-to-b from-orange-400 to-orange-600 hover:from-orange-500 hover:to-orange-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-orange-500/40 flex justify-center items-center gap-2 text-lg active:scale-95 transition-all">
+                <Icon path={Icons.Send} /> <span><RubyText text="提出" kana="ていしゅつ" />する</span>
+              </button>
+            </div>
+          </div>
+
+          {activePastJournal && (
+             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in border border-gray-100">
+                 
+                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 flex justify-between items-center border-b border-indigo-100 shrink-0">
+                    <h3 className="font-black text-indigo-800 text-lg flex items-center gap-2"><Icon path="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" className="text-indigo-500"/> {activePastJournal.date} <RubyText text="の記録" kana="のきろく"/></h3>
+                    <button onClick={()=>setActivePastJournal(null)} className="p-2 bg-white rounded-full text-gray-500 hover:text-indigo-600 shadow-sm transition-colors"><Icon path={Icons.Close}/></button>
+                 </div>
+                 
+                 <div className="p-8 overflow-y-auto flex-1 bg-white">
+                    {activePastJournal.status === '返却済み' && (
+                      <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 p-6 rounded-3xl mb-8 shadow-sm relative">
+                        <div className="absolute -top-3 -right-3 text-4xl rotate-12">{activePastJournal.teacherStamp}</div>
+                        <h4 className="font-black text-blue-700 mb-3 flex items-center gap-2 text-lg"><span className="text-2xl">👩‍🏫</span> <RubyText text="先生" kana="せんせい"/>からのおへんじ</h4>
+                        {activePastJournal.teacherComment && <p className="text-gray-800 whitespace-pre-wrap font-bold leading-relaxed">{activePastJournal.teacherComment}</p>}
+                      </div>
+                    )}
+
+                    <div className="text-gray-700 whitespace-pre-wrap lined-paper text-lg leading-[40px] font-medium mb-6">
+                      {activePastJournal.highlights ? (() => {
+                        let content = activePastJournal.content;
+                        const hls = JSON.parse(activePastJournal.highlights);
+                        hls.forEach(h => {
+                           if(h.textToHighlight && content.includes(h.textToHighlight)) {
+                              const mark = `<mark class="bg-yellow-200/60 border-b-2 border-yellow-400 px-1 py-0.5 rounded">${h.textToHighlight}</mark>`;
+                              content = content.replace(h.textToHighlight, mark);
+                           }
+                        });
+                        return <div dangerouslySetInnerHTML={{__html: content}} />
+                      })() : activePastJournal.content}
+                    </div>
+                    {activePastJournal.imageUrl && <img src={activePastJournal.imageUrl} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>}
+                 </div>
+
+                 <div className="bg-gray-50 p-6 border-t border-gray-100 shrink-0">
+                    <p className="text-sm font-black text-indigo-600 mb-3 flex items-center gap-2"><Icon path="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" className="w-4 h-4"/> <span><RubyText text="今" kana="いま"/>の<RubyText text="自分" kana="じぶん"/>から、<RubyText text="過去" kana="かこ"/>の<RubyText text="自分" kana="じぶん"/>へメッセージ</span></p>
+                    <textarea value={pastCommentInput} onChange={e=>setPastCommentInput(e.target.value)} className="w-full p-4 bg-white border border-gray-200 rounded-2xl resize-none outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all font-medium" rows="2" placeholder="1ヶ月前の自分、がんばってたね！"></textarea>
+                    <div className="text-right mt-3"><button onClick={handleSavePastComment} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-indigo-500/30 active:scale-95 transition-all"><RubyText text="保存" kana="ほぞん"/>する</button></div>
+                 </div>
+               </div>
+             </div>
+          )}
+          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 🧠 心のバイタルサイン解析 (先生用)
+    // ==========================================
+    const analyzeVitals = (journals, roster) => {
+      const studentMap = {};
+      roster.forEach(s => { studentMap[s.email] = { name: s.name, email: s.email, journals: [], alerts: [] }; });
+      journals.forEach(j => { if(studentMap[j.email]) studentMap[j.email].journals.push(j); });
+
+      const today = new Date(); today.setHours(0,0,0,0);
+      const past14Days = Array.from({length: 14}, (_, i) => {
+         const d = new Date(today); d.setDate(d.getDate() - (13 - i)); return d.toLocaleDateString('ja-JP');
+      });
+
+      Object.values(studentMap).forEach(s => {
+         s.journals.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+         s.heatMap = past14Days.map(dateStr => {
+            const j = s.journals.find(jj => new Date(jj.timestamp).toLocaleDateString('ja-JP') === dateStr);
+            if(!j) return { date: dateStr, status: 'none', color: 'bg-gray-100', content: '未提出' };
+            let color = 'bg-gray-200';
+            if(j.emotion.includes('うれしい')) color = 'bg-rose-400 shadow-rose-400/40 shadow-sm';
+            else if(j.emotion.includes('なるほど')) color = 'bg-amber-400 shadow-amber-400/40 shadow-sm';
+            else if(j.emotion.includes('もやもや')) color = 'bg-indigo-400 shadow-indigo-400/40 shadow-sm';
+            else if(j.emotion.includes('くやしい')) color = 'bg-violet-600 shadow-violet-600/40 shadow-sm';
+            return { date: dateStr, status: 'submitted', color, content: j.content, emotion: j.emotion };
+         });
+
+         const recent = s.journals.slice(-3);
+         if (recent.length >= 2) {
+            let nV = 0; recent.forEach(j => { if(j.emotion.includes('もやもや') || j.emotion.includes('くやしい')) nV++; });
+            if (nV >= 2) s.alerts.push("ネガティブな感情が続いています");
+         }
+         if (s.journals.length >= 3) {
+            const avgLen = s.journals.slice(0, -1).reduce((acc, j) => acc + j.content.length, 0) / (s.journals.length - 1);
+            const lastLen = s.journals[s.journals.length - 1].content.length;
+            if (avgLen > 20 && lastLen < avgLen * 0.3) s.alerts.push("記述量が急激に減少しています");
+         }
+      });
+      return { students: Object.values(studentMap).sort((a,b) => b.alerts.length - a.alerts.length), dates: past14Days };
+    };
+
+    // ==========================================
+    // 👩‍🏫 教員用画面 (Teacher App)
+    // ==========================================
+    const TeacherApp = ({ data }) => {
+      const { call, isLoading, toast, setToast, showToast } = useGas();
+      const [journals, setJournals] = useState(data.journals);
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [activeJournal, setActiveJournal] = useState(null);
+      const [feedback, setFeedback] = useState("");
+      
+      const [filterStudent, setFilterStudent] = useState('all');
+      const [filterStatus, setFilterStatus] = useState('all');
+      const [searchQuery, setSearchQuery] = useState('');
+
+      const [weeklyThemes, setWeeklyThemes] = useState({ mon: '', tue: '', wed: '', thu: '', fri: '' });
+      const [todayThemeInput, setTodayThemeInput] = useState(data.todayTheme);
+      const [confirmConfig, setConfirmConfig] = useState({ isOpen: false });
+
+      // 名簿管理用ステート
+      const [rosterData, setRosterData] = useState([]);
+      const [isRosterLoading, setIsRosterLoading] = useState(false);
+
+      const vitalData = useMemo(() => analyzeVitals(journals, data.classRoster), [journals, data.classRoster]);
+
+      useEffect(() => { 
+        call('getWeeklyThemes').then(res => { if (res && res.success && res.data) setWeeklyThemes(res.data); }); 
+      }, []);
+
+      useEffect(() => {
+        if (activeTab === 'admin') {
+          setIsRosterLoading(true);
+          call('getRosterAll').then(res => {
+            if (res && res.success) setRosterData(res.data);
+            setIsRosterLoading(false);
+          });
+        }
+      }, [activeTab]);
+
+      const filteredJournals = useMemo(() => {
+        return journals.filter(j => {
+          const mStudent = filterStudent === 'all' || j.email === filterStudent;
+          const mStatus = filterStatus === 'all' || j.status === filterStatus;
+          const mSearch = !searchQuery || j.content.includes(searchQuery) || j.studentName.includes(searchQuery) || (j.theme && j.theme.includes(searchQuery));
+          return mStudent && mStatus && mSearch;
+        }).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+      }, [journals, filterStudent, filterStatus, searchQuery]);
+
+      const handleTextSelect = () => {
+         const selection = window.getSelection();
+         if (!selection.isCollapsed && selection.toString().trim() !== "" && activeJournal) {
+            const text = selection.toString();
+            const newHl = { id: 'hl-'+Date.now(), textToHighlight: text, suggestedComment: '', suggestedStamp: '' };
+            const currentHighlights = activeJournal.highlights ? JSON.parse(activeJournal.highlights) : [];
+            currentHighlights.push(newHl);
+            setActiveJournal({...activeJournal, highlights: JSON.stringify(currentHighlights)});
+            selection.removeAllRanges();
+         }
+      };
+
+      const updateHighlight = (id, field, value) => {
+         const hls = JSON.parse(activeJournal.highlights);
+         const updated = hls.map(h => h.id === id ? {...h, [field]: value} : h);
+         setActiveJournal({...activeJournal, highlights: JSON.stringify(updated)});
+      };
+      
+      const removeHighlight = (id) => {
+         const hls = JSON.parse(activeJournal.highlights);
+         const updated = hls.filter(h => h.id !== id);
+         setActiveJournal({...activeJournal, highlights: JSON.stringify(updated)});
+      };
+
+      const handleSetTheme = async () => {
+        const res = await call('setTodayTheme', todayThemeInput);
+        if(res.success) showToast("今日のテーマを設定しました");
+      };
+
+      const handleSaveWeekly = async () => {
+        const res = await call('saveWeeklyThemes', weeklyThemes);
+        if(res.success) showToast("週間スケジュールを保存しました");
+      };
+
+      const executeAiAction = async (type) => {
+        setConfirmConfig({ isOpen: false });
+        const res = await call(type === 'simple' ? 'generateAiSimpleCommentsForAll' : 'generateAiFullFeedbackForAll');
+        if (res.success) { showToast(res.message); setTimeout(()=>window.top.location.reload(), 1500); }
+      };
+
+      const handleSaveFeedback = async () => {
+        const res = await call('saveFeedback', { journalId: activeJournal.journalId, comment: feedback, highlights: activeJournal.highlights });
+        if (res.success) {
+          showToast("フィードバックを返却しました");
+          setJournals(journals.map(j => j.journalId === activeJournal.journalId ? {...j, status: '返却済み', teacherComment: feedback, highlights: activeJournal.highlights} : j));
+          setActiveJournal(null);
+        }
+      };
+
+      const handleQuickAction = async (jId, action, value) => {
+        if (action === 'stamp') {
+          const res = await call('quickReturn', jId, value);
+          if(res.success){ setJournals(journals.map(j => j.journalId === jId ? {...j, status: '返却済み', teacherStamp: value} : j)); showToast(`${value} を押しました！`); }
+        } else if (action === 'revert') {
+          const res = await call('revertJournalStatus', jId);
+          if(res.success){ setJournals(journals.map(j => j.journalId === jId ? {...j, status: '未返却'} : j)); showToast("返却を取り消しました"); }
+        }
+      };
+
+      const executeDataReset = async () => {
+        setConfirmConfig({ isOpen: false });
+        const res = await call('resetAllData');
+        if(res.success) { showToast("全データを削除しました"); setTimeout(()=>window.top.location.reload(), 1500); }
+      };
+      
+      const executeBatchReturn = async () => {
+        setConfirmConfig({ isOpen: false });
+        const res = await call('batchReturnAll');
+        if (res.success) { showToast(res.message); setTimeout(()=>window.top.location.reload(), 1500); }
+      };
+
+      const handleRosterChange = (index, field, value) => {
+        const newRoster = [...rosterData];
+        newRoster[index][field] = value;
+        setRosterData(newRoster);
+      };
+
+      // ✨ 追加: 行を追加する処理
+      const handleAddRoster = () => {
+        setRosterData([...rosterData, { role: '児童', name: '', email: '' }]);
+      };
+
+      // ✨ 追加: 行を削除する処理
+      const handleRemoveRoster = (index) => {
+        const newRoster = [...rosterData];
+        newRoster.splice(index, 1);
+        setRosterData(newRoster);
+      };
+
+      const handleSaveRoster = async () => {
+        const validRows = rosterData.filter(r => r.name.trim() && r.email.trim());
+        if (validRows.length === 0) return showToast('有効なデータがありません', 'error');
+        const res = await call('saveRosterAll', validRows);
+        if (res.success) {
+          showToast('名簿を更新しました');
+          setTimeout(() => window.top.location.reload(), 1500);
+        }
+      };
+
+      const handleExport = async (type) => {
+         const res = await call(type === 'csv' ? 'exportJournalsCsv' : 'exportJournalsPdf', { startDate: expStart, endDate: expEnd, email: expStudent });
+         if(res.success) {
+            setConfirmConfig({
+              isOpen: true, title: "出力完了", text: "ファイルがGoogle Driveに保存されました。", confirmText: "ファイルを開く",
+              onConfirm: () => { window.open(res.fileUrl, '_blank'); setConfirmConfig({isOpen: false}); }, onCancel: () => setConfirmConfig({isOpen: false})
+            });
+         }
+      };
+
+      const pct = data.classRoster.length ? Math.round((journals.filter(j => new Date(j.timestamp).toLocaleDateString('ja-JP') === new Date().toLocaleDateString('ja-JP')).length / data.classRoster.length)*100) : 0;
+
+      return (
+        <div className="h-full flex flex-col gap-6 relative">
+          {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
+          <ConfirmDialog {...confirmConfig} />
+
+          <div className="flex gap-2 bg-white/60 backdrop-blur-md p-1.5 rounded-2xl shadow-sm border border-gray-200/50 inline-flex self-start">
+             <button onClick={()=>setActiveTab('dashboard')} className={`px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${activeTab==='dashboard'?'bg-white text-blue-600 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path="M3 3v18h18 M18 17V9 M13 17V5 M8 17v-3" className="w-5 h-5"/> ジャーナル管理</button>
+             <button onClick={()=>setActiveTab('vitals')} className={`px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${activeTab==='vitals'?'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-pink-500/20':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Pulse} className="w-5 h-5"/> 心のバイタル</button>
+             {data.isAdmin && <button onClick={()=>setActiveTab('admin')} className={`px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${activeTab==='admin'?'bg-white text-gray-800 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Settings} className="w-5 h-5"/> 設定</button>}
+          </div>
+
+          {activeTab === 'dashboard' && (
+            <div className="animate-fade-in flex flex-col gap-6 h-full">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                 {/* サマリードーナツ */}
+                 <div className="col-span-1 bg-white p-7 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col relative overflow-hidden">
+                    <div className="absolute -right-10 -top-10 w-40 h-40 bg-blue-50 rounded-full blur-3xl opacity-60"></div>
+                    <h3 className="font-black text-gray-800 mb-6 flex items-center gap-2 text-lg z-10"><div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Icon path="M12 20v-6 M6 20V10 M18 20V4" className="w-5 h-5"/></div> 今日の提出率</h3>
+                    <div className="flex items-center justify-center z-10 mb-5">
+                      <div className="relative w-28 h-28">
+                        <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90 drop-shadow-sm">
+                          <circle cx="50" cy="50" r="45" fill="none" stroke="#f1f5f9" strokeWidth="10"></circle>
+                          <circle cx="50" cy="50" r="45" fill="none" stroke="#3b82f6" strokeWidth="10" strokeLinecap="round" strokeDasharray="283" strokeDashoffset={283 - (283 * pct) / 100} className="circle-chart-circle"></circle>
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center"><span className="text-2xl font-black text-gray-800">{pct}%</span></div>
+                      </div>
+                    </div>
+                 </div>
+
+                 {/* テーマ設定エリア */}
+                 <div className="col-span-1 lg:col-span-2 bg-white p-7 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col">
+                    <h3 className="font-black text-gray-800 mb-6 flex items-center gap-2 text-lg"><div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg"><Icon path="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" className="w-5 h-5"/></div> テーマ・スケジュール設定</h3>
+                    <div className="flex gap-3 mb-6">
+                       <input type="text" value={todayThemeInput} onChange={e=>setTodayThemeInput(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3 font-bold outline-none focus:border-blue-400 focus:bg-white transition-colors text-lg" placeholder="今日のテーマを入力"/>
+                       <button onClick={handleSetTheme} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all">今すぐ適用</button>
+                    </div>
+                    <div className="mt-auto bg-gray-50/50 rounded-2xl p-5 border border-gray-100">
+                      <details className="group">
+                         <summary className="cursor-pointer text-sm font-bold text-gray-600 hover:text-blue-600 list-none flex items-center justify-between select-none">
+                           <span className="flex items-center gap-2"><Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" className="w-5 h-5"/> 曜日ごとの自動テーマ（週間スケジュール）</span>
+                           <Icon path="M19 9l-7 7-7-7" className="w-5 h-5 transition-transform duration-300 group-open:rotate-180"/>
+                         </summary>
+                         <div className="mt-4 pt-4 border-t border-gray-200">
+                           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                              {['mon','tue','wed','thu','fri'].map((d,i) => (
+                                 <div key={d}><label className="text-xs font-bold text-gray-500 block mb-1.5 px-1">{['月','火','水','木','金'][i]}曜日</label>
+                                 <input type="text" value={weeklyThemes[d]} onChange={e=>setWeeklyThemes({...weeklyThemes, [d]: e.target.value})} className="w-full text-sm p-2.5 bg-white border border-gray-200 rounded-xl focus:border-blue-400 outline-none transition-colors" placeholder="テーマ"/></div>
+                              ))}
+                           </div>
+                           <div className="mt-4 flex justify-end">
+                             <button onClick={handleSaveWeekly} className="text-sm bg-gray-800 hover:bg-gray-900 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">スケジュールを保存</button>
+                           </div>
+                         </div>
+                      </details>
+                    </div>
+                 </div>
+              </div>
+
+              {/* リストとツールバー */}
+              <div className="flex-1 bg-white rounded-[2rem] shadow-premium border border-gray-100 overflow-hidden flex flex-col min-h-[500px]">
+                 <div className="p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50">
+                    <div className="flex w-full lg:w-auto items-center gap-3">
+                      <div className="relative flex-1 lg:w-64">
+                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400"><Icon path={Icons.Search} className="w-5 h-5" /></div>
+                        <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="名前や内容で検索..." className="w-full pl-11 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-colors font-medium text-sm"/>
+                      </div>
+                      <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} className="bg-white border border-gray-200 text-sm font-bold text-gray-600 outline-none rounded-xl px-3 py-2.5 cursor-pointer">
+                         <option value="all">全状況</option><option value="未返却">未返却</option><option value="返却済み">返却済</option>
+                      </select>
+                    </div>
+                    
+                    <div className="flex w-full lg:w-auto items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"AIコメント作成", text:"未返却のジャーナルに温かいコメント案を作ります。", onConfirm: ()=>executeAiAction('simple'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-purple-50 text-purple-600 hover:bg-purple-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-4 h-4"/> AIシンプル</button>
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"AI高度分析", text:"未返却のジャーナルを分析し、ハイライトとコメント案を作ります。", onConfirm: ()=>executeAiAction('full'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" className="w-4 h-4"/> AI高度分析</button>
+                       <div className="w-px h-6 bg-gray-300 mx-1"></div>
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"一括返却", text:"コメントが付いている未返却ジャーナルを全て返却済みにしますか？", onConfirm: executeBatchReturn, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-sm transition-colors flex items-center gap-2 active:scale-95"><Icon path="M5 13l4 4L19 7" className="w-4 h-4"/> 一括返却</button>
+                    </div>
+                 </div>
+
+                 <div className="overflow-y-auto flex-1 p-0">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-gray-50/80 backdrop-blur sticky top-0 z-10 shadow-sm border-b border-gray-100">
+                        <tr><th className="p-4 pl-6 font-black text-gray-400 text-xs tracking-wider uppercase">日付</th><th className="p-4 font-black text-gray-400 text-xs tracking-wider uppercase">児童名</th><th className="p-4 font-black text-gray-400 text-xs tracking-wider uppercase">状況</th><th className="p-4 pr-6 font-black text-gray-400 text-xs tracking-wider uppercase text-right">アクション</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {filteredJournals.map(j => (
+                          <tr key={j.journalId} className="hover:bg-blue-50/40 transition-colors group">
+                            <td className="p-4 pl-6 text-sm font-bold text-gray-500 whitespace-nowrap">{j.date}</td>
+                            <td className="p-4 font-black text-gray-800">{j.studentName}</td>
+                            <td className="p-4">
+                              <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold tracking-wide ${j.status === '返却済み' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700 ring-1 ring-orange-400/30'}`}>
+                                {j.status === '未返却' && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5 animate-pulse"></span>}{j.status}
+                              </span>
+                            </td>
+                            <td className="p-4 pr-6 flex gap-2 justify-end items-center">
+                              {j.status === '未返却' ? (
+                                <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 mr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {['😊','👏','💪','⭐'].map(s => <button key={s} onClick={()=>handleQuickAction(j.journalId, 'stamp', s)} className="hover:scale-125 hover:bg-white hover:shadow-sm rounded transition-all px-2 py-0.5 text-lg" title={`${s}で即返却`}>{s}</button>)}
+                                </div>
+                              ) : <button onClick={()=>handleQuickAction(j.journalId, 'revert')} className="text-xs text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-xl font-bold mr-2 transition-colors opacity-0 group-hover:opacity-100">取消</button>}
+                              <button onClick={() => {setActiveJournal({...j}); setFeedback(j.teacherComment || "");}} className="bg-white border-2 border-gray-100 hover:border-blue-400 hover:text-blue-600 text-gray-700 px-5 py-2 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-all">詳細を開く</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'vitals' && (
+             <div className="flex flex-col gap-6 animate-fade-in h-full">
+                <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-6">
+                   <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2 text-lg"><div className="p-1.5 bg-rose-100 text-rose-600 rounded-lg"><Icon path="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" className="w-5 h-5"/></div> 気にかけたい児童 (AI解析)</h3>
+                   <div className="flex flex-wrap gap-4">
+                     {vitalData.students.filter(s => s.alerts.length > 0).length === 0 ? (
+                        <p className="text-gray-400 font-bold text-sm p-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200 w-full text-center">現在、特筆すべきアラートはありません。クラスの心は安定しています✨</p>
+                     ) : (
+                        vitalData.students.filter(s => s.alerts.length > 0).map(s => (
+                           <div key={s.email} className="flex-1 min-w-[250px] bg-rose-50/50 border border-rose-100 p-4 rounded-2xl">
+                             <div className="flex justify-between items-center mb-2"><span className="font-black text-gray-800 text-lg">{s.name}</span><span className="text-xs font-bold text-rose-600 bg-rose-100 px-2 py-1 rounded-lg">{s.alerts.length}つの予兆</span></div>
+                             <ul className="text-sm text-gray-600 space-y-1">{s.alerts.map((a,i) => <li key={i} className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>{a}</li>)}</ul>
+                           </div>
+                        ))
+                     )}
+                   </div>
+                </div>
+
+                <div className="flex-1 bg-white rounded-[2rem] shadow-premium border border-gray-100 p-6 flex flex-col overflow-hidden">
+                   <div className="flex justify-between items-center mb-6">
+                     <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg"><div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"><Icon path="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" className="w-5 h-5"/></div> クラスの心の波 (過去14日間)</h3>
+                     <div className="flex gap-4 text-xs font-bold text-gray-500 bg-gray-50 px-4 py-2 rounded-xl">
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-rose-400"></span>うれしい</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-amber-400"></span>なるほど</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-indigo-400"></span>もやもや</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-violet-600"></span>くやしい</div>
+                     </div>
+                   </div>
+
+                   <div className="overflow-x-auto pb-4 custom-scrollbar">
+                     <div className="min-w-[800px]">
+                       <div className="flex mb-3 pl-32">
+                         {vitalData.dates.map((d, i) => <div key={i} className="flex-1 text-center text-[10px] font-bold text-gray-400 transform -rotate-45 origin-bottom-left whitespace-nowrap">{d.split('/')[1] + '/' + d.split('/')[2]}</div>)}
+                       </div>
+                       <div className="space-y-3">
+                         {vitalData.students.map(s => (
+                            <div key={s.email} className="flex items-center group/row">
+                              <div className="w-32 pr-4 text-sm font-bold text-gray-700 truncate text-right group-hover/row:text-indigo-600 transition-colors">{s.name}</div>
+                              <div className="flex flex-1 gap-2">
+                                 {s.heatMap.map((h, i) => (
+                                    <div key={i} className="flex-1 relative group flex justify-center">
+                                       <div className={`w-6 h-6 rounded-full transition-all duration-300 ${h.status === 'none' ? 'bg-gray-100 hover:bg-gray-200' : h.color + ' hover:scale-125 cursor-pointer'}`}></div>
+                                       {h.status !== 'none' && (
+                                          <div className="tooltip-content absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 bg-gray-900/95 backdrop-blur text-white text-xs p-3 rounded-2xl shadow-xl z-50 pointer-events-none border border-gray-700">
+                                            <div className="font-bold text-gray-300 mb-1 flex justify-between"><span>{h.date}</span><span>{h.emotion}</span></div>
+                                            <p className="line-clamp-3 leading-relaxed">{h.content}</p>
+                                            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900/95"></div>
+                                          </div>
+                                       )}
+                                    </div>
+                                 ))}
+                              </div>
+                            </div>
+                         ))}
+                       </div>
+                     </div>
+                   </div>
+                </div>
+             </div>
+          )}
+
+          {activeTab === 'admin' && (
+             <div className="flex flex-col gap-6 animate-fade-in h-full">
+               
+               {/* 👥 名簿管理エディタ */}
+               <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg">
+                      <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Icon path={Icons.User} className="w-5 h-5"/></div> 児童名簿の管理
+                    </h3>
+                    <button onClick={handleSaveRoster} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">保存して更新</button>
+                  </div>
+                  
+                  {isRosterLoading ? (
+                     <div className="flex-1 flex justify-center items-center py-10"><div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div></div>
+                  ) : (
+                    <div className="overflow-y-auto max-h-[400px] bg-gray-50/50 rounded-2xl border border-gray-200 p-2 custom-scrollbar">
+                      <table className="w-full text-left">
+                        <thead className="text-xs text-gray-500 font-bold bg-gray-100/80 rounded-xl sticky top-0 z-10">
+                          <tr>
+                             <th className="p-3 pl-4 rounded-l-xl w-24">役割</th>
+                             <th className="p-3">氏名</th>
+                             <th className="p-3">メールアドレス <span className="text-[10px] font-normal">(Googleアカウント)</span></th>
+                             <th className="p-3 pr-4 rounded-r-xl text-right">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {rosterData.map((r, i) => (
+                             <tr key={i} className="hover:bg-white transition-colors group">
+                               <td className="p-2 pl-4">
+                                 <select value={r.role} onChange={(e)=>handleRosterChange(i, 'role', e.target.value)} className="w-full bg-transparent border-none outline-none font-bold text-gray-700 cursor-pointer">
+                                   <option value="児童">児童</option>
+                                   <option value="担任">担任</option>
+                                 </select>
+                               </td>
+                               <td className="p-2">
+                                 <input type="text" value={r.name} onChange={(e)=>handleRosterChange(i, 'name', e.target.value)} placeholder="例: 山田 太郎" className="w-full bg-transparent border-none outline-none font-bold text-gray-800 focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all"/>
+                               </td>
+                               <td className="p-2">
+                                 <input type="text" value={r.email} onChange={(e)=>handleRosterChange(i, 'email', e.target.value)} placeholder="例: yamada@school.ed.jp" className="w-full bg-transparent border-none outline-none text-gray-600 text-sm focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all font-mono"/>
+                               </td>
+                               <td className="p-2 pr-4 text-right">
+                                 <button onClick={()=>handleRemoveRoster(i)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"><Icon path={Icons.Trash} className="w-4 h-4"/></button>
+                               </td>
+                             </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="p-2 mt-2">
+                        <button onClick={handleAddRoster} className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-500 font-bold rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.99]">
+                          <Icon path={Icons.Plus} className="w-5 h-5"/> あたらしい行を追加する
+                        </button>
+                      </div>
+                    </div>
+                  )}
+               </div>
+               
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 {/* エクスポート */}
+                 <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4 text-gray-600"><Icon path={Icons.Download} className="w-8 h-8"/></div>
+                    <h3 className="font-black text-gray-800 mb-2">データの一括出力</h3>
+                    <p className="text-sm text-gray-500 mb-6">CSVやPDF形式で、ジャーナルの記録をGoogle Driveに保存します。</p>
+                    <div className="flex gap-2 w-full">
+                       <button onClick={()=>handleExport('csv')} className="flex-1 bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-xl transition-all active:scale-95">CSV</button>
+                       <button onClick={()=>handleExport('pdf')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl transition-all active:scale-95">PDF</button>
+                    </div>
+                 </div>
+                 
+                 {/* データ削除 */}
+                 <div className="bg-red-50 p-8 rounded-[2rem] shadow-premium border border-red-100 flex flex-col justify-center items-center text-center">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"><Icon path={Icons.Trash} className="w-8 h-8"/></div>
+                    <h3 className="font-black text-red-800 mb-2">危険な操作</h3>
+                    <p className="text-sm text-red-600 mb-6">すべてのジャーナルデータを完全に削除します。年度替わりなどに使用してください。</p>
+                    <button onClick={()=>setConfirmConfig({isOpen:true, isDanger:true, title:"データ全削除", text:"本当にすべてのジャーナルデータを削除しますか？\nこの操作は元に戻せません。", confirmText:"削除する", onConfirm: executeDataReset, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all">全データを削除</button>
+                 </div>
+               </div>
+             </div>
+          )}
+
+          {activeJournal && (
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 md:p-8 transition-opacity">
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-full max-h-[85vh] flex flex-col md:flex-row overflow-hidden animate-fade-in border border-gray-100">
+                <div className="flex-1 bg-gradient-to-br from-orange-50/50 to-amber-50/50 p-6 md:p-8 border-r overflow-y-auto relative" onMouseUp={handleTextSelect}>
+                  <div className="flex justify-between items-start mb-6">
+                    <div><p className="text-sm font-bold text-gray-400 mb-1">{activeJournal.date}</p><h2 className="text-3xl font-black text-gray-800">{activeJournal.studentName} <span className="text-xl font-medium text-gray-400">さん</span></h2></div>
+                    <span className="text-3xl bg-white px-4 py-2 rounded-2xl shadow-sm border border-orange-100">{activeJournal.emotion || '📝'}</span>
+                  </div>
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-orange-100 min-h-[250px] whitespace-pre-wrap text-lg lined-paper text-gray-800 leading-[40px] font-medium select-text relative">
+                     {activeJournal.highlights ? (() => {
+                        let content = activeJournal.content;
+                        const hls = JSON.parse(activeJournal.highlights);
+                        hls.forEach(h => {
+                           if(h.textToHighlight && content.includes(h.textToHighlight)) {
+                              const mark = `<mark class="highlight-marker group relative" data-id="${h.id}">${h.textToHighlight}<span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg whitespace-nowrap z-10 font-bold shadow-lg">${h.suggestedStamp||''} ${h.suggestedComment||'編集可'}</span></mark>`;
+                              content = content.replace(h.textToHighlight, mark);
+                           }
+                        });
+                        return <div dangerouslySetInnerHTML={{__html: content}} />
+                     })() : activeJournal.content}
+                  </div>
+                </div>
+                <div className="w-full md:w-[420px] p-6 md:p-8 bg-white flex flex-col relative overflow-y-auto">
+                  <button onClick={() => setActiveJournal(null)} className="absolute top-6 right-6 p-2 text-gray-400 hover:text-gray-600 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"><Icon path={Icons.Close} /></button>
+                  <h3 className="text-lg font-black text-blue-600 mb-4 flex items-center gap-2"><div className="p-1.5 bg-blue-50 rounded-lg"><Icon path="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" className="w-5 h-5"/></div> 全体コメント</h3>
+                  <textarea value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="温かいコメントを入力..." className="w-full border-2 border-gray-100 rounded-2xl p-4 text-gray-700 outline-none focus:border-blue-400 focus:bg-blue-50/30 transition-colors resize-none mb-6 min-h-[160px] font-medium" />
+                  
+                  <h3 className="text-sm font-black text-gray-700 mb-3 flex items-center gap-2"><Icon path="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" className="w-4 h-4 text-yellow-500" /> 抽出したハイライト</h3>
+                  <div className="flex-1 overflow-y-auto space-y-3 mb-6 pr-1 custom-scrollbar">
+                     {(activeJournal.highlights ? JSON.parse(activeJournal.highlights) : []).map(h => (
+                        <div key={h.id} className="bg-yellow-50/50 border border-yellow-200 p-4 rounded-2xl relative group hover:bg-yellow-50 transition-colors">
+                           <button onClick={()=>removeHighlight(h.id)} className="absolute top-3 right-3 text-yellow-400 hover:text-red-500 bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"><Icon path={Icons.Close} className="w-3 h-3"/></button>
+                           <p className="text-sm font-bold text-gray-800 mb-3 border-l-4 border-yellow-400 pl-3 leading-relaxed">"{h.textToHighlight}"</p>
+                           <input type="text" placeholder="コメント (任意)" value={h.suggestedComment||''} onChange={e=>updateHighlight(h.id, 'suggestedComment', e.target.value)} className="w-full text-xs p-2.5 rounded-xl border border-yellow-200 outline-none focus:border-yellow-400 mb-3 font-medium bg-white" />
+                           <div className="flex gap-1.5 overflow-x-auto pb-1">
+                              {['😄','👏','🤔','😭','👍','✨','💪','🌱'].map(s=>(<button key={s} onClick={()=>updateHighlight(h.id, 'suggestedStamp', s)} className={`shrink-0 text-base p-1.5 rounded-lg hover:bg-yellow-100 transition-colors ${h.suggestedStamp===s?'bg-yellow-200 border-yellow-400 shadow-sm transform scale-110':''}`}>{s}</button>))}
+                           </div>
+                        </div>
+                     ))}
+                     {(!activeJournal.highlights || JSON.parse(activeJournal.highlights).length === 0) && <div className="text-xs font-bold text-gray-400 text-center py-6 bg-gray-50 rounded-2xl border border-gray-100 border-dashed">ハイライトはありません</div>}
+                  </div>
+
+                  <button onClick={handleSaveFeedback} className="mt-auto bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-blue-500/30 text-lg active:scale-95 transition-all w-full flex justify-center items-center gap-2"><Icon path={Icons.Send} /> 保存して返却する</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        </div>
+      );
+    };
+
+    const App = () => {
+      const data = window.APP_DATA;
+      if (!data) return <div className="h-screen flex items-center justify-center bg-gray-50"><div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div></div>;
+      const isTeacher = data.user && data.user.role === '担任';
+      const isGuest = !data.user || data.user.role === '未登録';
+
+      return (
+        <div className="h-screen w-full flex flex-col bg-gray-50 text-gray-800 font-sans selection:bg-orange-200">
+          <header className={`flex-none bg-white/80 backdrop-blur-md z-30 p-4 px-6 flex justify-between items-center border-b ${isTeacher ? 'border-blue-500' : 'border-orange-500'} shadow-[0_2px_10px_rgba(0,0,0,0.02)]`}>
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-2xl text-white shadow-sm ${isTeacher ? 'bg-gradient-to-br from-blue-500 to-blue-600' : 'bg-gradient-to-br from-orange-400 to-orange-500'}`}><Icon path={Icons.Book} className="w-6 h-6"/></div>
+              <h1 className={`text-2xl font-black tracking-tight ${isTeacher ? 'text-blue-600' : 'text-orange-600'}`}>{isTeacher ? "教員ダッシュボード" : "ふりかえりジャーナル"}</h1>
+            </div>
+            <div className="flex items-center gap-2 bg-gray-100/80 px-4 py-2 rounded-2xl font-bold text-sm text-gray-600"><Icon path={Icons.User} className="w-4 h-4 text-gray-400" /> {data.user ? data.user.name : "ゲスト"} {isTeacher ? "先生" : "さん"}</div>
+          </header>
+          <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">{isGuest ? <div className="flex flex-col items-center justify-center h-full"><h2 className="text-2xl font-black text-gray-700">アクセス権がありません</h2></div> : isTeacher ? <TeacherApp data={data} /> : <StudentApp data={data} />}</div></main>
+          
+          <footer className="flex-none w-full text-center text-gray-400 py-3 bg-white border-t border-gray-100 text-sm">
+            <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+          </footer>
+        </div>
+      );
+    };
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
-
 </html>
