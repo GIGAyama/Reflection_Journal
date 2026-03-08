@@ -1,6 +1,6 @@
 /**
  * ============================================================
- * ふりかえりジャーナル — サーバーサイド スクリプト (エラー対策版)
+ * ふりかえりジャーナル — サーバーサイド スクリプト (自動リカバリ対応版)
  * ============================================================
  */
 
@@ -68,15 +68,53 @@ function doGet(e) {
     .setFaviconUrl('https://drive.google.com/uc?id=1rJjk2hoVW64rVz0kb-fdARn7g02Q5rjI&.png');
 }
 
+// 🌟 自動リカバリ対応: スプレッドシート取得
 function getSpreadsheet_() {
-  const ssId = PropertiesService.getScriptProperties().getProperty(PROP_SPREADSHEET_ID);
-  if (!ssId) throw new Error('データベースが初期化されていません。');
-  return SpreadsheetApp.openById(ssId);
+  const props = PropertiesService.getScriptProperties();
+  const ssId = props.getProperty(PROP_SPREADSHEET_ID);
+  
+  if (ssId) {
+    try {
+      return SpreadsheetApp.openById(ssId);
+    } catch (e) {
+      // 削除されている・アクセス権がない場合はリカバリ処理へ進む
+      console.warn('Spreadsheet not found. Recovering...');
+    }
+  }
+  
+  // スプレッドシート再作成（リカバリ）
+  initializeApp_(props);
+  return SpreadsheetApp.openById(props.getProperty(PROP_SPREADSHEET_ID));
 }
 
+// 🌟 自動リカバリ対応: 画像フォルダ取得
+function getImageFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const folderId = props.getProperty(PROP_IMAGE_FOLDER_ID);
+  
+  if (folderId) {
+    try {
+      return DriveApp.getFolderById(folderId);
+    } catch (e) {
+      // フォルダが削除されている場合はリカバリ処理へ進む
+      console.warn('Image folder not found. Recovering...');
+    }
+  }
+  
+  // フォルダ再作成（リカバリ）
+  const folder = DriveApp.createFolder('ふりかえりジャーナル_画像');
+  props.setProperty(PROP_IMAGE_FOLDER_ID, folder.getId());
+  return folder;
+}
+
+// 🌟 自動リカバリ対応: 管理者権限の保護を追加
 function initializeApp_(props) {
-  const adminEmail = Session.getActiveUser().getEmail();
-  props.setProperty(PROP_ADMIN_EMAIL, adminEmail);
+  // すでに管理者が設定されていれば維持し、リカバリ時に管理者がすり替わるのを防ぐ
+  let adminEmail = props.getProperty(PROP_ADMIN_EMAIL);
+  if (!adminEmail) {
+    adminEmail = Session.getActiveUser().getEmail();
+    props.setProperty(PROP_ADMIN_EMAIL, adminEmail);
+  }
 
   const ss = SpreadsheetApp.create('ふりかえりジャーナル_DB');
   props.setProperty(PROP_SPREADSHEET_ID, ss.getId());
@@ -91,8 +129,15 @@ function initializeApp_(props) {
   const rosterSheet = ss.getSheetByName(ROSTER_SHEET_NAME);
   rosterSheet.appendRow(['担任', '管理者', adminEmail]);
 
-  const folder = DriveApp.createFolder('ふりかえりジャーナル_画像');
-  props.setProperty(PROP_IMAGE_FOLDER_ID, folder.getId());
+  // フォルダの初期化・リカバリ
+  try {
+    const folderId = props.getProperty(PROP_IMAGE_FOLDER_ID);
+    if (folderId) DriveApp.getFolderById(folderId);
+    else throw new Error("No folder");
+  } catch(e) {
+    const folder = DriveApp.createFolder('ふりかえりジャーナル_画像');
+    props.setProperty(PROP_IMAGE_FOLDER_ID, folder.getId());
+  }
 
   props.setProperty(PROP_INITIALIZED, 'true');
 }
@@ -271,11 +316,10 @@ function deleteJournal(journalId) {
   } finally { lock.releaseLock(); }
 }
 
+// 🌟 自動リカバリ対応
 function uploadImage(fileData) {
   try {
-    const folderId = PropertiesService.getScriptProperties().getProperty(PROP_IMAGE_FOLDER_ID);
-    if (!folderId) return { success: false, message: 'フォルダがありません。' };
-    const folder = DriveApp.getFolderById(folderId);
+    const folder = getImageFolder_(); // リカバリ対応の取得関数を使用
     const decoded = Utilities.base64Decode(fileData.data, Utilities.Charset.UTF_8);
     const blob = Utilities.newBlob(decoded, fileData.mimeType, fileData.fileName);
     const file = folder.createFile(blob);
@@ -634,9 +678,10 @@ function getFilteredJournals_(params) {
   }).sort(function(a, b) { return (a.studentName||'').localeCompare(b.studentName||'') || (a.timestamp||0) - (b.timestamp||0); });
 }
 
+// 🌟 自動リカバリ対応: エクスポートフォルダ
 function getExportFolder_() {
-  const pFolderId = PropertiesService.getScriptProperties().getProperty(PROP_IMAGE_FOLDER_ID);
-  const parent = pFolderId ? DriveApp.getFolderById(pFolderId).getParents().next() : DriveApp.getRootFolder();
+  const pFolder = getImageFolder_(); // リカバリ対応の取得関数を使用
+  const parent = pFolder.getParents().hasNext() ? pFolder.getParents().next() : DriveApp.getRootFolder();
   const folders = parent.getFoldersByName('エクスポート');
   return folders.hasNext() ? folders.next() : parent.createFolder('エクスポート');
 }
