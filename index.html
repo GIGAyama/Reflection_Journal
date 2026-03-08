@@ -620,12 +620,14 @@
       };
 
       const handleExport = async (type) => {
-         const res = await call(type === 'csv' ? 'exportJournalsCsv' : 'exportJournalsPdf', { startDate: expStart, endDate: expEnd, email: expStudent });
+         const res = await call(type === 'csv' ? 'exportJournalsCsv' : 'exportJournalsPdf', { startDate: null, endDate: null, email: 'all' });
          if(res.success) {
             setConfirmConfig({
               isOpen: true, title: "出力完了", text: "ファイルがGoogle Driveに保存されました。", confirmText: "ファイルを開く",
               onConfirm: () => { window.open(res.fileUrl, '_blank'); setConfirmConfig({isOpen: false}); }, onCancel: () => setConfirmConfig({isOpen: false})
             });
+         } else {
+            showToast(res.message, "error");
          }
       };
 
@@ -805,9 +807,9 @@
 
           {activeTab === 'admin' && (
              <div className="flex flex-col gap-6 animate-fade-in h-full">
-               
-               {/* 👥 名簿管理エディタ */}
-               <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col">
+                
+                {/* 👥 名簿管理エディタ */}
+                <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col">
                   <div className="flex justify-between items-center mb-6">
                     <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg">
                       <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Icon path={Icons.User} className="w-5 h-5"/></div> 児童名簿の管理
