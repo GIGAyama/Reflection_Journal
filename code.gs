@@ -12,10 +12,10 @@ const GEMINI_MODEL = 'gemini-2.5-flash';
 const API_ENDPOINT_V1      = 'https://generativelanguage.googleapis.com/v1/models/' + GEMINI_MODEL + ':generateContent?key=';
 const API_ENDPOINT_V1_BETA = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=';
 
-const PROP_SPREADSHEET_ID  = 'SPREADSHEET_ID';
+// DB スプレッドシート ID の解決は Tenant.gs（resolveSpreadsheetId_ / getSs_）に一本化。
+// 以下は個人ごとの設定キー（tGetProp_/tSetProp_ 経由で UserProperties に保存される）
 const PROP_IMAGE_FOLDER_ID = 'IMAGE_FOLDER_ID';
 const PROP_ADMIN_EMAIL     = 'ADMIN_EMAIL';
-const PROP_INITIALIZED     = 'APP_INITIALIZED';
 
 const JOURNAL_HEADERS = [
   'journalId', 'timestamp', 'email', 'theme', 'content',
@@ -26,72 +26,83 @@ const ROSTER_HEADERS = ['役割', '氏名', 'メールアドレス'];
 const THEME_HEADERS = ['日付', 'テーマ'];
 
 function doGet(e) {
-  const props = PropertiesService.getScriptProperties();
-  if (!props.getProperty(PROP_INITIALIZED)) {
-    initializeApp_(props);
-  }
+  // 旧バインド環境からの移行ブリッジ: バインド先があれば個別紐付けへ引き継ぐ
+  try {
+    const bound = SpreadsheetApp.getActiveSpreadsheet();
+    if (bound) {
+      PropertiesService.getScriptProperties().setProperty(SP_KEY_LEGACY_SPREADSHEET_ID, bound.getId());
+      try { if (!getUserSpreadsheetId_()) setUserSpreadsheetId_(bound.getId()); } catch (e2) {}
+    }
+  } catch (err) {}
 
-  const userEmail = Session.getActiveUser().getEmail();
-  const adminEmail = props.getProperty(PROP_ADMIN_EMAIL);
-  const isAdmin = (userEmail === adminEmail);
-  const userData = getUserData_(userEmail, isAdmin);
+  let userEmail = '';
+  try { userEmail = Session.getActiveUser().getEmail() || ''; } catch (err) {}
 
-  const tmpl = HtmlService.createTemplateFromFile('index');
-  
-  let journals = [];
-  let classRoster = [];
-  
-  if (userData) {
-      if (userData.role === '担任') {
-          classRoster = getClassRoster();
-          journals = getJournalsForTeacher();
-      } else {
-          journals = getJournalsForStudent(userEmail);
-      }
-  }
+  const tenant = getTenantStatus();
 
-  const dataObj = {
-    user: userData,
-    isAdmin: isAdmin,
-    todayTheme: getTodayTheme(),
-    journals: journals,
-    classRoster: classRoster
+  // DB 未接続時はオンボーディング用の最小データのみ渡す
+  let dataObj = {
+    user: null,
+    isAdmin: false,
+    todayTheme: '',
+    journals: [],
+    classRoster: [],
+    tenant: tenant.success ? tenant : { success: true, linked: false, email: userEmail, canCreate: true, templateConfigured: false }
   };
 
+  if (tenant.success && tenant.linked) {
+    try {
+      const adminEmail = tGetProp_(PROP_ADMIN_EMAIL);
+      let isAdmin = !!adminEmail && userEmail === adminEmail;
+      const userData = getUserData_(userEmail, isAdmin);
+      // 名簿で担任になっているユーザーは自分のテナントの管理者として扱う
+      if (!isAdmin && userData && userData.role === '担任') {
+        isAdmin = true;
+        try { if (!adminEmail && userEmail) tSetProp_(PROP_ADMIN_EMAIL, userEmail); } catch (e3) {}
+      }
+
+      let journals = [];
+      let classRoster = [];
+      if (userData) {
+        if (userData.role === '担任') {
+          classRoster = getClassRoster();
+          journals = getJournalsForTeacher();
+        } else {
+          journals = getJournalsForStudent(userEmail);
+        }
+      }
+
+      dataObj = {
+        user: userData,
+        isAdmin: isAdmin,
+        todayTheme: getTodayTheme(),
+        journals: journals,
+        classRoster: classRoster,
+        tenant: tenant
+      };
+    } catch (err) {
+      // DB は紐付いているが読めない → オンボーディングに戻して再設定を促す
+      dataObj.tenant = { success: true, linked: false, email: userEmail, canCreate: true, templateConfigured: tenant.templateConfigured, error: err.message };
+    }
+  }
+
+  const tmpl = HtmlService.createTemplateFromFile('index');
   // エラー対策: JSON化してHTML崩れを防ぐ
   tmpl.initialData = JSON.stringify(dataObj).replace(/</g, '\\u003c');
 
   return tmpl.evaluate()
     .setTitle('ふりかえりジャーナル')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
+    // GitHub Pages シェルが iframe 埋め込みするため必須。
+    // GAS は特定オリジン限定ができないので ALLOWALL 一択（リスクは README に明記）
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .setFaviconUrl('https://drive.google.com/uc?id=1rJjk2hoVW64rVz0kb-fdARn7g02Q5rjI&.png');
 }
 
-// 🌟 自動リカバリ対応: スプレッドシート取得
-function getSpreadsheet_() {
-  const props = PropertiesService.getScriptProperties();
-  const ssId = props.getProperty(PROP_SPREADSHEET_ID);
-  
-  if (ssId) {
-    try {
-      return SpreadsheetApp.openById(ssId);
-    } catch (e) {
-      // 削除されている・アクセス権がない場合はリカバリ処理へ進む
-      console.warn('Spreadsheet not found. Recovering...');
-    }
-  }
-  
-  // スプレッドシート再作成（リカバリ）
-  initializeApp_(props);
-  return SpreadsheetApp.openById(props.getProperty(PROP_SPREADSHEET_ID));
-}
-
-// 🌟 自動リカバリ対応: 画像フォルダ取得
+// 🌟 画像フォルダ取得（ユーザーごとに UserProperties で管理・自動リカバリ対応）
 function getImageFolder_() {
-  const props = PropertiesService.getScriptProperties();
-  const folderId = props.getProperty(PROP_IMAGE_FOLDER_ID);
-  
+  const folderId = tGetProp_(PROP_IMAGE_FOLDER_ID);
+
   if (folderId) {
     try {
       return DriveApp.getFolderById(folderId);
@@ -100,46 +111,11 @@ function getImageFolder_() {
       console.warn('Image folder not found. Recovering...');
     }
   }
-  
-  // フォルダ再作成（リカバリ）
+
+  // フォルダ再作成（リカバリ）: 実行ユーザー本人の Drive に作られる
   const folder = DriveApp.createFolder('ふりかえりジャーナル_画像');
-  props.setProperty(PROP_IMAGE_FOLDER_ID, folder.getId());
+  tSetProp_(PROP_IMAGE_FOLDER_ID, folder.getId());
   return folder;
-}
-
-// 🌟 自動リカバリ対応: 管理者権限の保護を追加
-function initializeApp_(props) {
-  // すでに管理者が設定されていれば維持し、リカバリ時に管理者がすり替わるのを防ぐ
-  let adminEmail = props.getProperty(PROP_ADMIN_EMAIL);
-  if (!adminEmail) {
-    adminEmail = Session.getActiveUser().getEmail();
-    props.setProperty(PROP_ADMIN_EMAIL, adminEmail);
-  }
-
-  const ss = SpreadsheetApp.create('ふりかえりジャーナル_DB');
-  props.setProperty(PROP_SPREADSHEET_ID, ss.getId());
-
-  createSheetIfNotExists_(ss, ROSTER_SHEET_NAME, ROSTER_HEADERS);
-  createSheetIfNotExists_(ss, JOURNAL_SHEET_NAME, JOURNAL_HEADERS);
-  createSheetIfNotExists_(ss, THEME_SHEET_NAME, THEME_HEADERS);
-
-  const defaultSheet = ss.getSheetByName('シート1');
-  if (defaultSheet && ss.getSheets().length > 1) ss.deleteSheet(defaultSheet);
-
-  const rosterSheet = ss.getSheetByName(ROSTER_SHEET_NAME);
-  rosterSheet.appendRow(['担任', '管理者', adminEmail]);
-
-  // フォルダの初期化・リカバリ
-  try {
-    const folderId = props.getProperty(PROP_IMAGE_FOLDER_ID);
-    if (folderId) DriveApp.getFolderById(folderId);
-    else throw new Error("No folder");
-  } catch(e) {
-    const folder = DriveApp.createFolder('ふりかえりジャーナル_画像');
-    props.setProperty(PROP_IMAGE_FOLDER_ID, folder.getId());
-  }
-
-  props.setProperty(PROP_INITIALIZED, 'true');
 }
 
 function createSheetIfNotExists_(ss, sheetName, headers) {
@@ -155,7 +131,7 @@ function createSheetIfNotExists_(ss, sheetName, headers) {
 }
 
 function getUserData_(email, isAdmin) {
-  const ss = getSpreadsheet_();
+  const ss = getSs_();
   const sheet = ss.getSheetByName(ROSTER_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return isAdmin ? { role: '担任', name: '管理者', email: email } : null;
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
@@ -166,12 +142,12 @@ function getUserData_(email, isAdmin) {
 }
 
 function getUserData(email) {
-  const adminEmail = PropertiesService.getScriptProperties().getProperty(PROP_ADMIN_EMAIL);
-  return getUserData_(email, email === adminEmail);
+  const adminEmail = tGetProp_(PROP_ADMIN_EMAIL);
+  return getUserData_(email, !!adminEmail && email === adminEmail);
 }
 
 function getClassRoster() {
-  const ss = getSpreadsheet_();
+  const ss = getSs_();
   const sheet = ss.getSheetByName(ROSTER_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
@@ -182,7 +158,7 @@ function saveJournal(journalData) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const newRow = [
       Utilities.getUuid(), new Date(), journalData.email, journalData.theme, journalData.content,
@@ -198,7 +174,7 @@ function saveJournal(journalData) {
 }
 
 function getJournalsForStudent(email) {
-  const ss = getSpreadsheet_();
+  const ss = getSs_();
   const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const data = sheet.getDataRange().getValues();
@@ -209,7 +185,7 @@ function getJournalsForStudent(email) {
 }
 
 function getJournalsForTeacher() {
-  const ss = getSpreadsheet_();
+  const ss = getSs_();
   const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const data = sheet.getDataRange().getValues();
@@ -239,7 +215,7 @@ function saveFeedback(feedbackData) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
@@ -266,7 +242,7 @@ function revertJournalStatus(journalId) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
@@ -284,7 +260,7 @@ function addPastComment(journalId, comment) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
@@ -302,7 +278,7 @@ function deleteJournal(journalId) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
@@ -331,7 +307,7 @@ function uploadImage(fileData) {
 }
 
 function getTodayTheme() {
-  const ss = getSpreadsheet_();
+  const ss = getSs_();
   const sheet = ss.getSheetByName(THEME_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return getWeeklyThemeForToday_() || '今日の学びをふり返ろう';
   
@@ -349,27 +325,28 @@ function setTodayTheme(theme) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    getSpreadsheet_().getSheetByName(THEME_SHEET_NAME).appendRow([new Date(), theme]);
+    getSs_().getSheetByName(THEME_SHEET_NAME).appendRow([new Date(), theme]);
     return { success: true, message: 'テーマを設定しました！' };
   } finally { lock.releaseLock(); }
 }
 
 function getWeeklyThemes() {
   try {
-    const json = PropertiesService.getScriptProperties().getProperty('WEEKLY_THEMES');
+    const json = tGetProp_('WEEKLY_THEMES');
     return { success: true, data: json ? JSON.parse(json) : { mon: '', tue: '', wed: '', thu: '', fri: '' } };
   } catch (e) { return { success: false, message: 'Error: ' + e.message }; }
 }
 
 function saveWeeklyThemes(themes) {
   try {
-    PropertiesService.getScriptProperties().setProperty('WEEKLY_THEMES', JSON.stringify(themes));
+    // 個人ごとの設定なので UserProperties に保存（全ユーザー共有を防ぐ）
+    tSetProp_('WEEKLY_THEMES', JSON.stringify(themes));
     return { success: true, message: '保存しました！' };
   } catch (e) { return { success: false, message: 'Error: ' + e.message }; }
 }
 
 function getWeeklyThemeForToday_() {
-  const json = PropertiesService.getScriptProperties().getProperty('WEEKLY_THEMES');
+  const json = tGetProp_('WEEKLY_THEMES');
   if (!json) return null;
   const themes = JSON.parse(json);
   const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -380,7 +357,7 @@ function quickReturn(journalId, stamp) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
@@ -399,7 +376,7 @@ function batchReturnAll() {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000);
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
@@ -416,7 +393,7 @@ function batchReturnAll() {
 
 function generateAiSimpleCommentsForAll() {
   try {
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data.shift();
@@ -437,7 +414,7 @@ function generateAiSimpleCommentsForAll() {
 
 function generateAiFullFeedbackForAll() {
   try {
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data.shift();
@@ -477,7 +454,7 @@ function generateAiFullFeedbackForAll() {
 }
 
 function callGeminiApiForSimpleComment_(journalContent) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  const apiKey = tGetProp_('GEMINI_API_KEY');
   if (!apiKey) return 'エラー: APIキーが設定されていません。';
   
   const promptText = 'あなたは児童の小さな頑張りやユニークな視点を見つけて具体的に褒めるのが得意な、経験豊富な小学校の先生です。以下の記述を読み、児童が努力した点などを引用しつつ、自己肯定感を育む温かい賞賛のコメントを100字程度で作成してください。見出しや解説は不要です。\n\n' + journalContent;
@@ -491,7 +468,7 @@ function callGeminiApiForSimpleComment_(journalContent) {
 }
 
 function callGeminiApiForFullFeedback_(journalContent) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  const apiKey = tGetProp_('GEMINI_API_KEY');
   if (!apiKey) return { success: false, jsonText: null, message: 'APIキー未設定' };
   
   const promptText = 'あなたは経験豊富な小学校の先生です。以下の児童のジャーナルを読み、フィードバックを作成してください。\n' +
@@ -511,7 +488,7 @@ function callGeminiApiForFullFeedback_(journalContent) {
 
 function getRosterAll() {
   try {
-    const sheet = getSpreadsheet_().getSheetByName(ROSTER_SHEET_NAME);
+    const sheet = getSs_().getSheetByName(ROSTER_SHEET_NAME);
     if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [] };
     const roster = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues().filter(function(row) { return row[2]; }).map(function(row) { return { role: row[0], name: row[1], email: row[2] }; });
     return { success: true, data: roster };
@@ -522,7 +499,7 @@ function saveRosterAll(rows) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const sheet = getSpreadsheet_().getSheetByName(ROSTER_SHEET_NAME);
+    const sheet = getSs_().getSheetByName(ROSTER_SHEET_NAME);
     if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).clearContent();
     if (rows.length > 0) {
       const values = rows.map(function(r) { return [r.role || '児童', r.name, r.email]; });
@@ -534,10 +511,9 @@ function saveRosterAll(rows) {
 
 function getAdminSettings() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const apiKey = props.getProperty('GEMINI_API_KEY') || '';
-    const ssId = props.getProperty(PROP_SPREADSHEET_ID) || '';
-    const folderId = props.getProperty(PROP_IMAGE_FOLDER_ID) || '';
+    const apiKey = tGetProp_('GEMINI_API_KEY') || '';
+    const ssId = resolveSpreadsheetId_();
+    const folderId = tGetProp_(PROP_IMAGE_FOLDER_ID) || '';
     let maskedKey = apiKey.length > 10 ? apiKey.substring(0, 6) + '****' + apiKey.substring(apiKey.length - 4) : (apiKey ? '設定済み' : '');
     return { success: true, apiKeyMasked: maskedKey, hasApiKey: !!apiKey, spreadsheetUrl: ssId ? 'https://docs.google.com/spreadsheets/d/' + ssId : '', imageFolderUrl: folderId ? 'https://drive.google.com/drive/folders/' + folderId : '' };
   } catch (e) { return { success: false, message: e.message }; }
@@ -545,7 +521,8 @@ function getAdminSettings() {
 
 function saveAdminSettings(settings) {
   try {
-    if (settings.apiKey !== undefined && settings.apiKey !== '') PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', settings.apiKey);
+    // APIキーは個人の秘密情報なので UserProperties に保存する
+    if (settings.apiKey !== undefined && settings.apiKey !== '') tSetProp_('GEMINI_API_KEY', settings.apiKey);
     return { success: true, message: '設定を保存しました！' };
   } catch (e) { return { success: false, message: e.message }; }
 }
@@ -566,7 +543,7 @@ function resetAllData() {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const sheet = getSpreadsheet_().getSheetByName(JOURNAL_SHEET_NAME);
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
     if (sheet.getLastRow() > 1) {
       sheet.getRange(2, 1, sheet.getLastRow() - 1, JOURNAL_HEADERS.length).clearContent();
       if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
@@ -577,7 +554,7 @@ function resetAllData() {
 
 function getSubmissionStatus() {
   try {
-    const ss = getSpreadsheet_();
+    const ss = getSs_();
     const roster = getClassRoster();
     const today = Utilities.formatDate(new Date(), 'JST', 'yyyy/MM/dd');
     const jSheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
@@ -653,7 +630,7 @@ function exportJournalsPdf(params) {
 }
 
 function getFilteredJournals_(params) {
-  const ss = getSpreadsheet_();
+  const ss = getSs_();
   const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const data = sheet.getDataRange().getValues();

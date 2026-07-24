@@ -55,10 +55,47 @@
             { journalId: '1', timestamp: new Date(Date.now() - 86400000*0).toISOString(), date: '今日', email: 'yamada@example.com', studentName: '山田 太郎', status: '未返却', content: '今日は算数が難しかったけど、がんばりました！', emotion: '😊 うれしい', teacherComment: '', highlights: '[]' },
             { journalId: '2', timestamp: new Date(Date.now() - 86400000*1).toISOString(), date: '昨日', email: 'yamada@example.com', studentName: '山田 太郎', status: '返却済み', content: '国語の発表で緊張した。', emotion: '🤔 もやもや', teacherComment: '', highlights: '[]' }
           ],
-          classRoster: [{name: '山田 太郎', email: 'yamada@example.com', role: '児童'}]
+          classRoster: [{name: '山田 太郎', email: 'yamada@example.com', role: '児童'}],
+          tenant: { linked: true, spreadsheetId: 'test', spreadsheetName: 'テストDB', email: 'teacher@example.com', canCreate: true, templateConfigured: false }
         };
       }
     } catch(e) { console.error(e); }
+  </script>
+
+  <script>
+    // ==========================================
+    // 🤝 PWAシェル（GitHub Pages）とのハンドシェイク
+    // ==========================================
+    (function () {
+      window.__shellAcked = false;
+
+      window.addEventListener('message', function (ev) {
+        if (ev && ev.data && ev.data.type === 'app:shellAck') {
+          // シェル内（iframe埋め込み）で動作していることが確定
+          window.__shellAcked = true;
+        }
+      });
+
+      // アプリ描画完了をシェルへ通知（top / parent 両方に送る）
+      window.notifyShellReady = function () {
+        try { window.top.postMessage({ type: 'app:ready' }, '*'); } catch (e) {}
+        try { window.parent.postMessage({ type: 'app:ready' }, '*'); } catch (e) {}
+      };
+
+      // 再読み込みヘルパー: シェル内なら親に app:reload を送って iframe を貼り直してもらう。
+      // 単体表示（直接 exec URL を開いている）なら自分でリロードする。
+      // ※ シェル(別オリジン)内で window.top.location にアクセスすると SecurityError に
+      //   なるため、必ずこのヘルパーを経由すること。
+      window.appReload = function () {
+        try { window.top.postMessage({ type: 'app:reload' }, '*'); } catch (e) {}
+        try { window.parent.postMessage({ type: 'app:reload' }, '*'); } catch (e) {}
+        if (!window.__shellAcked) {
+          try { window.top.location.reload(); } catch (e) { window.location.reload(); }
+        }
+      };
+
+      window.addEventListener('load', function () { setTimeout(window.notifyShellReady, 0); });
+    })();
   </script>
 </head>
 <body>
@@ -213,7 +250,7 @@
           if (typeof confetti === 'function') confetti({ particleCount: 200, spread: 90, origin: { y: 0.6 }, colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981'] });
           showToast("先生に提出できたよ！");
           setContent(""); setEmotion(""); setImageFile(null);
-          setTimeout(() => window.top.location && window.top.location.reload(), 2500);
+          setTimeout(() => window.appReload(), 2500);
         }
       };
 
@@ -557,7 +594,7 @@
       const executeAiAction = async (type) => {
         setConfirmConfig({ isOpen: false });
         const res = await call(type === 'simple' ? 'generateAiSimpleCommentsForAll' : 'generateAiFullFeedbackForAll');
-        if (res.success) { showToast(res.message); setTimeout(()=>window.top.location.reload(), 1500); }
+        if (res.success) { showToast(res.message); setTimeout(()=>window.appReload(), 1500); }
       };
 
       const handleSaveFeedback = async () => {
@@ -582,13 +619,13 @@
       const executeDataReset = async () => {
         setConfirmConfig({ isOpen: false });
         const res = await call('resetAllData');
-        if(res.success) { showToast("全データを削除しました"); setTimeout(()=>window.top.location.reload(), 1500); }
+        if(res.success) { showToast("全データを削除しました"); setTimeout(()=>window.appReload(), 1500); }
       };
       
       const executeBatchReturn = async () => {
         setConfirmConfig({ isOpen: false });
         const res = await call('batchReturnAll');
-        if (res.success) { showToast(res.message); setTimeout(()=>window.top.location.reload(), 1500); }
+        if (res.success) { showToast(res.message); setTimeout(()=>window.appReload(), 1500); }
       };
 
       const handleRosterChange = (index, field, value) => {
@@ -615,7 +652,7 @@
         const res = await call('saveRosterAll', validRows);
         if (res.success) {
           showToast('名簿を更新しました');
-          setTimeout(() => window.top.location.reload(), 1500);
+          setTimeout(() => window.appReload(), 1500);
         }
       };
 
@@ -861,7 +898,19 @@
                   )}
                </div>
                
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 {/* データベース連携 */}
+                 <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center">
+                    <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 text-emerald-500"><Icon path="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" className="w-8 h-8"/></div>
+                    <h3 className="font-black text-gray-800 mb-2">データベース連携</h3>
+                    <p className="text-sm text-gray-500 mb-6 break-all">{(data.tenant && data.tenant.spreadsheetName) ? `接続中: ${data.tenant.spreadsheetName}` : 'DBスプレッドシートに接続中です。'}</p>
+                    <div className="flex flex-col gap-2 w-full">
+                       {data.tenant && data.tenant.spreadsheetId && <a href={`https://docs.google.com/spreadsheets/d/${data.tenant.spreadsheetId}`} target="_blank" rel="noopener noreferrer" className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-bold py-3 rounded-xl transition-all active:scale-95">シートを開く</a>
+                       }
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"連携の解除", text:"データベースの紐付けを解除しますか？\nスプレッドシート自体は削除されません。\n解除後は初期設定画面に戻ります。", confirmText:"解除する", onConfirm: async ()=>{ setConfirmConfig({isOpen:false}); const res = await call('unlinkMyDatabase'); if(res && res.success){ showToast(res.message || '解除しました'); setTimeout(()=>window.appReload(), 1200); } else { showToast((res && res.error) || '解除に失敗しました', 'error'); } }, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold py-3 rounded-xl transition-all active:scale-95">連携を解除</button>
+                    </div>
+                 </div>
+
                  {/* エクスポート */}
                  <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center">
                     <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4 text-gray-600"><Icon path={Icons.Download} className="w-8 h-8"/></div>
@@ -936,9 +985,105 @@
       );
     };
 
+    // ==========================================
+    // 🚀 初期設定（オンボーディング）画面
+    //    DB 未接続のユーザーに表示し、新規作成 or 既存紐付けを行う
+    // ==========================================
+    const OnboardingApp = ({ tenant }) => {
+      const { call, isLoading, toast, setToast, showToast } = useGas();
+      const [linkInput, setLinkInput] = useState("");
+      const [done, setDone] = useState(false);
+
+      const finishAndReload = (delay) => {
+        setDone(true);
+        setTimeout(() => window.appReload(), delay || 1200);
+      };
+
+      const handleCreate = async () => {
+        try {
+          const res = await call('createMyDatabase', 'ふりかえりジャーナル_DB');
+          if (res && res.success) {
+            showToast(res.method === 'template' ? 'テンプレートからデータベースを作成しました！' : 'データベースを作成しました！');
+            finishAndReload(1200);
+          } else {
+            showToast((res && res.error) || 'データベースの作成に失敗しました。', 'error');
+          }
+        } catch (e) {
+          showToast('通信エラーが発生しました。もう一度お試しください。', 'error');
+        }
+      };
+
+      const handleLink = async () => {
+        if (!linkInput.trim()) { showToast('スプレッドシートのURLまたはIDを入力してください。', 'error'); return; }
+        try {
+          const res = await call('linkMyDatabase', linkInput.trim());
+          if (res && res.success) {
+            if (res.warning) { showToast(res.warning, 'error'); finishAndReload(3000); }
+            else { showToast('「' + (res.spreadsheetName || 'スプレッドシート') + '」を紐付けました！'); finishAndReload(1200); }
+          } else {
+            showToast((res && res.error) || '紐付けに失敗しました。', 'error');
+          }
+        } catch (e) {
+          showToast('通信エラーが発生しました。もう一度お試しください。', 'error');
+        }
+      };
+
+      return (
+        <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto">
+          {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
+          <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8">
+            <div className="text-center mb-8">
+              <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"><Icon path={Icons.Book} className="w-10 h-10"/></div>
+              <h1 className="text-3xl font-black text-gray-800 mb-2">はじめまして！</h1>
+              <p className="text-gray-500 font-medium leading-relaxed">「ふりかえりジャーナル」を使うための<br/>あなた専用のデータベースを設定しましょう。</p>
+              {tenant && tenant.email && <p className="mt-3 text-xs font-bold text-gray-400 bg-gray-50 inline-block px-4 py-1.5 rounded-full">ログイン中: {tenant.email}</p>}
+              {tenant && tenant.error && <p className="mt-3 text-xs font-bold text-red-500 bg-red-50 px-4 py-2 rounded-xl">前回のデータベースに接続できませんでした（{tenant.error}）。再設定してください。</p>}
+            </div>
+
+            {done ? (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 mx-auto rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4"><Icon path={Icons.Check} className="w-8 h-8"/></div>
+                <p className="font-black text-gray-700 text-lg">設定が完了しました！</p>
+                <p className="text-sm text-gray-400 font-medium mt-1">アプリを読み込み直しています…</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {/* 新規作成 */}
+                <div className="border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6">
+                  <h2 className="font-black text-gray-800 mb-1 flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-5 h-5 text-orange-500"/> 新しくデータベースを作成</h2>
+                  <p className="text-sm text-gray-500 mb-4 leading-relaxed">あなたの Google Drive に専用のスプレッドシートを自動作成します。<span className="font-bold">先生（管理者）はこちら</span>がおすすめです。{tenant && tenant.templateConfigured && <span className="block text-xs text-orange-500 font-bold mt-1">✨ 配布元のテンプレートから作成されます</span>}</p>
+                  <button onClick={handleCreate} disabled={isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">🎒 新しくはじめる</button>
+                </div>
+
+                {/* 既存紐付け */}
+                <div className="border-2 border-blue-100 bg-blue-50/40 rounded-3xl p-6">
+                  <h2 className="font-black text-gray-800 mb-1 flex items-center gap-2"><Icon path="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" className="w-5 h-5 text-blue-500"/> 既存のスプレッドシートを紐付け</h2>
+                  <p className="text-sm text-gray-500 mb-4 leading-relaxed">先生から共有されたDBのURL、または以前使っていたDBのURLを貼り付けてください。<span className="font-bold">児童のみなさんはこちら</span>です。</p>
+                  <input
+                    type="text"
+                    value={linkInput}
+                    onChange={(e) => setLinkInput(e.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/... または ID"
+                    className="w-full border-2 border-blue-100 rounded-2xl p-3.5 text-sm text-gray-700 outline-none focus:border-blue-400 bg-white font-mono mb-3 transition-colors"
+                  />
+                  <button onClick={handleLink} disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50">🔗 このスプレッドシートを使う</button>
+                </div>
+
+                <p className="text-[11px] text-gray-400 text-center leading-relaxed">設定はあなたの Google アカウントにのみ保存され、他の利用者には影響しません。<br/>あとから紐付けを解除・変更することもできます。</p>
+              </div>
+            )}
+          </div>
+          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        </div>
+      );
+    };
+
     const App = () => {
       const data = window.APP_DATA;
+      // 描画完了をPWAシェルへ通知（シェル外では無害）
+      useEffect(() => { if (window.notifyShellReady) window.notifyShellReady(); }, []);
       if (!data) return <div className="h-screen flex items-center justify-center bg-gray-50"><div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div></div>;
+      if (data.tenant && !data.tenant.linked) return <OnboardingApp tenant={data.tenant} />;
       const isTeacher = data.user && data.user.role === '担任';
       const isGuest = !data.user || data.user.role === '未登録';
 
