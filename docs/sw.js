@@ -6,12 +6,13 @@
 // 認証・データがあるため【絶対にキャッシュしない】。
 // ============================================================
 
-const CACHE_NAME = 'rj-shell-v1';
+const CACHE_NAME = 'rj-shell-v2';
 const SHELL_ASSETS = [
   './',
   './index.html',
   './config.js',
   './manifest.webmanifest',
+  './icon-180.png',
   './icon-192.png',
   './icon-512.png'
 ];

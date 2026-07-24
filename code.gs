@@ -154,14 +154,51 @@ function getClassRoster() {
   return data.filter(function(row) { return row[0] !== '担任' && row[2]; }).map(function(row) { return { name: row[1], email: row[2] }; });
 }
 
+// 担任権限ガード: 担任以外が呼ぶとエラーオブジェクトを返す（担任なら null）。
+// メールアドレスが取得できない旧デプロイ構成では判定不能のため従来動作を維持する。
+function teacherGuard_() {
+  try {
+    let email = '';
+    try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+    if (!email) return null;
+    const adminEmail = tGetProp_(PROP_ADMIN_EMAIL);
+    const userData = getUserData_(email, !!adminEmail && email === adminEmail);
+    if (userData && userData.role === '担任') return null;
+    return { success: false, message: 'この操作は担任（管理者）のみ実行できます。' };
+  } catch (e) {
+    return null;
+  }
+}
+
+// journalId から行番号を高速検索（TextFinder は全行走査より大幅に速い）
+function findJournalRowById_(sheet, journalId) {
+  if (!journalId || sheet.getLastRow() < 2) return -1;
+  const cell = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1)
+    .createTextFinder(String(journalId)).matchEntireCell(true).findNext();
+  return cell ? cell.getRow() : -1;
+}
+
+function getJournalHeaders_(sheet) {
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+}
+
 function saveJournal(journalData) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
+    if (!journalData || !String(journalData.content || '').trim()) {
+      return { success: false, message: '本文が空です。ひとことでも書いてから提出してね。' };
+    }
+    // なりすまし防止: メールアドレスはサーバー側で取得（取得不能な旧構成のみクライアント値を利用）
+    let email = '';
+    try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+    if (!email) email = journalData.email || '';
+
     const ss = getSs_();
     const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
+    if (!sheet) return { success: false, message: 'ジャーナルデータのシートが見つかりません。DBの設定を確認してください。' };
     const newRow = [
-      Utilities.getUuid(), new Date(), journalData.email, journalData.theme, journalData.content,
+      Utilities.getUuid(), new Date(), email, journalData.theme, journalData.content,
       journalData.imageFileId || '', journalData.emotion || '', '', '[]', '', '未返却', '', ''
     ];
     sheet.appendRow(newRow);
@@ -212,25 +249,18 @@ function rowToJournalObject_(headers, row) {
 }
 
 function saveFeedback(feedbackData) {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const idIdx = headers.indexOf('journalId');
-
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][idIdx] === feedbackData.journalId) {
-        const rowNum = i + 1;
-        sheet.getRange(rowNum, headers.indexOf('teacherComment') + 1).setValue(feedbackData.comment);
-        sheet.getRange(rowNum, headers.indexOf('highlights') + 1).setValue(feedbackData.highlights || '[]');
-        sheet.getRange(rowNum, headers.indexOf('status') + 1).setValue('返却済み');
-        return { success: true, message: 'フィードバックを保存しました！' };
-      }
-    }
-    return { success: false, message: '該当するジャーナルが見つかりません。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const headers = getJournalHeaders_(sheet);
+    const rowNum = findJournalRowById_(sheet, feedbackData.journalId);
+    if (rowNum < 0) return { success: false, message: '該当するジャーナルが見つかりません。' };
+    sheet.getRange(rowNum, headers.indexOf('teacherComment') + 1).setValue(feedbackData.comment);
+    sheet.getRange(rowNum, headers.indexOf('highlights') + 1).setValue(feedbackData.highlights || '[]');
+    sheet.getRange(rowNum, headers.indexOf('status') + 1).setValue('返却済み');
+    return { success: true, message: 'フィードバックを保存しました！' };
   } catch (e) {
     return { success: false, message: 'エラー：' + e.message };
   } finally {
@@ -239,20 +269,17 @@ function saveFeedback(feedbackData) {
 }
 
 function revertJournalStatus(journalId) {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][headers.indexOf('journalId')] === journalId) {
-        sheet.getRange(i + 1, headers.indexOf('status') + 1).setValue('未返却');
-        return { success: true };
-      }
-    }
-    return { success: false, message: '見つかりませんでした。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const rowNum = findJournalRowById_(sheet, journalId);
+    if (rowNum < 0) return { success: false, message: '見つかりませんでした。' };
+    sheet.getRange(rowNum, getJournalHeaders_(sheet).indexOf('status') + 1).setValue('未返却');
+    return { success: true };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
@@ -260,43 +287,42 @@ function addPastComment(journalId, comment) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][headers.indexOf('journalId')] === journalId) {
-        sheet.getRange(i + 1, headers.indexOf('pastComment') + 1).setValue(comment);
-        return { success: true, message: '保存しました！' };
-      }
-    }
-    return { success: false, message: '見つかりませんでした。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const rowNum = findJournalRowById_(sheet, journalId);
+    if (rowNum < 0) return { success: false, message: '見つかりませんでした。' };
+    sheet.getRange(rowNum, getJournalHeaders_(sheet).indexOf('pastComment') + 1).setValue(comment);
+    return { success: true, message: '保存しました！' };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
 function deleteJournal(journalId) {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][headers.indexOf('journalId')] === journalId) {
-        sheet.getRange(i + 1, headers.indexOf('deletedAt') + 1).setValue(new Date());
-        return { success: true, message: '削除しました。' };
-      }
-    }
-    return { success: false, message: '見つかりませんでした。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const rowNum = findJournalRowById_(sheet, journalId);
+    if (rowNum < 0) return { success: false, message: '見つかりませんでした。' };
+    sheet.getRange(rowNum, getJournalHeaders_(sheet).indexOf('deletedAt') + 1).setValue(new Date());
+    return { success: true, message: '削除しました。' };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
 // 🌟 自動リカバリ対応
 function uploadImage(fileData) {
   try {
+    if (!fileData || !fileData.data) return { success: false, message: '画像データがありません。' };
+    // 目安 10MB 超は拒否（base64 は約 4/3 倍になるため 14MB 相当で判定）
+    if (String(fileData.data).length > 14 * 1024 * 1024) {
+      return { success: false, message: '画像が大きすぎます（10MBまで）。小さい画像でためしてね。' };
+    }
     const folder = getImageFolder_(); // リカバリ対応の取得関数を使用
-    const decoded = Utilities.base64Decode(fileData.data, Utilities.Charset.UTF_8);
+    // 注意: 第2引数に Charset を渡すとバイナリが壊れるため、素の base64Decode を使う
+    const decoded = Utilities.base64Decode(fileData.data);
     const blob = Utilities.newBlob(decoded, fileData.mimeType, fileData.fileName);
     const file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -322,11 +348,16 @@ function getTodayTheme() {
 }
 
 function setTodayTheme(theme) {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    getSs_().getSheetByName(THEME_SHEET_NAME).appendRow([new Date(), theme]);
+    const sheet = getSs_().getSheetByName(THEME_SHEET_NAME);
+    if (!sheet) return { success: false, message: 'テーマ設定シートが見つかりません。' };
+    sheet.appendRow([new Date(), theme]);
     return { success: true, message: 'テーマを設定しました！' };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
@@ -346,144 +377,178 @@ function saveWeeklyThemes(themes) {
 }
 
 function getWeeklyThemeForToday_() {
-  const json = tGetProp_('WEEKLY_THEMES');
-  if (!json) return null;
-  const themes = JSON.parse(json);
-  const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-  return themes[dayKeys[new Date().getDay()]] || null;
+  try {
+    const json = tGetProp_('WEEKLY_THEMES');
+    if (!json) return null;
+    const themes = JSON.parse(json);
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    return themes[dayKeys[new Date().getDay()]] || null;
+  } catch (e) {
+    return null; // 設定が壊れていてもアプリ全体は止めない
+  }
 }
 
 function quickReturn(journalId, stamp) {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][headers.indexOf('journalId')] === journalId) {
-        sheet.getRange(i + 1, headers.indexOf('teacherStamp') + 1).setValue(stamp);
-        sheet.getRange(i + 1, headers.indexOf('status') + 1).setValue('返却済み');
-        return { success: true, message: 'スタンプで返却しました！' };
-      }
-    }
-    return { success: false, message: '見つかりませんでした。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const headers = getJournalHeaders_(sheet);
+    const rowNum = findJournalRowById_(sheet, journalId);
+    if (rowNum < 0) return { success: false, message: '見つかりませんでした。' };
+    sheet.getRange(rowNum, headers.indexOf('teacherStamp') + 1).setValue(stamp);
+    sheet.getRange(rowNum, headers.indexOf('status') + 1).setValue('返却済み');
+    return { success: true, message: 'スタンプで返却しました！' };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
 function batchReturnAll() {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000);
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
+    const statusIdx = headers.indexOf('status');
+    const commentIdx = headers.indexOf('teacherComment');
+    const deletedIdx = headers.indexOf('deletedAt');
     let count = 0;
     for (let i = 1; i < data.length; i++) {
-      if (data[i][headers.indexOf('status')] === '未返却' && data[i][headers.indexOf('teacherComment')] && !data[i][headers.indexOf('deletedAt')]) {
-        sheet.getRange(i + 1, headers.indexOf('status') + 1).setValue('返却済み');
+      if (data[i][statusIdx] === '未返却' && data[i][commentIdx] && !data[i][deletedIdx]) {
+        sheet.getRange(i + 1, statusIdx + 1).setValue('返却済み');
         count++;
       }
     }
     return { success: true, count: count, message: count > 0 ? count + '件を一括返却しました！' : '返却対象がありません。' };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
-function generateAiSimpleCommentsForAll() {
-  try {
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data.shift();
-    let successCount = 0;
+// AI処理対象（未返却×本文あり×未削除）の抽出
+function collectAiTargets_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idx = {
+    status: headers.indexOf('status'),
+    content: headers.indexOf('content'),
+    deletedAt: headers.indexOf('deletedAt'),
+    teacherComment: headers.indexOf('teacherComment'),
+    highlights: headers.indexOf('highlights')
+  };
+  const targets = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idx.status] === '未返却' && data[i][idx.content] && !data[i][idx.deletedAt]) {
+      targets.push({ rowNum: i + 1, content: String(data[i][idx.content]) });
+    }
+  }
+  return { targets: targets, idx: idx };
+}
 
-    data.forEach(function(row, index) {
-      if (row[headers.indexOf('status')] === '未返却' && row[headers.indexOf('content')] && !row[headers.indexOf('deletedAt')]) {
-        const comment = callGeminiApiForSimpleComment_(row[headers.indexOf('content')]);
-        sheet.getRange(index + 2, headers.indexOf('teacherComment') + 1).setValue(comment);
-        successCount++;
-      }
+// fetchAll をチャンク実行（直列比で大幅に高速。レート制限も考慮して小分けにする）
+function fetchAllInChunks_(requests, chunkSize) {
+  const responses = [];
+  for (let i = 0; i < requests.length; i += chunkSize) {
+    const chunk = UrlFetchApp.fetchAll(requests.slice(i, i + chunkSize));
+    for (let j = 0; j < chunk.length; j++) responses.push(chunk[j]);
+  }
+  return responses;
+}
+
+const AI_SIMPLE_PROMPT = 'あなたは児童の小さな頑張りやユニークな視点を見つけて具体的に褒めるのが得意な、経験豊富な小学校の先生です。以下の記述を読み、児童が努力した点などを引用しつつ、自己肯定感を育む温かい賞賛のコメントを100字程度で作成してください。見出しや解説は不要です。\n\n';
+
+const AI_FULL_PROMPT = 'あなたは経験豊富な小学校の先生です。以下の児童のジャーナルを読み、フィードバックを作成してください。\n' +
+  '# 出力形式の厳密なルール\n' +
+  '必ず以下の構造を持つJSONのみを出力してください。\n' +
+  '{"comment":"（全体への温かいコメント100字以内）","highlights":[{"textToHighlight":"（本文から完全一致で引用）","suggestedComment":"（ハイライト箇所へのコメント）","suggestedStamp":"（絵文字1つ）"}]}\n' +
+  '---\n';
+
+function generateAiSimpleCommentsForAll() {
+  const guard = teacherGuard_(); if (guard) return guard;
+  try {
+    const apiKey = tGetProp_('GEMINI_API_KEY');
+    if (!apiKey) return { success: false, message: 'Gemini APIキーが設定されていません。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const collected = collectAiTargets_(sheet);
+    if (collected.targets.length === 0) return { success: true, message: '対象（未返却×本文あり）のジャーナルがありません。' };
+
+    const requests = collected.targets.map(function (t) {
+      return {
+        url: API_ENDPOINT_V1 + apiKey, method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ contents: [{ parts: [{ text: AI_SIMPLE_PROMPT + t.content }] }] }),
+        muteHttpExceptions: true
+      };
     });
-    return { success: true, message: 'AIコメント案を作成しました。（' + successCount + '件）' };
+    const responses = fetchAllInChunks_(requests, 8);
+
+    let ok = 0, ng = 0;
+    responses.forEach(function (res, i) {
+      try {
+        if (res.getResponseCode() === 200) {
+          const comment = JSON.parse(res.getContentText()).candidates[0].content.parts[0].text.trim();
+          sheet.getRange(collected.targets[i].rowNum, collected.idx.teacherComment + 1).setValue(comment);
+          ok++;
+        } else { ng++; }
+      } catch (e) { ng++; }
+    });
+    return { success: true, message: 'AIコメント案を作成しました。（成功: ' + ok + '件' + (ng ? '、失敗: ' + ng + '件' : '') + '）' };
   } catch (e) {
     return { success: false, message: 'AI処理エラー：' + e.message };
   }
 }
 
 function generateAiFullFeedbackForAll() {
+  const guard = teacherGuard_(); if (guard) return guard;
   try {
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    const headers = data.shift();
-    let successCount = 0;
-    let errorCount = 0;
+    const apiKey = tGetProp_('GEMINI_API_KEY');
+    if (!apiKey) return { success: false, message: 'Gemini APIキーが設定されていません。' };
+    const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
+    const collected = collectAiTargets_(sheet);
+    if (collected.targets.length === 0) return { success: true, message: '対象（未返却×本文あり）のジャーナルがありません。' };
 
-    data.forEach(function(row, index) {
-      if (row[headers.indexOf('status')] === '未返却' && row[headers.indexOf('content')] && !row[headers.indexOf('deletedAt')]) {
-        const aiResponse = callGeminiApiForFullFeedback_(row[headers.indexOf('content')]);
-        if (aiResponse && aiResponse.success) {
-          try {
-            const feedback = JSON.parse(aiResponse.jsonText);
-            if (feedback.comment) {
-              sheet.getRange(index + 2, headers.indexOf('teacherComment') + 1).setValue(feedback.comment);
-            }
-            if (feedback.highlights && feedback.highlights.length > 0) {
-              const content = row[headers.indexOf('content')];
-              const hlToSave = [];
-              feedback.highlights.forEach(function(h) {
-                const startIndex = content.indexOf(h.textToHighlight);
-                if (startIndex !== -1) {
-                  hlToSave.push({
-                    id: 'hl-' + Date.now() + Math.random(), text: h.textToHighlight, comment: h.suggestedComment || '', stamp: h.suggestedStamp || '',
-                    startOffset: startIndex, endOffset: startIndex + h.textToHighlight.length
-                  });
-                }
+    const requests = collected.targets.map(function (t) {
+      return {
+        url: API_ENDPOINT_V1_BETA + apiKey, method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ contents: [{ parts: [{ text: AI_FULL_PROMPT + t.content }] }], generationConfig: { responseMimeType: 'application/json' } }),
+        muteHttpExceptions: true
+      };
+    });
+    const responses = fetchAllInChunks_(requests, 8);
+
+    let successCount = 0, errorCount = 0;
+    responses.forEach(function (res, i) {
+      const target = collected.targets[i];
+      try {
+        if (res.getResponseCode() !== 200) { errorCount++; return; }
+        const jsonText = JSON.parse(res.getContentText()).candidates[0].content.parts[0].text;
+        const feedback = JSON.parse(jsonText);
+        if (feedback.comment) {
+          sheet.getRange(target.rowNum, collected.idx.teacherComment + 1).setValue(feedback.comment);
+        }
+        if (feedback.highlights && feedback.highlights.length > 0) {
+          const content = target.content;
+          const hlToSave = [];
+          feedback.highlights.forEach(function (h) {
+            const startIndex = content.indexOf(h.textToHighlight);
+            if (startIndex !== -1) {
+              hlToSave.push({
+                id: 'hl-' + Date.now() + Math.random(), textToHighlight: h.textToHighlight,
+                suggestedComment: h.suggestedComment || '', suggestedStamp: h.suggestedStamp || '',
+                startOffset: startIndex, endOffset: startIndex + h.textToHighlight.length
               });
-              if (hlToSave.length > 0) sheet.getRange(index + 2, headers.indexOf('highlights') + 1).setValue(JSON.stringify(hlToSave));
             }
-            successCount++;
-          } catch (e) { errorCount++; }
-        } else { errorCount++; }
-      }
+          });
+          if (hlToSave.length > 0) sheet.getRange(target.rowNum, collected.idx.highlights + 1).setValue(JSON.stringify(hlToSave));
+        }
+        successCount++;
+      } catch (e) { errorCount++; }
     });
     return { success: true, message: 'AI高度分析完了。（成功: ' + successCount + '件, 失敗: ' + errorCount + '件）' };
   } catch (e) { return { success: false, message: 'AIエラー：' + e.message }; }
-}
-
-function callGeminiApiForSimpleComment_(journalContent) {
-  const apiKey = tGetProp_('GEMINI_API_KEY');
-  if (!apiKey) return 'エラー: APIキーが設定されていません。';
-  
-  const promptText = 'あなたは児童の小さな頑張りやユニークな視点を見つけて具体的に褒めるのが得意な、経験豊富な小学校の先生です。以下の記述を読み、児童が努力した点などを引用しつつ、自己肯定感を育む温かい賞賛のコメントを100字程度で作成してください。見出しや解説は不要です。\n\n' + journalContent;
-  const payload = { contents: [{ parts: [{ text: promptText }] }] };
-  
-  try {
-    const res = UrlFetchApp.fetch(API_ENDPOINT_V1 + apiKey, { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true });
-    if (res.getResponseCode() === 200) return JSON.parse(res.getContentText()).candidates[0].content.parts[0].text.trim();
-    return 'コメント生成失敗';
-  } catch (e) { return 'エラー発生'; }
-}
-
-function callGeminiApiForFullFeedback_(journalContent) {
-  const apiKey = tGetProp_('GEMINI_API_KEY');
-  if (!apiKey) return { success: false, jsonText: null, message: 'APIキー未設定' };
-  
-  const promptText = 'あなたは経験豊富な小学校の先生です。以下の児童のジャーナルを読み、フィードバックを作成してください。\n' +
-    '# 出力形式の厳密なルール\n' +
-    '必ず以下の構造を持つJSONのみを出力してください。\n' +
-    '{"comment":"（全体への温かいコメント100字以内）","highlights":[{"textToHighlight":"（本文から完全一致で引用）","suggestedComment":"（ハイライト箇所へのコメント）","suggestedStamp":"（絵文字1つ）"}]}\n' +
-    '---\n' + journalContent;
-    
-  const payload = { contents: [{ parts: [{ text: promptText }] }], generationConfig: { responseMimeType: 'application/json' } };
-  
-  try {
-    const res = UrlFetchApp.fetch(API_ENDPOINT_V1_BETA + apiKey, { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true });
-    if (res.getResponseCode() === 200) return { success: true, jsonText: JSON.parse(res.getContentText()).candidates[0].content.parts[0].text, message: '成功' };
-    return { success: false, jsonText: null, message: 'エラー' };
-  } catch (e) { return { success: false, jsonText: null, message: 'エラー' }; }
 }
 
 function getRosterAll() {
@@ -496,6 +561,7 @@ function getRosterAll() {
 }
 
 function saveRosterAll(rows) {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
@@ -540,15 +606,16 @@ function testGeminiApiKey(apiKey) {
 }
 
 function resetAllData() {
+  const guard = teacherGuard_(); if (guard) return guard;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
     const sheet = getSs_().getSheetByName(JOURNAL_SHEET_NAME);
-    if (sheet.getLastRow() > 1) {
-      sheet.getRange(2, 1, sheet.getLastRow() - 1, JOURNAL_HEADERS.length).clearContent();
-      if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
-    }
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
     return { success: true, message: '全データを削除しました。' };
+  } catch (e) {
+    return { success: false, message: 'エラー：' + e.message };
   } finally { lock.releaseLock(); }
 }
 
@@ -563,10 +630,13 @@ function getSubmissionStatus() {
     if (jSheet && jSheet.getLastRow() >= 2) {
       const data = jSheet.getDataRange().getValues();
       const headers = data.shift();
+      const deletedIdx = headers.indexOf('deletedAt');
+      const tsIdx = headers.indexOf('timestamp');
+      const emailIdx = headers.indexOf('email');
       data.forEach(function(row) {
-        if (row[headers.indexOf('deletedAt')]) return;
-        if (row[headers.indexOf('timestamp')] instanceof Date && Utilities.formatDate(row[headers.indexOf('timestamp')], 'JST', 'yyyy/MM/dd') === today) {
-          submittedEmails.add(row[headers.indexOf('email')]);
+        if (row[deletedIdx]) return;
+        if (row[tsIdx] instanceof Date && Utilities.formatDate(row[tsIdx], 'JST', 'yyyy/MM/dd') === today) {
+          submittedEmails.add(row[emailIdx]);
         }
       });
     }
@@ -576,14 +646,21 @@ function getSubmissionStatus() {
   } catch (e) { return { success: false, message: e.message }; }
 }
 
+// CSVインジェクション対策: 数式として解釈されうる先頭文字はシングルクォートで無害化
+function csvSafe_(v) {
+  const s = String(v == null ? '' : v);
+  return /^[=+\-@\t]/.test(s) ? "'" + s : s;
+}
+
 function exportJournalsCsv(params) {
+  const guard = teacherGuard_(); if (guard) return guard;
   try {
     const journals = getFilteredJournals_(params);
     if (journals.length === 0) return { success: false, message: 'データがありません。' };
-    
+
     const csvHeaders = ['日付', '氏名', 'テーマ', '本文', '気持ち', '先生のコメント', 'ステータス'];
-    const csvRows = journals.map(function(j) { return [j.date||'', j.studentName||'', j.theme||'', (j.content||'').replace(/"/g, '""'), j.emotion||'', (j.teacherComment||'').replace(/"/g, '""'), j.status||'']; });
-    const csvContent = [csvHeaders].concat(csvRows).map(function(row) { return row.map(function(cell) { return '"' + cell + '"'; }).join(','); }).join('\r\n');
+    const csvRows = journals.map(function(j) { return [j.date||'', j.studentName||'', j.theme||'', j.content||'', j.emotion||'', j.teacherComment||'', j.status||'']; });
+    const csvContent = [csvHeaders].concat(csvRows).map(function(row) { return row.map(function(cell) { return '"' + csvSafe_(cell).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
     
     const fileName = 'ジャーナルデータ_' + Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmmss') + '.csv';
     const file = getExportFolder_().createFile(Utilities.newBlob('\uFEFF' + csvContent, 'text/csv', fileName));
@@ -592,6 +669,7 @@ function exportJournalsCsv(params) {
 }
 
 function exportJournalsPdf(params) {
+  const guard = teacherGuard_(); if (guard) return guard;
   try {
     const journals = getFilteredJournals_(params);
     if (journals.length === 0) return { success: false, message: 'データがありません。' };
@@ -635,22 +713,25 @@ function getFilteredJournals_(params) {
   if (!sheet || sheet.getLastRow() < 2) return [];
   const data = sheet.getDataRange().getValues();
   const headers = data.shift();
+  const deletedIdx = headers.indexOf('deletedAt');
+  const emailIdx = headers.indexOf('email');
+  const tsIdx = headers.indexOf('timestamp');
   const nameMap = getClassRoster().reduce(function(map, u) { map[u.email] = u.name; return map; }, {});
   const startDate = params.startDate ? new Date(params.startDate + 'T00:00:00+09:00') : null;
   const endDate = params.endDate ? new Date(params.endDate + 'T23:59:59+09:00') : null;
   const filterEmail = (params.email && params.email !== 'all') ? params.email.trim().toLowerCase() : null;
 
   return data.filter(function(row) {
-    if (row[headers.indexOf('deletedAt')]) return false;
-    if (filterEmail && String(row[headers.indexOf('email')]).trim().toLowerCase() !== filterEmail) return false;
-    if (row[headers.indexOf('timestamp')] instanceof Date) {
-      if (startDate && row[headers.indexOf('timestamp')] < startDate) return false;
-      if (endDate && row[headers.indexOf('timestamp')] > endDate) return false;
+    if (row[deletedIdx]) return false;
+    if (filterEmail && String(row[emailIdx]).trim().toLowerCase() !== filterEmail) return false;
+    if (row[tsIdx] instanceof Date) {
+      if (startDate && row[tsIdx] < startDate) return false;
+      if (endDate && row[tsIdx] > endDate) return false;
     }
     return true;
   }).map(function(row) {
     const j = rowToJournalObject_(headers, row);
-    j.studentName = nameMap[row[headers.indexOf('email')]] || '不明';
+    j.studentName = nameMap[row[emailIdx]] || '不明';
     return j;
   }).sort(function(a, b) { return (a.studentName||'').localeCompare(b.studentName||'') || (a.timestamp||0) - (b.timestamp||0); });
 }

@@ -8,7 +8,12 @@
   <meta name="theme-color" content="#f97316">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png" type="image/png">
-  <link rel="apple-touch-icon" href="./icon-192.png">
+  <!-- iOS Safari 向け PWA 設定（ホーム画面に追加でスタンドアロン起動） -->
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ジャーナル">
   <script src="./config.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -18,10 +23,33 @@
       background: linear-gradient(135deg, #fff7ed 0%, #fef3c7 50%, #eff6ff 100%);
       color: #1f2937;
     }
+    /* ノッチ等のセーフエリアを避けて全画面表示（インストール後のスタンドアロン時に有効） */
     #app-frame {
-      position: fixed; inset: 0; width: 100%; height: 100%;
+      position: fixed;
+      top: env(safe-area-inset-top, 0px);
+      left: env(safe-area-inset-left, 0px);
+      right: env(safe-area-inset-right, 0px);
+      bottom: env(safe-area-inset-bottom, 0px);
+      width: auto; height: auto;
       border: none; display: none; background: #f8fafc;
     }
+    body.app-active { background: #f8fafc; }
+    #install-bar {
+      position: fixed; left: 12px; right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      background: #1f2937; color: #fff; border-radius: 20px;
+      padding: 14px 16px; display: none; align-items: center; gap: 12px;
+      box-shadow: 0 12px 35px rgba(0,0,0,.3); z-index: 50;
+      font-size: 13px; line-height: 1.6;
+    }
+    #install-bar.visible { display: flex; }
+    #install-bar .msg { flex: 1; font-weight: 700; }
+    #install-bar button {
+      border: none; cursor: pointer; font-family: inherit; font-weight: 900;
+      border-radius: 12px; padding: 10px 14px; font-size: 13px;
+    }
+    #install-bar .install { background: #f97316; color: #fff; white-space: nowrap; }
+    #install-bar .close { background: transparent; color: #9ca3af; padding: 6px 8px; font-size: 16px; }
     .screen {
       position: fixed; inset: 0; display: none;
       align-items: center; justify-content: center; padding: 24px;
@@ -109,6 +137,13 @@
     </div>
   </div>
 
+  <!-- インストール案内バー（Chrome: ワンタップ / iOS Safari: 手順案内） -->
+  <div id="install-bar">
+    <span class="msg" id="install-msg">アプリとしてインストールできます</span>
+    <button class="install" id="install-btn">インストール</button>
+    <button class="close" id="install-close" aria-label="閉じる">✕</button>
+  </div>
+
   <script>
     (function () {
       const LS_KEY_URL = 'rj_appUrl';
@@ -129,6 +164,7 @@
       function showScreen(name) {
         Object.keys(screens).forEach((k) => screens[k].classList.toggle('active', k === name));
         frame.style.display = name === 'app' ? 'block' : 'none';
+        document.body.classList.toggle('app-active', name === 'app');
         if (name === 'app') {
           Object.keys(screens).forEach((k) => screens[k].classList.remove('active'));
         }
@@ -228,6 +264,64 @@
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('./sw.js').catch(() => {});
         });
+      }
+
+      // ---- アプリとしてインストール（Chrome / Edge / Android と iOS Safari） ----
+      const LS_KEY_INSTALL_DISMISSED = 'rj_installDismissedAt';
+      const installBar = document.getElementById('install-bar');
+      const installMsg = document.getElementById('install-msg');
+      const installBtn = document.getElementById('install-btn');
+      let deferredInstallPrompt = null;
+
+      function isStandalone() {
+        return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      }
+      function isIos() {
+        return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS
+      }
+      function installDismissedRecently() {
+        try {
+          const at = Number(localStorage.getItem(LS_KEY_INSTALL_DISMISSED) || 0);
+          return at && (Date.now() - at) < 14 * 24 * 60 * 60 * 1000; // 14日間は再表示しない
+        } catch (e) { return false; }
+      }
+      function showInstallBar(message, showButton) {
+        if (isStandalone() || installDismissedRecently()) return;
+        installMsg.textContent = message;
+        installBtn.style.display = showButton ? 'block' : 'none';
+        installBar.classList.add('visible');
+      }
+
+      // Chrome / Edge / Android: beforeinstallprompt を受けてワンタップ導線を出す
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        showInstallBar('このアプリを端末にインストールできます', true);
+      });
+
+      installBtn.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) return;
+        installBar.classList.remove('visible');
+        deferredInstallPrompt.prompt();
+        try { await deferredInstallPrompt.userChoice; } catch (e) {}
+        deferredInstallPrompt = null;
+      });
+
+      document.getElementById('install-close').addEventListener('click', () => {
+        installBar.classList.remove('visible');
+        try { localStorage.setItem(LS_KEY_INSTALL_DISMISSED, String(Date.now())); } catch (e) {}
+      });
+
+      window.addEventListener('appinstalled', () => {
+        installBar.classList.remove('visible');
+      });
+
+      // iOS Safari には beforeinstallprompt が無いため、手順を案内する
+      if (isIos() && !isStandalone()) {
+        setTimeout(() => {
+          showInstallBar('ホーム画面に追加すると、アプリとして使えます：共有ボタン（□↑）→「ホーム画面に追加」', false);
+        }, 3000);
       }
 
       // ---- 起動 ----
