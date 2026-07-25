@@ -1,8 +1,20 @@
 <!DOCTYPE html>
+<!--
+  ふりかえりジャーナル — GitHub Pages シェル（このパターンの配布層）
+
+  役割:
+    (a) 覚えやすい共通 URL を提供する
+    (b) GAS を再デプロイしても利用者に配った URL が変わらない間接層になる
+    (c) Google サインイン（GIS）を実行し、ID トークンを iframe 内の GAS へ postMessage で渡す
+    (d) PWA 化（ホーム画面に追加してアプリとして起動）
+    (e) 診断ページ（diag.html）への動線
+
+  ルーティング: ?t=<クラスコード> があれば児童モード（デプロイB）、無ければ先生モード（デプロイA）。
+-->
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ふりかえりジャーナル</title>
   <meta name="description" content="毎日の5分間で児童のメタ認知を育むふりかえりジャーナル">
   <meta name="theme-color" content="#f97316">
@@ -34,22 +46,6 @@
       border: none; display: none; background: #f8fafc;
     }
     body.app-active { background: #f8fafc; }
-    #install-bar {
-      position: fixed; left: 12px; right: 12px;
-      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-      background: #1f2937; color: #fff; border-radius: 20px;
-      padding: 14px 16px; display: none; align-items: center; gap: 12px;
-      box-shadow: 0 12px 35px rgba(0,0,0,.3); z-index: 50;
-      font-size: 13px; line-height: 1.6;
-    }
-    #install-bar.visible { display: flex; }
-    #install-bar .msg { flex: 1; font-weight: 700; }
-    #install-bar button {
-      border: none; cursor: pointer; font-family: inherit; font-weight: 900;
-      border-radius: 12px; padding: 10px 14px; font-size: 13px;
-    }
-    #install-bar .install { background: #f97316; color: #fff; white-space: nowrap; }
-    #install-bar .close { background: transparent; color: #9ca3af; padding: 6px 8px; font-size: 16px; }
     .screen {
       position: fixed; inset: 0; display: none;
       align-items: center; justify-content: center; padding: 24px;
@@ -80,20 +76,37 @@
       background: #f3f4f6; color: #4b5563; box-shadow: none;
       margin-top: 10px; font-weight: 700; font-size: 13px; padding: 12px;
     }
-    input[type="url"] {
-      width: 100%; padding: 14px 16px; margin-bottom: 12px;
-      border: 2px solid #e5e7eb; border-radius: 16px; font-size: 13px;
-      font-family: ui-monospace, monospace; outline: none; transition: border-color .2s;
-    }
-    input[type="url"]:focus { border-color: #f97316; }
     .spinner {
       width: 56px; height: 56px; margin: 0 auto 20px;
       border: 5px solid #fed7aa; border-top-color: #f97316;
       border-radius: 50%; animation: spin 1s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error-msg { color: #ef4444; font-size: 12px; font-weight: 700; min-height: 18px; margin-bottom: 8px; }
+    .gsi-holder { display: flex; justify-content: center; margin-bottom: 8px; min-height: 44px; }
     .hint { font-size: 11px; color: #9ca3af; line-height: 1.7; margin-top: 16px; margin-bottom: 0; }
+    a { color: #2563eb; font-weight: 700; }
+    #overlay {
+      position: fixed; inset: 0; background: rgba(255,255,255,.96);
+      display: none; align-items: center; justify-content: center; flex-direction: column;
+      gap: 16px; z-index: 60; padding: 24px; text-align: center;
+    }
+    #overlay.visible { display: flex; }
+    #install-bar {
+      position: fixed; left: 12px; right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      background: #1f2937; color: #fff; border-radius: 20px;
+      padding: 14px 16px; display: none; align-items: center; gap: 12px;
+      box-shadow: 0 12px 35px rgba(0,0,0,.3); z-index: 50;
+      font-size: 13px; line-height: 1.6;
+    }
+    #install-bar.visible { display: flex; }
+    #install-bar .msg { flex: 1; font-weight: 700; }
+    #install-bar button {
+      border: none; cursor: pointer; font-family: inherit; font-weight: 900;
+      border-radius: 12px; padding: 10px 14px; font-size: 13px;
+    }
+    #install-bar .install { background: #f97316; color: #fff; white-space: nowrap; }
+    #install-bar .close { background: transparent; color: #9ca3af; padding: 6px 8px; font-size: 16px; }
   </style>
 </head>
 <body>
@@ -106,35 +119,48 @@
     <div class="card">
       <div class="logo">📔</div>
       <div class="spinner"></div>
-      <h1>アプリを準備しています…</h1>
-      <p>はじめての場合は少し時間がかかることがあります。</p>
+      <h1 id="loading-title">アプリを準備しています…</h1>
+      <p id="loading-text">はじめての場合は少し時間がかかることがあります。</p>
     </div>
   </div>
 
-  <!-- exec URL 未設定時の入力画面 -->
-  <div id="screen-setup" class="screen">
-    <div class="card">
-      <div class="logo">📔</div>
-      <h1>はじめての設定</h1>
-      <p>先生から配られた「アプリのURL」<br>（https://script.google.com/… で始まるもの）を貼り付けてください。</p>
-      <div id="setup-error" class="error-msg"></div>
-      <input type="url" id="url-input" placeholder="https://script.google.com/macros/s/…/exec">
-      <button class="btn" id="save-url-btn">このURLで始める</button>
-      <p class="hint">URLは この端末のブラウザにのみ保存されます。</p>
-    </div>
-  </div>
-
-  <!-- 未ログイン時の案内画面 -->
+  <!-- Google サインイン -->
   <div id="screen-login" class="screen">
     <div class="card">
       <div class="logo">📔</div>
-      <h1>Googleでログインして始めよう</h1>
-      <p>アプリを使うには Google アカウントでの<br>ログインが必要です。<br>下のボタンでログインして、<br>この画面に戻ってきてください。</p>
-      <button class="btn" id="login-btn">Googleでログインして始める</button>
-      <button class="btn secondary" id="retry-btn">もう一度読み込む</button>
-      <button class="btn secondary" id="change-url-btn">アプリのURLを設定し直す</button>
-      <p class="hint">ログインが終わってこのタブに戻ると、自動でアプリを表示します。</p>
+      <h1>Googleでサインインしてはじめよう</h1>
+      <p id="login-text">アプリを使うには Google アカウントでの<br>サインインが必要です。</p>
+      <div id="gsi-button" class="gsi-holder"></div>
+      <p class="hint">サインイン情報はこのタブの中だけで使われます。</p>
     </div>
+  </div>
+
+  <!-- 接続失敗フォールバック -->
+  <div id="screen-fallback" class="screen">
+    <div class="card">
+      <div class="logo">📔</div>
+      <h1>うまくつながらないみたいです</h1>
+      <p>通信環境を確認して、もう一度ためしてください。<br>なんども失敗するときは接続診断をひらいてください。</p>
+      <button class="btn" id="retry-btn">もう一度読み込む</button>
+      <button class="btn secondary" id="open-tab-btn" style="display:none">Googleにログインして戻る（別タブ）</button>
+      <button class="btn secondary" id="open-diag-btn">接続診断をひらく</button>
+    </div>
+  </div>
+
+  <!-- 設定未完了 -->
+  <div id="screen-config-error" class="screen">
+    <div class="card">
+      <div class="logo">⚙️</div>
+      <h1>アプリの設定が未完了です</h1>
+      <p>配布元（運営者）が <code>docs/config.js</code> に<br>exec URL とクライアント ID を設定する必要があります。</p>
+    </div>
+  </div>
+
+  <!-- トークン期限切れの再サインイン -->
+  <div id="overlay">
+    <p style="font-weight:900; font-size:16px; margin:0;">サインインの有効期限が切れました</p>
+    <p style="margin:0;">もう一度サインインすると、そのまま続きから使えます。</p>
+    <div id="gsi-button-overlay" class="gsi-holder"></div>
   </div>
 
   <!-- インストール案内バー（Chrome: ワンタップ / iOS Safari: 手順案内） -->
@@ -144,194 +170,276 @@
     <button class="close" id="install-close" aria-label="閉じる">✕</button>
   </div>
 
-  <script>
-    (function () {
-      const LS_KEY_URL = 'rj_appUrl';
-      const LS_KEY_SHELL_OK = 'rj_shellOk'; // 一度でも表示に成功したか
+<script>
+(function () {
+  'use strict';
+  var CFG = window.APP_CONFIG || {};
+  var TOKEN_KEY = 'rj_id_token';   // sessionStorage のみ（共用端末対策で localStorage には置かない）
+  var READY_TIMEOUT_MS = 15000;
 
-      const frame = document.getElementById('app-frame');
-      const screens = {
-        loading: document.getElementById('screen-loading'),
-        setup: document.getElementById('screen-setup'),
-        login: document.getElementById('screen-login')
-      };
+  // ── ルーティング: ?t= の有無で 先生（デプロイA）/ 児童（デプロイB）を出し分け ──
+  var params = new URLSearchParams(location.search);
+  var tenantCode = String(params.get('t') || '').replace(/[^A-Z2-9]/gi, '').toUpperCase().slice(0, 16);
+  var mode = tenantCode ? 'member' : 'owner';
 
-      let appUrl = '';
-      let appReady = false;
-      let readyTimer = null;
-      let waitingForLoginReturn = false;
+  var frame = document.getElementById('app-frame');
+  var el = function (id) { return document.getElementById(id); };
 
-      function showScreen(name) {
-        Object.keys(screens).forEach((k) => screens[k].classList.toggle('active', k === name));
-        frame.style.display = name === 'app' ? 'block' : 'none';
-        document.body.classList.toggle('app-active', name === 'app');
-        if (name === 'app') {
-          Object.keys(screens).forEach((k) => screens[k].classList.remove('active'));
+  // 児童用デプロイ B は匿名アクセス前提（本人確認は ID トークンで行う）。
+  // ブラウザにログイン中の Google アカウント（組織の管理アカウント等）の Cookie が
+  // iframe に付くと、そのアカウント側のポリシーで GAS へのアクセスがブロックされる
+  // ことがあるため、児童モードでは Cookie を送らない credentialless iframe で読み込む。
+  // 先生モード（デプロイ A）は Session による本人特定に Cookie が必要なので付けない。
+  if (mode === 'member') { try { frame.setAttribute('credentialless', ''); } catch (e) {} }
+
+  var state = { appReady: false, frameBooted: false, readyTimer: null };
+
+  function show(section) {
+    ['screen-loading', 'screen-login', 'screen-fallback', 'screen-config-error'].forEach(function (id) {
+      el(id).classList.toggle('active', id === section);
+    });
+    frame.style.display = section ? 'none' : 'block';
+    document.body.classList.toggle('app-active', !section);
+  }
+  function showApp() {
+    ['screen-loading', 'screen-login', 'screen-fallback', 'screen-config-error'].forEach(function (id) {
+      el(id).classList.remove('active');
+    });
+    frame.style.display = 'block';
+    document.body.classList.add('app-active');
+  }
+
+  if (!CFG.execUrlA || !CFG.execUrlB || !CFG.googleClientId) { show('screen-config-error'); return; }
+
+  // ── ID トークンの保持（sessionStorage / 約1時間で失効） ──
+  function decodeExp(jwt) {
+    try {
+      var p = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return Number(p.exp) || 0;
+    } catch (e) { return 0; }
+  }
+  function saveToken(jwt) {
+    try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ t: jwt, exp: decodeExp(jwt) })); } catch (e) {}
+  }
+  function getToken() {
+    try {
+      var raw = sessionStorage.getItem(TOKEN_KEY);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (!o.t || o.exp * 1000 < Date.now() + 60000) return null;  // 失効60秒前から期限切れ扱い
+      return o.t;
+    } catch (e) { return null; }
+  }
+
+  // ── GIS (Google Identity Services) ──
+  function onCredential(res) {
+    if (!res || !res.credential) return;
+    saveToken(res.credential);
+    el('overlay').classList.remove('visible');
+    bootFrame();
+    deliverToken();
+  }
+
+  function gisLoaded() {
+    google.accounts.id.initialize({
+      client_id: CFG.googleClientId, callback: onCredential,
+      auto_select: true, itp_support: true
+    });
+    if (getToken()) { bootFrame(); return; }
+    show('screen-login');
+    renderButton('gsi-button');
+    try { google.accounts.id.prompt(); } catch (e) {}   // まずサイレント取得を試す
+  }
+
+  function renderButton(id) {
+    try {
+      google.accounts.id.renderButton(el(id), {
+        type: 'standard', theme: 'filled_blue', size: 'large', shape: 'pill', locale: 'ja'
+      });
+    } catch (e) {}
+  }
+
+  function requestFreshToken() {
+    try {
+      google.accounts.id.prompt(function (n) {
+        if (n && ((n.isNotDisplayed && n.isNotDisplayed()) || (n.isSkippedMoment && n.isSkippedMoment()))) {
+          el('overlay').classList.add('visible');
+          renderButton('gsi-button-overlay');
         }
-      }
-
-      function isValidExecUrl(url) {
-        return /^https:\/\/script\.google\.com\/(a\/)?(macros\/)?[^\s]+/.test(url);
-      }
-
-      // exec URL の解決: config.js → localStorage
-      function resolveAppUrl() {
-        if (window.APP_CONFIG && window.APP_CONFIG.appUrl) return window.APP_CONFIG.appUrl;
-        try { return localStorage.getItem(LS_KEY_URL) || ''; } catch (e) { return ''; }
-      }
-
-      function loadApp() {
-        appReady = false;
-        showScreen('loading');
-        // src を貼り直して再読み込み
-        frame.src = 'about:blank';
-        setTimeout(() => { frame.src = appUrl; }, 50);
-
-        if (readyTimer) clearTimeout(readyTimer);
-        // 一度成功している端末は回線待ちの可能性が高いので長めに待つ
-        let timeoutMs = 12000;
-        try { if (localStorage.getItem(LS_KEY_SHELL_OK)) timeoutMs = 20000; } catch (e) {}
-        readyTimer = setTimeout(() => {
-          if (!appReady) {
-            // 未ログインだと Google のログイン画面は iframe 内に表示できず
-            // app:ready が届かない → ログイン案内へ
-            showScreen('login');
-          }
-        }, timeoutMs);
-      }
-
-      // ---- GAS アプリとのハンドシェイク ----
-      window.addEventListener('message', (ev) => {
-        const data = ev && ev.data;
-        if (!data || typeof data.type !== 'string') return;
-
-        if (data.type === 'app:ready') {
-          appReady = true;
-          waitingForLoginReturn = false;
-          if (readyTimer) clearTimeout(readyTimer);
-          try { localStorage.setItem(LS_KEY_SHELL_OK, '1'); } catch (e) {}
-          showScreen('app');
-          // シェル内で動作していることをアプリへ通知
-          try { if (ev.source) ev.source.postMessage({ type: 'app:shellAck' }, '*'); } catch (e) {}
-        }
-
-        if (data.type === 'app:reload') {
-          loadApp();
-        }
       });
+    } catch (e) {
+      el('overlay').classList.add('visible');
+      renderButton('gsi-button-overlay');
+    }
+  }
 
-      // ログインのため別タブへ行って戻ってきたら自動再試行
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && waitingForLoginReturn) {
-          waitingForLoginReturn = false;
-          loadApp();
-        }
-      });
+  // ── iframe 起動 ──
+  // 児童モードは「素の exec URL」で開く。クラスコード付き URL の iframe 読み込みを
+  // Google 側が拒否する環境が確認されているため、コードは app:idToken メッセージで渡す。
+  function frameUrl() {
+    if (mode === 'member') return CFG.execUrlB;
+    return CFG.execUrlA + (CFG.execUrlA.indexOf('?') >= 0 ? '&' : '?') + 'portal=1';
+  }
 
-      // ---- 画面のボタン ----
-      document.getElementById('save-url-btn').addEventListener('click', () => {
-        const v = document.getElementById('url-input').value.trim();
-        const errEl = document.getElementById('setup-error');
-        if (!isValidExecUrl(v)) {
-          errEl.textContent = 'URLの形式が正しくありません。https://script.google.com/… で始まるURLを入力してください。';
-          return;
-        }
-        errEl.textContent = '';
-        try { localStorage.setItem(LS_KEY_URL, v); } catch (e) {}
-        appUrl = v;
-        loadApp();
-      });
+  function bootFrame() {
+    show('screen-loading');
+    el('loading-title').textContent = 'アプリをひらいています…';
+    if (!state.frameBooted) { state.frameBooted = true; frame.src = frameUrl(); }
+    armReadyTimeout();
+  }
 
-      document.getElementById('login-btn').addEventListener('click', () => {
-        // 未ログイン時: Google のログイン画面は iframe 内に出せないため別タブで開く
-        waitingForLoginReturn = true;
-        window.open(appUrl, '_blank', 'noopener');
-      });
+  function reloadFrame() {
+    state.appReady = false;
+    show('screen-loading');
+    frame.src = 'about:blank';
+    setTimeout(function () { frame.src = frameUrl(); }, 50);
+    armReadyTimeout();
+  }
 
-      document.getElementById('retry-btn').addEventListener('click', loadApp);
+  function armReadyTimeout() {
+    clearTimeout(state.readyTimer);
+    state.readyTimer = setTimeout(function () {
+      if (state.appReady) return;
+      show('screen-fallback');
+    }, READY_TIMEOUT_MS);
+  }
 
-      document.getElementById('change-url-btn').addEventListener('click', () => {
-        if (window.APP_CONFIG && window.APP_CONFIG.appUrl) {
-          alert('このアプリのURLは配布元によって固定されています。');
-          return;
-        }
-        try { localStorage.removeItem(LS_KEY_URL); } catch (e) {}
-        showScreen('setup');
-      });
+  // ── iframe との postMessage ハンドシェイク ──
+  // GAS の Web アプリは script.google.com / *.googleusercontent.com 配下で動く。
+  // それ以外のオリジンからのメッセージはすべて無視する（必須の防御線）。
+  function isAllowedOrigin(origin) {
+    if (origin === 'https://script.google.com') return true;
+    return /^https:\/\/[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*\.googleusercontent\.com$/i.test(origin);
+  }
 
-      // ---- Service Worker（シェル資産のみキャッシュ） ----
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./sw.js').catch(() => {});
-        });
-      }
+  var appPort = null;
+  function sendToApp(msg) {
+    if (!appPort) return;
+    try { appPort.source.postMessage(msg, appPort.origin); } catch (e) {}
+  }
+  function deliverToken() {
+    if (mode !== 'member') return;   // 先生モードは Session 認証なのでトークン不要
+    var t = getToken();
+    if (!t) { requestFreshToken(); return; }
+    sendToApp({ type: 'app:idToken', idToken: t, tenantCode: tenantCode });
+  }
 
-      // ---- アプリとしてインストール（Chrome / Edge / Android と iOS Safari） ----
-      const LS_KEY_INSTALL_DISMISSED = 'rj_installDismissedAt';
-      const installBar = document.getElementById('install-bar');
-      const installMsg = document.getElementById('install-msg');
-      const installBtn = document.getElementById('install-btn');
-      let deferredInstallPrompt = null;
+  window.addEventListener('message', function (ev) {
+    if (!isAllowedOrigin(ev.origin)) return;
+    var d = ev.data || {};
+    if (d.type === 'app:ready') {
+      state.appReady = true;
+      clearTimeout(state.readyTimer);
+      showApp();
+      appPort = { source: ev.source, origin: ev.origin };
+      sendToApp({ type: 'app:shellAck' });
+      deliverToken();
+    } else if (d.type === 'app:needToken') {
+      appPort = appPort || { source: ev.source, origin: ev.origin };
+      var t = getToken();
+      if (t) sendToApp({ type: 'app:idToken', idToken: t, tenantCode: tenantCode });
+      else requestFreshToken();
+    } else if (d.type === 'app:reload') {
+      reloadFrame();
+    }
+  });
 
-      function isStandalone() {
-        return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-      }
-      function isIos() {
-        return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS
-      }
-      function installDismissedRecently() {
-        try {
-          const at = Number(localStorage.getItem(LS_KEY_INSTALL_DISMISSED) || 0);
-          return at && (Date.now() - at) < 14 * 24 * 60 * 60 * 1000; // 14日間は再表示しない
-        } catch (e) { return false; }
-      }
-      function showInstallBar(message, showButton) {
-        if (isStandalone() || installDismissedRecently()) return;
-        installMsg.textContent = message;
-        installBtn.style.display = showButton ? 'block' : 'none';
-        installBar.classList.add('visible');
-      }
+  // 別タブからサインインして戻ってきた場合の自動再試行
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && state.frameBooted && !state.appReady) {
+      reloadFrame();
+    }
+  });
 
-      // Chrome / Edge / Android: beforeinstallprompt を受けてワンタップ導線を出す
-      window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredInstallPrompt = e;
-        showInstallBar('このアプリを端末にインストールできます', true);
-      });
+  // ── 画面のボタン ──
+  el('retry-btn').addEventListener('click', function () {
+    if (!state.frameBooted) bootFrame();
+    else reloadFrame();
+  });
+  // 先生モード（デプロイA）はログイン必須のため、ブラウザによっては iframe に
+  // Google のセッション Cookie が渡らず表示できないことがある。
+  // その場合は別タブでログインしてもらい、戻ってきたら visibilitychange で自動再試行する。
+  if (mode === 'owner') {
+    el('open-tab-btn').style.display = 'inline-block';
+    el('open-tab-btn').addEventListener('click', function () {
+      window.open(frameUrl(), '_blank', 'noopener');
+    });
+  }
+  el('open-diag-btn').addEventListener('click', function () {
+    location.href = 'diag.html' + (tenantCode ? '?t=' + encodeURIComponent(tenantCode) : '');
+  });
 
-      installBtn.addEventListener('click', async () => {
-        if (!deferredInstallPrompt) return;
-        installBar.classList.remove('visible');
-        deferredInstallPrompt.prompt();
-        try { await deferredInstallPrompt.userChoice; } catch (e) {}
-        deferredInstallPrompt = null;
-      });
+  // ── Service Worker（シェル資産のみキャッシュ） ──
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('./sw.js').catch(function () {}); });
+  }
 
-      document.getElementById('install-close').addEventListener('click', () => {
-        installBar.classList.remove('visible');
-        try { localStorage.setItem(LS_KEY_INSTALL_DISMISSED, String(Date.now())); } catch (e) {}
-      });
+  // ── アプリとしてインストール（Chrome / Edge / Android と iOS Safari） ──
+  var LS_KEY_INSTALL_DISMISSED = 'rj_installDismissedAt';
+  var installBar = el('install-bar');
+  var installMsg = el('install-msg');
+  var installBtn = el('install-btn');
+  var deferredInstallPrompt = null;
 
-      window.addEventListener('appinstalled', () => {
-        installBar.classList.remove('visible');
-      });
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+  function isIos() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS
+  }
+  function installDismissedRecently() {
+    try {
+      var at = Number(localStorage.getItem(LS_KEY_INSTALL_DISMISSED) || 0);
+      return at && (Date.now() - at) < 14 * 24 * 60 * 60 * 1000; // 14日間は再表示しない
+    } catch (e) { return false; }
+  }
+  function showInstallBar(message, showButton) {
+    if (isStandalone() || installDismissedRecently()) return;
+    installMsg.textContent = message;
+    installBtn.style.display = showButton ? 'block' : 'none';
+    installBar.classList.add('visible');
+  }
 
-      // iOS Safari には beforeinstallprompt が無いため、手順を案内する
-      if (isIos() && !isStandalone()) {
-        setTimeout(() => {
-          showInstallBar('ホーム画面に追加すると、アプリとして使えます：共有ボタン（□↑）→「ホーム画面に追加」', false);
-        }, 3000);
-      }
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    showInstallBar('このアプリを端末にインストールできます', true);
+  });
 
-      // ---- 起動 ----
-      appUrl = resolveAppUrl();
-      if (appUrl && isValidExecUrl(appUrl)) {
-        loadApp();
-      } else {
-        showScreen('setup');
-      }
-    })();
-  </script>
+  installBtn.addEventListener('click', function () {
+    if (!deferredInstallPrompt) return;
+    installBar.classList.remove('visible');
+    deferredInstallPrompt.prompt();
+    deferredInstallPrompt = null;
+  });
+
+  document.getElementById('install-close').addEventListener('click', function () {
+    installBar.classList.remove('visible');
+    try { localStorage.setItem(LS_KEY_INSTALL_DISMISSED, String(Date.now())); } catch (e) {}
+  });
+
+  window.addEventListener('appinstalled', function () {
+    installBar.classList.remove('visible');
+  });
+
+  if (isIos() && !isStandalone()) {
+    setTimeout(function () {
+      showInstallBar('ホーム画面に追加すると、アプリとして使えます：共有ボタン（□↑）→「ホーム画面に追加」', false);
+    }, 3000);
+  }
+
+  // ── GIS ローダー ──
+  var s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.async = true; s.defer = true;
+  s.onload = function () { gisLoaded(); };
+  s.onerror = function () {
+    el('loading-title').textContent = 'Google に接続できません';
+    el('loading-text').textContent = '通信環境を確認して再読み込みしてください。';
+  };
+  document.head.appendChild(s);
+})();
+</script>
 </body>
 </html>
