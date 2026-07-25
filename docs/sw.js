@@ -6,7 +6,7 @@
 // 認証・データがあるため【絶対にキャッシュしない】。
 // ============================================================
 
-const CACHE_NAME = 'rj-shell-v3';
+const CACHE_NAME = 'rj-shell-v4';
 const SHELL_ASSETS = [
   './',
   './index.html',
