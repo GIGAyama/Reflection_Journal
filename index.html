@@ -4,14 +4,39 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>ふりかえりジャーナル</title>
-  
+
+  <script>
+    // GAS テンプレートが評価する行。doGet(Main.gs) が渡すブート情報。
+    // GAS 外で開いた場合はこのブロックだけが構文エラーになるが、
+    // 次の <script> ブロックでフォールバックが働く
+    window.BOOT = {
+      mode: '<?= bootMode ?>',              // 'owner' | 'member'
+      tenantCode: '<?= bootTenantCode ?>',
+      shellUrl: '<?= bootShellUrl ?>',
+      shellOrigin: '<?= bootShellOrigin ?>'
+    };
+  </script>
+  <script>
+    // ローカルプレビュー用フォールバック
+    if (!window.BOOT) window.BOOT = { mode: 'owner', tenantCode: '', shellUrl: '', shellOrigin: '' };
+  </script>
+  <script>
+    // ── 起動ビーコン（CDN が読めない環境でも到達をシェルへ通知するため、素の JS で先頭に置く） ──
+    (function () {
+      try {
+        var target = window.BOOT.shellOrigin || '*';
+        window.parent.postMessage({ type: 'app:loaded', libs: { react: !!window.React, babel: !!window.Babel } }, target);
+      } catch (e) {}
+    })();
+  </script>
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
-  
+
   <style>
     body { font-family: 'Zen Maru Gothic', sans-serif; background-color: #f8fafc; overflow: hidden; }
 
@@ -25,21 +50,21 @@
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f8fafc; }
     ::-webkit-scrollbar-track { background: transparent; }
-    
-    .lined-paper { 
-      line-height: 40px; 
+
+    .lined-paper {
+      line-height: 40px;
       background-image: linear-gradient(transparent, transparent 39px, #e2e8f0 39px, #e2e8f0 40px);
       background-size: 100% 40px;
-      background-attachment: local; 
+      background-attachment: local;
     }
-    
+
     .highlight-marker { background-color: #fef08a; padding: 0.1rem 0; border-radius: 0.2rem; cursor: pointer; transition: all 0.2s; }
     .highlight-marker:hover { background-color: #fde047; box-shadow: 0 0 8px rgba(253, 224, 71, 0.8); }
     .shadow-premium { box-shadow: 0 4px 25px -2px rgba(0, 0, 0, 0.04), 0 0 5px rgba(0,0,0,0.01); }
-    
+
     @keyframes fadeInScale { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
     .animate-fade-in { animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    
+
     @keyframes slideDownBounce {
       0% { opacity: 0; transform: translateY(-20px); }
       70% { transform: translateY(5px); }
@@ -54,53 +79,95 @@
   </style>
 
   <script>
-    // GAS テンプレートが評価する行。GAS 外で開いた場合はこのブロックだけが
-    // 構文エラーになるが、次の <script> ブロックでフォールバックが働く
-    window.APP_DATA = <?!= typeof initialData !== 'undefined' ? initialData : 'null' ?>;
-  </script>
-  <script>
-    try {
-      if (!window.APP_DATA) {
-        window.APP_DATA = {
-          user: { name: 'テスト先生', role: '担任', email: 'teacher@example.com' }, isAdmin: true, todayTheme: '今日の学びをふり返ろう',
-          journals: [
-            { journalId: '1', timestamp: new Date(Date.now() - 86400000*0).toISOString(), date: '今日', email: 'yamada@example.com', studentName: '山田 太郎', status: '未返却', content: '今日は算数が難しかったけど、がんばりました！', emotion: '😊 うれしい', teacherComment: '', highlights: '[]' },
-            { journalId: '2', timestamp: new Date(Date.now() - 86400000*1).toISOString(), date: '昨日', email: 'yamada@example.com', studentName: '山田 太郎', status: '返却済み', content: '国語の発表で緊張した。', emotion: '🤔 もやもや', teacherComment: '', highlights: '[]' }
-          ],
-          classRoster: [{name: '山田 太郎', email: 'yamada@example.com', role: '児童'}],
-          tenant: { linked: true, spreadsheetId: 'test', spreadsheetName: 'テストDB', email: 'teacher@example.com', canCreate: true, templateConfigured: false }
-        };
-      }
-    } catch(e) { console.error(e); }
-  </script>
-
-  <script>
     // ==========================================
-    // 🤝 PWAシェル（GitHub Pages）とのハンドシェイク
+    // 🤝 PWAシェル（GitHub Pages）とのブリッジ
+    //    - 児童モード: ID トークン + クラスコードを postMessage ハンドシェイクで受領
+    //    - 先生モード: Session で本人特定するためトークン不要（描画完了通知のみ）
     // ==========================================
     (function () {
       window.__shellAcked = false;
 
-      window.addEventListener('message', function (ev) {
-        if (ev && ev.data && ev.data.type === 'app:shellAck') {
-          // シェル内（iframe埋め込み）で動作していることが確定
-          window.__shellAcked = true;
-        }
-      });
+      function post(msg) {
+        var target = window.BOOT.shellOrigin || '*';
+        try { window.parent.postMessage(msg, target); } catch (e) {}
+        try { if (window.top && window.top !== window.parent) window.top.postMessage(msg, target); } catch (e) {}
+        // 「べつのタブでひらく」動線: シェルが window.open で開いた場合は opener がシェル
+        try { if (window.opener) window.opener.postMessage(msg, target); } catch (e) {}
+      }
 
-      // アプリ描画完了をシェルへ通知（top / parent 両方に送る）
-      window.notifyShellReady = function () {
-        try { window.top.postMessage({ type: 'app:ready' }, '*'); } catch (e) {}
-        try { window.parent.postMessage({ type: 'app:ready' }, '*'); } catch (e) {}
+      // ── シェル連携ブリッジ（児童モード） ──
+      // 受信は shellOrigin が設定されていればそのオリジンのみ許可。
+      // ID トークンの真正性はサーバー側検証（Auth.gs）が最終防衛線。
+      var Bridge = {
+        token: null,
+        tenantCode: window.BOOT.tenantCode || '',
+        waiters: [],
+
+        init: function () {
+          if (this._inited) return;
+          this._inited = true;
+          var self = this;
+          window.addEventListener('message', function (ev) {
+            if (window.BOOT.shellOrigin && ev.origin !== window.BOOT.shellOrigin) return;   // ★ origin 検証
+            var d = ev.data || {};
+            if (d.type === 'app:shellAck') window.__shellAcked = true;
+            if (d.type === 'app:idToken' && typeof d.idToken === 'string' && d.idToken) {
+              // クラスコードは URL パラメータではなくハンドシェイクで受け取る
+              if (typeof d.tenantCode === 'string' && d.tenantCode) {
+                self.tenantCode = d.tenantCode.replace(/[^A-Z2-9]/gi, '').toUpperCase().slice(0, 16);
+              }
+              self.token = d.idToken;
+              self.waiters.splice(0).forEach(function (w) { w.done(d.idToken); });
+            }
+          });
+        },
+
+        // announce を 700ms 間隔で再送する。iframe の準備完了とシェルの listener 登録に
+        // 競合があるため、1 回だけ送る実装だと取りこぼす
+        _wait: function (announce, timeoutMs) {
+          var self = this;
+          return new Promise(function (resolve, reject) {
+            var iv = setInterval(announce, 700);
+            var w = {};
+            var tm = setTimeout(function () { finish(false); }, timeoutMs);
+            function finish(ok, v) {
+              clearInterval(iv); clearTimeout(tm);
+              self.waiters = self.waiters.filter(function (x) { return x !== w; });
+              ok ? resolve(v) : reject(new Error('シェルに接続できません。共通URL（先生から配られたURL）から開いてください'));
+            }
+            w.done = function (t) { finish(true, t); };
+            self.waiters.push(w);
+            announce();
+          });
+        },
+
+        getToken: function (timeoutMs) {
+          if (this.token) return Promise.resolve(this.token);
+          return this._wait(function () { post({ type: 'app:ready' }); }, timeoutMs || 20000);
+        },
+
+        refresh: function (timeoutMs) {
+          this.token = null;
+          return this._wait(function () { post({ type: 'app:needToken' }); }, timeoutMs || 25000);
+        }
       };
+      window.Bridge = Bridge;
+      if (window.BOOT.mode === 'member') { Bridge.init(); post({ type: 'app:ready' }); }
+      else {
+        window.addEventListener('message', function (ev) {
+          if (window.BOOT.shellOrigin && ev.origin !== window.BOOT.shellOrigin) return;
+          if (ev.data && ev.data.type === 'app:shellAck') window.__shellAcked = true;
+        });
+      }
+
+      // 描画完了をシェルへ通知
+      window.notifyShellReady = function () { post({ type: 'app:ready' }); };
 
       // 再読み込みヘルパー: シェル内なら親に app:reload を送って iframe を貼り直してもらう。
-      // 単体表示（直接 exec URL を開いている）なら自分でリロードする。
-      // ※ シェル(別オリジン)内で window.top.location にアクセスすると SecurityError に
-      //   なるため、必ずこのヘルパーを経由すること。
+      // 単体表示なら自分でリロードする。（別オリジンの top への location アクセスは
+      // SecurityError になるため、必ずこのヘルパーを経由すること）
       window.appReload = function () {
-        try { window.top.postMessage({ type: 'app:reload' }, '*'); } catch (e) {}
-        try { window.parent.postMessage({ type: 'app:reload' }, '*'); } catch (e) {}
+        post({ type: 'app:reload' });
         if (!window.__shellAcked) {
           try { window.top.location.reload(); } catch (e) { window.location.reload(); }
         }
@@ -108,6 +175,55 @@
 
       window.addEventListener('load', function () { setTimeout(window.notifyShellReady, 0); });
     })();
+
+    // ── GAS 呼び出しラッパ（サーバーは必ず JSON 文字列を返す） ──
+    window.runGas = function (fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      return new Promise(function (resolve, reject) {
+        if (typeof google === 'undefined' || !google.script) { reject(new Error('サーバーに接続できません')); return; }
+        google.script.run
+          .withSuccessHandler(function (res) {
+            try { resolve(JSON.parse(res)); } catch (e) { resolve(res); }
+          })
+          .withFailureHandler(reject)[fn].apply(google.script.run, args);
+      });
+    };
+
+    /** 先生 API 呼び出し（デプロイ A。Session で本人特定するのでトークン不要） */
+    window.callOwnerApi = function (fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      return window.runGas.apply(null, [fn].concat(args));
+    };
+
+    /**
+     * 児童 API 呼び出し。第 1 引数の idToken と第 2 引数の tenantCode を自動で付ける。
+     * TOKEN_EXPIRED が返ったらシェルにトークン再取得を要求し、一度だけ自動リトライする
+     * （児童は何も操作しなくてよい）。LOCK_BUSY は指数バックオフでリトライする。
+     */
+    window.callMemberApi = async function (fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      var token = await window.Bridge.getToken();
+      var res = await window.runGas.apply(null, [fn, token, window.Bridge.tenantCode].concat(args));
+      if (res && !res.success && res.code === 'TOKEN_EXPIRED') {
+        token = await window.Bridge.refresh();
+        res = await window.runGas.apply(null, [fn, token, window.Bridge.tenantCode].concat(args));
+      }
+      return res;
+    };
+
+    window.callMemberApiWithBackoff = async function () {
+      var args = Array.prototype.slice.call(arguments);
+      var delay = 300;
+      for (var i = 0; ; i++) {
+        var res = await window.callMemberApi.apply(null, args);
+        if (res && !res.success && res.code === 'LOCK_BUSY' && i < 3) {
+          await new Promise(function (r) { setTimeout(r, delay); });
+          delay *= 2;
+          continue;
+        }
+        return res;
+      }
+    };
   </script>
 </head>
 <body>
@@ -143,6 +259,34 @@
       return html;
     };
 
+    // 画像はサーバーへ送る前にブラウザ側で縮小・圧縮する
+    // （シート内チャンク保存のため Data URL 上限 ≒ 700,000 文字に収める）
+    const compressImage = (file, maxSize = 1024) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('画像を読み込めませんでした'));
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('画像を読み込めませんでした'));
+        img.onload = () => {
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          let quality = 0.85;
+          let dataUrl = canvas.toDataURL('image/jpeg', quality);
+          while (dataUrl.length > 700000 && quality > 0.3) {
+            quality -= 0.15;
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+          }
+          if (dataUrl.length > 700000) reject(new Error('画像が大きすぎます。小さい画像でためしてね'));
+          else resolve(dataUrl);
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
     const RubyText = ({ text, kana }) => (
       <ruby className="align-baseline">
         {text}
@@ -158,7 +302,10 @@
       Image: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12", Check: "M20 6L9 17l-5-5", User: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", Close: "M18 6L6 18 M6 6l12 12",
       Trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2", Sparkles: "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 5.6l2.1 2.1", Info: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 16v-4 M12 8h.01", Settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z", Search: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z", Pulse: "M4.318 16.318a4.5 4.5 0 000 6.364L12 20.364l7.682 2.318a4.5 4.5 0 000-6.364M12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0M12 7.636l1.318-1.318a4.5 4.5 0 016.364 0M12 7.636v-6",
       Pen: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z", Save: "M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4",
-      Plus: "M12 4v16m8-8H4", Download: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+      Plus: "M12 4v16m8-8H4", Download: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
+      Link: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1",
+      Copy: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z",
+      Refresh: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
     };
 
     const Toast = ({ message, type, onClose }) => {
@@ -184,24 +331,63 @@
       );
     };
 
-    const useGas = () => {
+    // API 呼び出しの共通フック。owner / member を明示して呼び分ける。
+    // 戻り値は常に { success, ... }。通信自体の失敗はトーストを出して success:false を返す。
+    const useServer = () => {
       const [isLoading, setIsLoading] = useState(false);
       const [toast, setToast] = useState(null);
-      const call = (funcName, ...args) => {
+      const wrap = async (promise) => {
         setIsLoading(true);
-        return new Promise((resolve, reject) => {
-          if (typeof google === 'undefined' || !google.script) { setTimeout(() => { setIsLoading(false); resolve({ success: true, message: "テスト成功", data: args[0] }); }, 800); return; }
-          google.script.run.withSuccessHandler(res => { setIsLoading(false); resolve(res); }).withFailureHandler(err => { setIsLoading(false); setToast({ message: "通信エラー", type: "error" }); reject(err); })[funcName](...args);
-        });
+        try { return await promise; }
+        catch (e) { setToast({ message: (e && e.message) || '通信エラー', type: 'error' }); return { success: false, error: (e && e.message) || '通信エラー' }; }
+        finally { setIsLoading(false); }
       };
-      return { call, isLoading, toast, setToast, showToast: (msg, type="success") => setToast({ message: msg, type }) };
+      const owner = (fn, ...args) => wrap(window.callOwnerApi(fn, ...args));
+      const member = (fn, ...args) => wrap(window.callMemberApi(fn, ...args));
+      const memberWrite = (fn, ...args) => wrap(window.callMemberApiWithBackoff(fn, ...args));
+      return { owner, member, memberWrite, isLoading, toast, setToast, showToast: (msg, type="success") => setToast({ message: msg, type }) };
     };
+
+    const failMsg = (res, fallback) => (res && (res.message || res.error)) || fallback;
+
+    // 画像の遅延読み込み（画像本体は getImage API から Data URL で取得する）
+    const LazyImage = ({ imageId, fetcher, className }) => {
+      const [src, setSrc] = useState(null);
+      const [failed, setFailed] = useState(false);
+      useEffect(() => {
+        let alive = true;
+        setSrc(null); setFailed(false);
+        if (!imageId) return;
+        fetcher(imageId).then(res => {
+          if (!alive) return;
+          if (res && res.success && res.dataUrl) setSrc(res.dataUrl);
+          else setFailed(true);
+        }).catch(() => { if (alive) setFailed(true); });
+        return () => { alive = false; };
+      }, [imageId]);
+      if (!imageId || failed) return null;
+      if (!src) return <div className="mt-4 w-40 h-24 rounded-xl bg-gray-100 animate-pulse" />;
+      return <img src={src} className={className} />;
+    };
+
+    const FullScreenSpinner = ({ color = 'border-orange-500' }) => (
+      <div className="h-screen flex items-center justify-center bg-gray-50"><div className={`w-16 h-16 border-4 ${color} border-t-transparent rounded-full animate-spin`}></div></div>
+    );
+
+    const CenterCard = ({ icon, children }) => (
+      <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto">
+        <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8 text-center">
+          <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30 text-3xl">{icon}</div>
+          {children}
+        </div>
+      </div>
+    );
 
     // ==========================================
     // 🎒 児童用画面 (Student App)
     // ==========================================
-    const StudentApp = ({ data }) => {
-      const { call, isLoading, toast, setToast, showToast } = useGas();
+    const StudentApp = ({ data, server, refresh }) => {
+      const { member, memberWrite, isLoading, toast, setToast, showToast } = server;
       const [content, setContent] = useState("");
       const [emotion, setEmotion] = useState("");
       const [imageFile, setImageFile] = useState(null);
@@ -214,10 +400,13 @@
       const [readJournals, setReadJournals] = useState([]);
       const [unreadJournals, setUnreadJournals] = useState([]);
 
+      // localStorage のキーは email ではなく匿名 uid を使う（端末に email を残さない）
+      const storeKey = (prefix) => `${prefix}_${data.user.uid}`;
+
       useEffect(() => {
-        const savedDraft = localStorage.getItem(`draft_${data.user.email}`);
+        const savedDraft = localStorage.getItem(storeKey('draft'));
         if (savedDraft && !content) setContent(savedDraft);
-        const savedRead = JSON.parse(localStorage.getItem(`read_journals_${data.user.email}`) || "[]");
+        const savedRead = JSON.parse(localStorage.getItem(storeKey('read_journals')) || "[]");
         setReadJournals(savedRead);
         const unreads = data.journals.filter(j => j.status === '返却済み' && !savedRead.includes(j.journalId));
         setUnreadJournals(unreads);
@@ -226,7 +415,7 @@
       const handleContentChange = (e) => {
         const val = e.target.value;
         setContent(val);
-        localStorage.setItem(`draft_${data.user.email}`, val);
+        localStorage.setItem(storeKey('draft'), val);
       };
 
       const emotions = ["😊 うれしい", "😠 くやしい", "💡 なるほど", "🤔 もやもや"];
@@ -263,7 +452,7 @@
           const endPos = ta.selectionEnd;
           const newContent = content.substring(0, startPos) + textToInsert + content.substring(endPos);
           setContent(newContent);
-          localStorage.setItem(`draft_${data.user.email}`, newContent);
+          localStorage.setItem(storeKey('draft'), newContent);
           setTimeout(() => { ta.focus(); ta.setSelectionRange(startPos + textToInsert.length, startPos + textToInsert.length); }, 0);
         } else {
           setContent(prev => prev + textToInsert);
@@ -273,26 +462,23 @@
 
       const handleImage = (e) => {
         const file = e.target.files[0];
-        if (file) { const reader = new FileReader(); reader.onload = (ev) => setImageFile({ name: file.name, type: file.type, data: ev.target.result.split(',')[1], preview: ev.target.result }); reader.readAsDataURL(file); }
+        if (!file) return;
+        compressImage(file).then(dataUrl => {
+          setImageFile({ name: file.name, dataUrl: dataUrl });
+        }).catch(err => showToast(err.message, "error"));
       };
 
       const handleSubmit = async () => {
         if (!content.trim()) return showToast("本文を書いてね！", "error");
-        let imageFileId = "";
-        if (imageFile) {
-          const res = await call('uploadImage', { fileName: imageFile.name, mimeType: imageFile.type, data: imageFile.data });
-          if (res && res.success) imageFileId = res.fileId;
-          else return showToast((res && res.message) || "画像のアップロードに失敗しました。画像なしで提出するか、もう一度ためしてね。", "error");
-        }
-        const res = await call('saveJournal', { email: data.user.email, theme: data.todayTheme, content, emotion, imageFileId });
-        if (!res || !res.success) return showToast((res && res.message) || "提出できませんでした。もう一度ためしてね。", "error");
-        if (res.success) {
-          localStorage.removeItem(`draft_${data.user.email}`); 
-          if (typeof confetti === 'function') confetti({ particleCount: 200, spread: 90, origin: { y: 0.6 }, colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981'] });
-          showToast("先生に提出できたよ！");
-          setContent(""); setEmotion(""); setImageFile(null);
-          setTimeout(() => window.appReload(), 2500);
-        }
+        const res = await memberWrite('mbSaveJournal', {
+          content, emotion, imageDataUrl: imageFile ? imageFile.dataUrl : ''
+        });
+        if (!res || !res.success) return showToast(failMsg(res, "提出できませんでした。もう一度ためしてね。"), "error");
+        localStorage.removeItem(storeKey('draft'));
+        if (typeof confetti === 'function') confetti({ particleCount: 200, spread: 90, origin: { y: 0.6 }, colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981'] });
+        showToast("先生に提出できたよ！");
+        setContent(""); setEmotion(""); setImageFile(null);
+        setTimeout(refresh, 2000);
       };
 
       const openJournalModal = (journal) => {
@@ -301,7 +487,7 @@
         if (journal.status === '返却済み' && !readJournals.includes(journal.journalId)) {
           const newRead = [...readJournals, journal.journalId];
           setReadJournals(newRead);
-          localStorage.setItem(`read_journals_${data.user.email}`, JSON.stringify(newRead));
+          localStorage.setItem(storeKey('read_journals'), JSON.stringify(newRead));
           setUnreadJournals(prev => prev.filter(j => j.journalId !== journal.journalId));
         }
       };
@@ -315,23 +501,23 @@
 
       const handleSavePastComment = async () => {
         if(!pastCommentInput.trim()) return;
-        const res = await call('addPastComment', activePastJournal.journalId, pastCommentInput);
+        const res = await memberWrite('mbAddPastComment', activePastJournal.journalId, pastCommentInput);
         if(res && res.success) { showToast("過去の自分にメッセージを送りました！"); setActivePastJournal(null); }
-        else showToast((res && res.message) || "保存できませんでした", "error");
+        else showToast(failMsg(res, "保存できませんでした"), "error");
       };
 
       const renderCalendarDays = () => {
         const y = currentMonth.getFullYear(), m = currentMonth.getMonth();
         const firstDay = new Date(y, m, 1).getDay(), lastDate = new Date(y, m + 1, 0).getDate();
-        
+
         let days = [];
         for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="p-2"></div>);
         for (let i = 1; i <= lastDate; i++) {
           const ds = new Date(y, m, i).toLocaleDateString('ja-JP');
           const matchedJournals = data.journals.filter(j => new Date(j.timestamp).toLocaleDateString('ja-JP') === ds);
           const hasJournal = matchedJournals.length > 0;
-          const isReturned = matchedJournals.some(j => j.status === '返却済み'); 
-          
+          const isReturned = matchedJournals.some(j => j.status === '返却済み');
+
           days.push(
             <div key={i} className={`p-2 text-center rounded-xl text-sm font-bold transition-all relative ${hasJournal ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200 cursor-pointer hover:bg-orange-200 hover:-translate-y-0.5' : 'text-gray-400'}`}
                  onClick={() => { if(hasJournal) { openJournalModal(matchedJournals[0]); } }}>
@@ -346,7 +532,7 @@
       return (
         <div className="flex flex-col h-full gap-6 relative animate-fade-in">
           {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
-          
+
           {unreadJournals.length > 0 && (
             <div className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 p-4 rounded-[2rem] shadow-lg shadow-blue-500/30 flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center animate-notification border border-blue-400">
               <div className="flex items-center gap-3 md:gap-4 text-white min-w-0">
@@ -392,13 +578,13 @@
                     {content.length > 0 && <span className="text-xs text-emerald-500 font-bold flex items-center gap-1"><Icon path={Icons.Save} className="w-3 h-3"/> <RubyText text="自動" kana="じどう"/><RubyText text="保存済" kana="ほぞんず"/>み</span>}
                   </div>
                 </div>
-                
-                <textarea 
+
+                <textarea
                   ref={textareaRef}
-                  value={content} 
+                  value={content}
                   onChange={handleContentChange}
-                  placeholder="ここをタップしてかきはじめよう..." 
-                  className="flex-1 w-full px-8 pt-[40px] pb-8 text-lg lined-paper resize-none outline-none text-gray-800 font-medium tracking-wide" 
+                  placeholder="ここをタップしてかきはじめよう..."
+                  className="flex-1 w-full px-8 pt-[40px] pb-8 text-lg lined-paper resize-none outline-none text-gray-800 font-medium tracking-wide"
                 />
 
                 {showHints && (
@@ -457,7 +643,7 @@
                   <Icon path={Icons.Image} /> <span>{imageFile ? imageFile.name : <><RubyText text="画像" kana="がぞう" />をのせる</>}</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handleImage} />
                 </label>
-                {imageFile && <img src={imageFile.preview} className="mt-3 rounded-xl max-h-32 mx-auto object-cover shadow-sm"/>}
+                {imageFile && <img src={imageFile.dataUrl} className="mt-3 rounded-xl max-h-32 mx-auto object-cover shadow-sm"/>}
               </div>
 
               <button onClick={handleSubmit} className="mt-auto bg-gradient-to-b from-orange-400 to-orange-600 hover:from-orange-500 hover:to-orange-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-orange-500/40 flex justify-center items-center gap-2 text-lg active:scale-95 transition-all">
@@ -469,12 +655,12 @@
           {activePastJournal && (
              <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in border border-gray-100">
-                 
+
                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 flex justify-between items-center border-b border-indigo-100 shrink-0">
                     <h3 className="font-black text-indigo-800 text-lg flex items-center gap-2"><Icon path="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" className="text-indigo-500"/> {activePastJournal.date} <RubyText text="の記録" kana="のきろく"/></h3>
                     <button onClick={()=>setActivePastJournal(null)} className="p-2 bg-white rounded-full text-gray-500 hover:text-indigo-600 shadow-sm transition-colors"><Icon path={Icons.Close}/></button>
                  </div>
-                 
+
                  <div className="p-8 overflow-y-auto flex-1 bg-white">
                     {activePastJournal.status === '返却済み' && (
                       <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 p-6 rounded-3xl mb-8 shadow-sm relative">
@@ -493,7 +679,7 @@
                         return <div dangerouslySetInnerHTML={{__html: html}} />;
                       })()}
                     </div>
-                    {activePastJournal.imageUrl && <img src={activePastJournal.imageUrl} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>}
+                    <LazyImage imageId={activePastJournal.imageId} fetcher={(id) => window.callMemberApi('mbGetImage', id)} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
                  </div>
 
                  <div className="bg-gray-50 p-6 border-t border-gray-100 shrink-0">
@@ -551,43 +737,74 @@
       return { students: Object.values(studentMap).sort((a,b) => b.alerts.length - a.alerts.length), dates: past14Days };
     };
 
+    // 学期末の記録用: ブラウザの印刷ダイアログから PDF 保存できる帳票を開く
+    const openPrintView = (journals, tenantName) => {
+      const grouped = {};
+      journals.slice().sort((a,b) => (a.studentName||'').localeCompare(b.studentName||'') || new Date(a.timestamp) - new Date(b.timestamp))
+        .forEach(j => { const k = j.studentName || '不明'; (grouped[k] = grouped[k] || []).push(j); });
+      const pages = Object.keys(grouped).map(name => `
+        <section class="student">
+          <h2>${escapeHtml(name)}</h2>
+          ${grouped[name].map(j => `
+            <article>
+              <h3>📅 ${escapeHtml(j.date || '')}</h3>
+              ${j.theme ? `<p class="theme">テーマ: ${escapeHtml(j.theme)}</p>` : ''}
+              <p class="content">${escapeHtml(j.content || '').replace(/\n/g, '<br>')}</p>
+              ${j.teacherComment ? `<p class="comment">💬 先生より<br>${escapeHtml(j.teacherComment).replace(/\n/g, '<br>')}</p>` : ''}
+            </article>`).join('')}
+        </section>`).join('');
+      const w = window.open('', '_blank');
+      if (!w) return false;
+      w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(tenantName || '')}</title>
+        <style>
+          body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }
+          section.student { page-break-after: always; }
+          h2 { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 8px; }
+          article { border-bottom: 1px dashed #cbd5e1; padding: 12px 0; }
+          h3 { margin: 0 0 4px; font-size: 14px; }
+          .theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }
+          .content { line-height: 1.9; white-space: normal; }
+          .comment { background: #eff6ff; border-radius: 8px; padding: 10px; }
+        </style></head><body>${pages}<script>window.onload = function(){ window.print(); };<\/script></body></html>`);
+      w.document.close();
+      return true;
+    };
+
     // ==========================================
     // 👩‍🏫 教員用画面 (Teacher App)
     // ==========================================
-    const TeacherApp = ({ data }) => {
-      const { call, isLoading, toast, setToast, showToast } = useGas();
+    const TeacherApp = ({ data, tenants, server, refresh, onSwitchTenant, onCreateNew }) => {
+      const { owner, isLoading, toast, setToast, showToast } = server;
+      const code = data.tenant.tenantCode;
+      const call = (fn, ...args) => owner(fn, code, ...args);
+
       const [journals, setJournals] = useState(data.journals);
       const [activeTab, setActiveTab] = useState('dashboard');
       const [activeJournal, setActiveJournal] = useState(null);
       const [feedback, setFeedback] = useState("");
-      
+
       const [filterStudent, setFilterStudent] = useState('all');
       const [filterStatus, setFilterStatus] = useState('all');
       const [searchQuery, setSearchQuery] = useState('');
 
-      const [weeklyThemes, setWeeklyThemes] = useState({ mon: '', tue: '', wed: '', thu: '', fri: '' });
+      const [weeklyThemes, setWeeklyThemes] = useState(data.weeklyThemes || { mon: '', tue: '', wed: '', thu: '', fri: '' });
       const [todayThemeInput, setTodayThemeInput] = useState(data.todayTheme);
       const [confirmConfig, setConfirmConfig] = useState({ isOpen: false });
 
-      // 名簿管理用ステート
-      const [rosterData, setRosterData] = useState([]);
-      const [isRosterLoading, setIsRosterLoading] = useState(false);
-
-      const vitalData = useMemo(() => analyzeVitals(journals, data.classRoster), [journals, data.classRoster]);
-
-      useEffect(() => { 
-        call('getWeeklyThemes').then(res => { if (res && res.success && res.data) setWeeklyThemes(res.data); }); 
-      }, []);
+      // 名簿管理用ステート（状態列 = active/pending を含む）
+      const [rosterData, setRosterData] = useState(data.rosterAll || []);
+      const [apiKeyInput, setApiKeyInput] = useState("");
+      const [copied, setCopied] = useState(false);
 
       useEffect(() => {
-        if (activeTab === 'admin') {
-          setIsRosterLoading(true);
-          call('getRosterAll').then(res => {
-            if (res && res.success) setRosterData(res.data);
-            setIsRosterLoading(false);
-          });
-        }
-      }, [activeTab]);
+        setJournals(data.journals);
+        setRosterData(data.rosterAll || []);
+        setWeeklyThemes(data.weeklyThemes || { mon: '', tue: '', wed: '', thu: '', fri: '' });
+        setTodayThemeInput(data.todayTheme);
+      }, [data]);
+
+      const vitalData = useMemo(() => analyzeVitals(journals, data.classRoster), [journals, data.classRoster]);
+      const pendingMembers = (data.pendingMembers || []);
 
       const filteredJournals = useMemo(() => {
         return journals.filter(j => {
@@ -621,30 +838,27 @@
          setActiveJournal({...activeJournal, highlights: JSON.stringify(updated)});
       };
 
-      // 失敗時のメッセージ表示を共通化
-      const failMsg = (res, fallback) => (res && (res.message || res.error)) || fallback;
-
       const handleSetTheme = async () => {
-        const res = await call('setTodayTheme', todayThemeInput);
+        const res = await call('opSetTodayTheme', todayThemeInput);
         if(res && res.success) showToast("今日のテーマを設定しました");
         else showToast(failMsg(res, "テーマを設定できませんでした"), "error");
       };
 
       const handleSaveWeekly = async () => {
-        const res = await call('saveWeeklyThemes', weeklyThemes);
+        const res = await call('opSaveWeeklyThemes', weeklyThemes);
         if(res && res.success) showToast("週間スケジュールを保存しました");
         else showToast(failMsg(res, "保存できませんでした"), "error");
       };
 
       const executeAiAction = async (type) => {
         setConfirmConfig({ isOpen: false });
-        const res = await call(type === 'simple' ? 'generateAiSimpleCommentsForAll' : 'generateAiFullFeedbackForAll');
-        if (res && res.success) { showToast(res.message); setTimeout(()=>window.appReload(), 1500); }
+        const res = await call(type === 'simple' ? 'opAiSimple' : 'opAiFull');
+        if (res && res.success) { showToast(res.message); setTimeout(refresh, 1500); }
         else showToast(failMsg(res, "AI処理に失敗しました"), "error");
       };
 
       const handleSaveFeedback = async () => {
-        const res = await call('saveFeedback', { journalId: activeJournal.journalId, comment: feedback, highlights: activeJournal.highlights });
+        const res = await call('opSaveFeedback', { journalId: activeJournal.journalId, comment: feedback, highlights: activeJournal.highlights });
         if (res && res.success) {
           showToast("フィードバックを返却しました");
           setJournals(journals.map(j => j.journalId === activeJournal.journalId ? {...j, status: '返却済み', teacherComment: feedback, highlights: activeJournal.highlights} : j));
@@ -654,11 +868,11 @@
 
       const handleQuickAction = async (jId, action, value) => {
         if (action === 'stamp') {
-          const res = await call('quickReturn', jId, value);
+          const res = await call('opQuickReturn', jId, value);
           if(res && res.success){ setJournals(journals.map(j => j.journalId === jId ? {...j, status: '返却済み', teacherStamp: value} : j)); showToast(`${value} を押しました！`); }
           else showToast(failMsg(res, "返却できませんでした"), "error");
         } else if (action === 'revert') {
-          const res = await call('revertJournalStatus', jId);
+          const res = await call('opRevertStatus', jId);
           if(res && res.success){ setJournals(journals.map(j => j.journalId === jId ? {...j, status: '未返却'} : j)); showToast("返却を取り消しました"); }
           else showToast(failMsg(res, "取り消せませんでした"), "error");
         }
@@ -666,30 +880,28 @@
 
       const executeDataReset = async () => {
         setConfirmConfig({ isOpen: false });
-        const res = await call('resetAllData');
-        if(res && res.success) { showToast("全データを削除しました"); setTimeout(()=>window.appReload(), 1500); }
+        const res = await call('opResetData');
+        if(res && res.success) { showToast("全データを削除しました"); setTimeout(refresh, 1500); }
         else showToast(failMsg(res, "削除できませんでした"), "error");
       };
 
       const executeBatchReturn = async () => {
         setConfirmConfig({ isOpen: false });
-        const res = await call('batchReturnAll');
-        if (res && res.success) { showToast(res.message); setTimeout(()=>window.appReload(), 1500); }
+        const res = await call('opBatchReturnAll');
+        if (res && res.success) { showToast(res.message); setTimeout(refresh, 1500); }
         else showToast(failMsg(res, "一括返却できませんでした"), "error");
       };
 
       const handleRosterChange = (index, field, value) => {
         const newRoster = [...rosterData];
-        newRoster[index][field] = value;
+        newRoster[index] = {...newRoster[index], [field]: value};
         setRosterData(newRoster);
       };
 
-      // ✨ 追加: 行を追加する処理
       const handleAddRoster = () => {
-        setRosterData([...rosterData, { role: '児童', name: '', email: '' }]);
+        setRosterData([...rosterData, { role: '児童', name: '', email: '', status: 'active' }]);
       };
 
-      // ✨ 追加: 行を削除する処理
       const handleRemoveRoster = (index) => {
         const newRoster = [...rosterData];
         newRoster.splice(index, 1);
@@ -697,25 +909,68 @@
       };
 
       const handleSaveRoster = async () => {
-        const validRows = rosterData.filter(r => r.name.trim() && r.email.trim());
+        const validRows = rosterData.filter(r => String(r.name||'').trim() && String(r.email||'').trim());
         if (validRows.length === 0) return showToast('有効なデータがありません', 'error');
-        const res = await call('saveRosterAll', validRows);
+        const res = await call('opSaveRoster', validRows);
         if (res && res.success) {
           showToast('名簿を更新しました');
-          setTimeout(() => window.appReload(), 1500);
+          setTimeout(refresh, 1200);
         } else showToast(failMsg(res, '名簿を保存できませんでした'), 'error');
       };
 
+      const handleApprove = async (email, ok) => {
+        const res = await call(ok ? 'opApproveMember' : 'opRejectMember', email);
+        if (res && res.success) { showToast(ok ? '参加を承認しました' : '申請を却下しました'); refresh(); }
+        else showToast(failMsg(res, '処理できませんでした'), 'error');
+      };
+
       const handleExport = async (type) => {
-         const res = await call(type === 'csv' ? 'exportJournalsCsv' : 'exportJournalsPdf', { startDate: null, endDate: null, email: 'all' });
-         if(res.success) {
-            setConfirmConfig({
-              isOpen: true, title: "出力完了", text: "ファイルがGoogle Driveに保存されました。", confirmText: "ファイルを開く",
-              onConfirm: () => { window.open(res.fileUrl, '_blank'); setConfirmConfig({isOpen: false}); }, onCancel: () => setConfirmConfig({isOpen: false})
-            });
-         } else {
-            showToast(res.message, "error");
+         if (type === 'pdf') {
+            if (journals.length === 0) return showToast('データがありません', 'error');
+            if (!openPrintView(journals, data.tenant.tenantName)) showToast('ポップアップがブロックされました。許可してください', 'error');
+            return;
          }
+         const res = await call('opExportCsv', { startDate: null, endDate: null, email: 'all' });
+         if(res && res.success) {
+            const blob = new Blob([res.csv], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = res.fileName;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            showToast('CSVをダウンロードしました');
+         } else {
+            showToast(failMsg(res, '出力できませんでした'), "error");
+         }
+      };
+
+      const handleSaveApiKey = async () => {
+        if (!apiKeyInput.trim()) return showToast('APIキーを入力してください', 'error');
+        const res = await call('opSaveSettings', { apiKey: apiKeyInput.trim() });
+        if (res && res.success) { showToast('APIキーを保存しました'); setApiKeyInput(''); refresh(); }
+        else showToast(failMsg(res, '保存できませんでした'), 'error');
+      };
+
+      const handleCopyUrl = async () => {
+        try {
+          await navigator.clipboard.writeText(data.tenant.memberUrl);
+          setCopied(true); setTimeout(() => setCopied(false), 2000);
+        } catch (e) {
+          window.prompt('この URL をコピーしてください', data.tenant.memberUrl);
+        }
+      };
+
+      const handleRegenerateCode = async () => {
+        setConfirmConfig({ isOpen: false });
+        const res = await call('opRegenerateCode');
+        if (res && res.success) { showToast('クラスコードを再発行しました。旧URLは使えなくなります'); refresh(); }
+        else showToast(failMsg(res, '再発行できませんでした'), 'error');
+      };
+
+      const handleJoinPolicy = async (joinOpen, requireApproval) => {
+        const res = await call('opUpdateJoinPolicy', joinOpen, requireApproval);
+        if (res && res.success) { showToast('設定を変更しました'); refresh(); }
+        else showToast(failMsg(res, '変更できませんでした'), 'error');
       };
 
       // 同じ児童が複数回提出しても100%を超えないよう、ユニークな児童数でカウントする
@@ -731,10 +986,23 @@
           {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
           <ConfirmDialog {...confirmConfig} />
 
-          <div className="flex gap-2 bg-white/60 backdrop-blur-md p-1.5 rounded-2xl shadow-sm border border-gray-200/50 self-start max-w-full overflow-x-auto whitespace-nowrap">
-             <button onClick={()=>setActiveTab('dashboard')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='dashboard'?'bg-white text-blue-600 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path="M3 3v18h18 M18 17V9 M13 17V5 M8 17v-3" className="w-5 h-5"/> ジャーナル管理</button>
-             <button onClick={()=>setActiveTab('vitals')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='vitals'?'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-pink-500/20':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Pulse} className="w-5 h-5"/> 心のバイタル</button>
-             {data.isAdmin && <button onClick={()=>setActiveTab('admin')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='admin'?'bg-white text-gray-800 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Settings} className="w-5 h-5"/> 設定</button>}
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+            <div className="flex gap-2 bg-white/60 backdrop-blur-md p-1.5 rounded-2xl shadow-sm border border-gray-200/50 self-start max-w-full overflow-x-auto whitespace-nowrap">
+               <button onClick={()=>setActiveTab('dashboard')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='dashboard'?'bg-white text-blue-600 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path="M3 3v18h18 M18 17V9 M13 17V5 M8 17v-3" className="w-5 h-5"/> ジャーナル管理</button>
+               <button onClick={()=>setActiveTab('vitals')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='vitals'?'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-pink-500/20':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Pulse} className="w-5 h-5"/> 心のバイタル</button>
+               <button onClick={()=>setActiveTab('admin')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='admin'?'bg-white text-gray-800 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}>
+                 <Icon path={Icons.Settings} className="w-5 h-5"/> クラス設定
+                 {pendingMembers.length > 0 && <span className="bg-rose-500 text-white text-xs font-black px-2 py-0.5 rounded-full">{pendingMembers.length}</span>}
+               </button>
+            </div>
+
+            {/* クラス切り替え */}
+            <div className="flex items-center gap-2 self-start lg:self-auto">
+              <select value={code} onChange={e => onSwitchTenant(e.target.value)} className="bg-white border border-gray-200 text-sm font-bold text-gray-700 outline-none rounded-xl px-3 py-2.5 cursor-pointer shadow-sm max-w-[220px]">
+                {tenants.map(t => <option key={t.tenantCode} value={t.tenantCode}>{t.tenantName}</option>)}
+              </select>
+              <button onClick={onCreateNew} className="bg-white border border-gray-200 hover:border-blue-400 hover:text-blue-600 text-gray-500 rounded-xl px-3 py-2.5 shadow-sm font-bold text-sm flex items-center gap-1 transition-colors"><Icon path={Icons.Plus} className="w-4 h-4"/> クラス追加</button>
+            </div>
           </div>
 
           {activeTab === 'dashboard' && (
@@ -796,7 +1064,7 @@
                          <option value="all">全状況</option><option value="未返却">未返却</option><option value="返却済み">返却済</option>
                       </select>
                     </div>
-                    
+
                     <div className="flex w-full lg:w-auto items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
                        <button onClick={()=>setConfirmConfig({isOpen:true, title:"AIコメント作成", text:"未返却のジャーナルに温かいコメント案を作ります。", onConfirm: ()=>executeAiAction('simple'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-purple-50 text-purple-600 hover:bg-purple-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-4 h-4"/> AIシンプル</button>
                        <button onClick={()=>setConfirmConfig({isOpen:true, title:"AI高度分析", text:"未返却のジャーナルを分析し、ハイライトとコメント案を作ります。", onConfirm: ()=>executeAiAction('full'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" className="w-4 h-4"/> AI高度分析</button>
@@ -901,7 +1169,59 @@
 
           {activeTab === 'admin' && (
              <div className="flex flex-col gap-6 animate-fade-in h-full">
-                
+
+                {/* 🎫 児童用URL（クラスコード） */}
+                <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100">
+                  <div className="flex flex-col md:flex-row gap-6 items-start">
+                    <div className="flex-1 w-full">
+                      <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg mb-2">
+                        <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg"><Icon path={Icons.Link} className="w-5 h-5"/></div> 児童用URL（クラスコード: <span className="font-mono tracking-widest">{data.tenant.tenantCode}</span>）
+                      </h3>
+                      <p className="text-sm text-gray-500 mb-4 leading-relaxed">このURLを児童に配ると、児童はGoogleでサインインするだけで参加できます。児童にスプレッドシートの権限は一切付与されません。</p>
+                      <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                        <input type="text" readOnly value={data.tenant.memberUrl} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none"/>
+                        <button onClick={handleCopyUrl} className={`shrink-0 font-bold px-6 py-3 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-gray-800 hover:bg-black text-white'}`}><Icon path={copied ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copied ? 'コピーしました' : 'URLをコピー'}</button>
+                      </div>
+                      <div className="flex flex-wrap gap-3 items-center">
+                        <label className="flex items-center gap-2 text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                          <input type="checkbox" checked={!!data.tenant.joinOpen} onChange={e=>handleJoinPolicy(e.target.checked, data.tenant.requireApproval)} className="accent-blue-600 w-4 h-4"/> 参加を受け付ける
+                        </label>
+                        <label className="flex items-center gap-2 text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                          <input type="checkbox" checked={!!data.tenant.requireApproval} onChange={e=>handleJoinPolicy(data.tenant.joinOpen, e.target.checked)} className="accent-blue-600 w-4 h-4"/> 参加は先生の承認制にする
+                        </label>
+                        <button onClick={()=>setConfirmConfig({isOpen:true, title:"コードの再発行", text:"クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？", confirmText:"再発行する", onConfirm: handleRegenerateCode, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="text-sm font-bold text-gray-500 hover:text-red-500 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> コード再発行</button>
+                      </div>
+                    </div>
+                    <div className="shrink-0 mx-auto md:mx-0 text-center">
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(data.tenant.memberUrl)}`} width="160" height="160" className="rounded-2xl border border-gray-200 shadow-sm" alt="児童用URLのQRコード"/>
+                      <p className="text-xs font-bold text-gray-400 mt-2">QRコードで配布</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ✋ 参加申請 */}
+                {pendingMembers.length > 0 && (
+                  <div className="bg-amber-50 p-8 rounded-[2rem] shadow-premium border border-amber-200">
+                    <h3 className="font-black text-amber-800 flex items-center gap-2 text-lg mb-4">
+                      <span className="text-2xl">✋</span> 参加申請（{pendingMembers.length}件）
+                    </h3>
+                    <div className="flex flex-col gap-3">
+                      {pendingMembers.map(m => (
+                        <div key={m.email} className="bg-white rounded-2xl border border-amber-100 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-gray-800">{m.name}</p>
+                            <p className="text-xs text-gray-400 font-mono truncate">{m.email}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button onClick={()=>handleApprove(m.email, true)} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center gap-1.5"><Icon path={Icons.Check} className="w-4 h-4"/> 承認</button>
+                            <button onClick={()=>handleApprove(m.email, false)} className="bg-white hover:bg-red-50 text-red-500 border border-red-200 font-bold px-5 py-2.5 rounded-xl active:scale-95 transition-all">却下</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* 👥 名簿管理エディタ */}
                 <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col">
                   <div className="flex justify-between items-center mb-6">
@@ -910,81 +1230,87 @@
                     </h3>
                     <button onClick={handleSaveRoster} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">保存して更新</button>
                   </div>
-                  
-                  {isRosterLoading ? (
-                     <div className="flex-1 flex justify-center items-center py-10"><div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div></div>
-                  ) : (
-                    <div className="overflow-auto max-h-[400px] bg-gray-50/50 rounded-2xl border border-gray-200 p-2 custom-scrollbar">
-                      <table className="w-full min-w-[560px] text-left">
-                        <thead className="text-xs text-gray-500 font-bold bg-gray-100/80 rounded-xl sticky top-0 z-10">
-                          <tr>
-                             <th className="p-3 pl-4 rounded-l-xl w-24">役割</th>
-                             <th className="p-3">氏名</th>
-                             <th className="p-3">メールアドレス <span className="text-[10px] font-normal">(Googleアカウント)</span></th>
-                             <th className="p-3 pr-4 rounded-r-xl text-right">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {rosterData.map((r, i) => (
-                             <tr key={i} className="hover:bg-white transition-colors group">
-                               <td className="p-2 pl-4">
-                                 <select value={r.role} onChange={(e)=>handleRosterChange(i, 'role', e.target.value)} className="w-full bg-transparent border-none outline-none font-bold text-gray-700 cursor-pointer">
-                                   <option value="児童">児童</option>
-                                   <option value="担任">担任</option>
-                                 </select>
-                               </td>
-                               <td className="p-2">
-                                 <input type="text" value={r.name} onChange={(e)=>handleRosterChange(i, 'name', e.target.value)} placeholder="例: 山田 太郎" className="w-full bg-transparent border-none outline-none font-bold text-gray-800 focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all"/>
-                               </td>
-                               <td className="p-2">
-                                 <input type="text" value={r.email} onChange={(e)=>handleRosterChange(i, 'email', e.target.value)} placeholder="例: yamada@school.ed.jp" className="w-full bg-transparent border-none outline-none text-gray-600 text-sm focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all font-mono"/>
-                               </td>
-                               <td className="p-2 pr-4 text-right">
-                                 <button onClick={()=>handleRemoveRoster(i)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"><Icon path={Icons.Trash} className="w-4 h-4"/></button>
-                               </td>
-                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div className="p-2 mt-2">
-                        <button onClick={handleAddRoster} className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-500 font-bold rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.99]">
-                          <Icon path={Icons.Plus} className="w-5 h-5"/> あたらしい行を追加する
-                        </button>
-                      </div>
+
+                  <div className="overflow-auto max-h-[400px] bg-gray-50/50 rounded-2xl border border-gray-200 p-2 custom-scrollbar">
+                    <table className="w-full min-w-[640px] text-left">
+                      <thead className="text-xs text-gray-500 font-bold bg-gray-100/80 rounded-xl sticky top-0 z-10">
+                        <tr>
+                           <th className="p-3 pl-4 rounded-l-xl w-24">役割</th>
+                           <th className="p-3">氏名</th>
+                           <th className="p-3">メールアドレス <span className="text-[10px] font-normal">(Googleアカウント)</span></th>
+                           <th className="p-3 w-24">状態</th>
+                           <th className="p-3 pr-4 rounded-r-xl text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {rosterData.map((r, i) => (
+                           <tr key={i} className="hover:bg-white transition-colors group">
+                             <td className="p-2 pl-4">
+                               <select value={r.role} onChange={(e)=>handleRosterChange(i, 'role', e.target.value)} className="w-full bg-transparent border-none outline-none font-bold text-gray-700 cursor-pointer">
+                                 <option value="児童">児童</option>
+                                 <option value="担任">担任</option>
+                               </select>
+                             </td>
+                             <td className="p-2">
+                               <input type="text" value={r.name} onChange={(e)=>handleRosterChange(i, 'name', e.target.value)} placeholder="例: 山田 太郎" className="w-full bg-transparent border-none outline-none font-bold text-gray-800 focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all"/>
+                             </td>
+                             <td className="p-2">
+                               <input type="text" value={r.email} onChange={(e)=>handleRosterChange(i, 'email', e.target.value)} placeholder="例: yamada@school.ed.jp" className="w-full bg-transparent border-none outline-none text-gray-600 text-sm focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all font-mono"/>
+                             </td>
+                             <td className="p-2">
+                               <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${r.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{r.status === 'pending' ? '承認待ち' : '参加中'}</span>
+                             </td>
+                             <td className="p-2 pr-4 text-right">
+                               <button onClick={()=>handleRemoveRoster(i)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"><Icon path={Icons.Trash} className="w-4 h-4"/></button>
+                             </td>
+                           </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="p-2 mt-2">
+                      <button onClick={handleAddRoster} className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-500 font-bold rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.99]">
+                        <Icon path={Icons.Plus} className="w-5 h-5"/> あたらしい行を追加する
+                      </button>
                     </div>
-                  )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-3 leading-relaxed">💡 名簿に登録した児童は、児童用URLからサインインするだけで参加できます（承認不要）。名簿に無いアカウントは「参加申請」として届きます。</p>
                </div>
-               
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                 {/* データベース連携 */}
+
+               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                 {/* AI設定 */}
+                 <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col">
+                    <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4 text-purple-500 mx-auto"><Icon path={Icons.Sparkles} className="w-8 h-8"/></div>
+                    <h3 className="font-black text-gray-800 mb-2 text-center">Gemini AI 設定</h3>
+                    <p className="text-sm text-gray-500 mb-4 text-center">{data.settings && data.settings.hasApiKey ? `設定済み: ${data.settings.apiKeyMasked}` : 'AIコメント機能にはAPIキーが必要です。'}</p>
+                    <input type="password" value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder="Gemini APIキーを貼り付け" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-purple-400 mb-3"/>
+                    <button onClick={handleSaveApiKey} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-xl transition-all active:scale-95 mt-auto">保存</button>
+                 </div>
+
+                 {/* データベース */}
                  <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center">
-                    <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 text-emerald-500"><Icon path="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" className="w-8 h-8"/></div>
-                    <h3 className="font-black text-gray-800 mb-2">データベース連携</h3>
-                    <p className="text-sm text-gray-500 mb-6 break-all">{(data.tenant && data.tenant.spreadsheetName) ? `接続中: ${data.tenant.spreadsheetName}` : 'DBスプレッドシートに接続中です。'}</p>
-                    <div className="flex flex-col gap-2 w-full">
-                       {data.tenant && data.tenant.spreadsheetId && <a href={`https://docs.google.com/spreadsheets/d/${data.tenant.spreadsheetId}`} target="_blank" rel="noopener noreferrer" className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-bold py-3 rounded-xl transition-all active:scale-95">シートを開く</a>
-                       }
-                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"連携の解除", text:"データベースの紐付けを解除しますか？\nスプレッドシート自体は削除されません。\n解除後は初期設定画面に戻ります。", confirmText:"解除する", onConfirm: async ()=>{ setConfirmConfig({isOpen:false}); const res = await call('unlinkMyDatabase'); if(res && res.success){ showToast(res.message || '解除しました'); setTimeout(()=>window.appReload(), 1200); } else { showToast((res && res.error) || '解除に失敗しました', 'error'); } }, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold py-3 rounded-xl transition-all active:scale-95">連携を解除</button>
-                    </div>
+                    <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 text-emerald-500"><Icon path={Icons.Link} className="w-8 h-8"/></div>
+                    <h3 className="font-black text-gray-800 mb-2">データベース</h3>
+                    <p className="text-sm text-gray-500 mb-6">このクラスの記録は、あなたのDrive内のスプレッドシートに保存されています。</p>
+                    <a href={data.spreadsheetUrl} target="_blank" rel="noopener noreferrer" className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-bold py-3 rounded-xl transition-all active:scale-95">シートを開く</a>
                  </div>
 
                  {/* エクスポート */}
                  <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center">
                     <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4 text-gray-600"><Icon path={Icons.Download} className="w-8 h-8"/></div>
                     <h3 className="font-black text-gray-800 mb-2">データの一括出力</h3>
-                    <p className="text-sm text-gray-500 mb-6">CSVやPDF形式で、ジャーナルの記録をGoogle Driveに保存します。</p>
+                    <p className="text-sm text-gray-500 mb-6">CSVをダウンロード、または印刷用の帳票（PDF保存可）を開きます。</p>
                     <div className="flex gap-2 w-full">
                        <button onClick={()=>handleExport('csv')} className="flex-1 bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-xl transition-all active:scale-95">CSV</button>
-                       <button onClick={()=>handleExport('pdf')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl transition-all active:scale-95">PDF</button>
+                       <button onClick={()=>handleExport('pdf')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl transition-all active:scale-95">印刷/PDF</button>
                     </div>
                  </div>
-                 
+
                  {/* データ削除 */}
                  <div className="bg-red-50 p-8 rounded-[2rem] shadow-premium border border-red-100 flex flex-col justify-center items-center text-center">
                     <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"><Icon path={Icons.Trash} className="w-8 h-8"/></div>
                     <h3 className="font-black text-red-800 mb-2">危険な操作</h3>
-                    <p className="text-sm text-red-600 mb-6">すべてのジャーナルデータを完全に削除します。年度替わりなどに使用してください。</p>
-                    <button onClick={()=>setConfirmConfig({isOpen:true, isDanger:true, title:"データ全削除", text:"本当にすべてのジャーナルデータを削除しますか？\nこの操作は元に戻せません。", confirmText:"削除する", onConfirm: executeDataReset, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all">全データを削除</button>
+                    <p className="text-sm text-red-600 mb-6">このクラスの全ジャーナルデータを削除します。年度替わりなどに使用してください。</p>
+                    <button onClick={()=>setConfirmConfig({isOpen:true, isDanger:true, title:"データ全削除", text:"本当にこのクラスのすべてのジャーナルデータを削除しますか？\nこの操作は元に戻せません。", confirmText:"削除する", onConfirm: executeDataReset, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all">全データを削除</button>
                  </div>
                </div>
              </div>
@@ -1007,15 +1333,16 @@
                         return <div dangerouslySetInnerHTML={{__html: html}} />;
                      })()}
                   </div>
+                  <LazyImage imageId={activeJournal.imageId} fetcher={(id) => window.callOwnerApi('opGetImage', code, id)} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
                 </div>
                 <div className="w-full md:w-[420px] shrink-0 max-h-[55%] md:max-h-none p-5 md:p-8 bg-white flex flex-col relative overflow-y-auto">
                   <button onClick={() => setActiveJournal(null)} className="absolute top-6 right-6 p-2 text-gray-400 hover:text-gray-600 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"><Icon path={Icons.Close} /></button>
-                  <h3 className="text-lg font-black text-blue-600 mb-4 flex items-center gap-2"><div className="p-1.5 bg-blue-50 rounded-lg"><Icon path="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" className="w-5 h-5"/></div> 全体コメント</h3>
+                  <h3 className="text-lg font-black text-blue-600 mb-4 flex items-center gap-2"><div className="p-1.5 bg-blue-50 rounded-lg"><Icon path={Icons.Pen} className="w-5 h-5"/></div> 全体コメント</h3>
                   <textarea value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="温かいコメントを入力..." className="w-full border-2 border-gray-100 rounded-2xl p-4 text-gray-700 outline-none focus:border-blue-400 focus:bg-blue-50/30 transition-colors resize-none mb-6 min-h-[160px] font-medium" />
-                  
-                  <h3 className="text-sm font-black text-gray-700 mb-3 flex items-center gap-2"><Icon path="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" className="w-4 h-4 text-yellow-500" /> 抽出したハイライト</h3>
+
+                  <h3 className="text-sm font-black text-gray-700 mb-3 flex items-center gap-2"><Icon path={Icons.Link} className="w-4 h-4 text-yellow-500" /> 抽出したハイライト</h3>
                   <div className="flex-1 overflow-y-auto space-y-3 mb-6 pr-1 custom-scrollbar">
-                     {(activeJournal.highlights ? JSON.parse(activeJournal.highlights) : []).map(h => (
+                     {parseHighlights(activeJournal.highlights).map(h => (
                         <div key={h.id} className="bg-yellow-50/50 border border-yellow-200 p-4 rounded-2xl relative group hover:bg-yellow-50 transition-colors">
                            <button onClick={()=>removeHighlight(h.id)} className="absolute top-3 right-3 text-yellow-400 hover:text-red-500 bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"><Icon path={Icons.Close} className="w-3 h-3"/></button>
                            <p className="text-sm font-bold text-gray-800 mb-3 border-l-4 border-yellow-400 pl-3 leading-relaxed">"{h.textToHighlight}"</p>
@@ -1025,7 +1352,7 @@
                            </div>
                         </div>
                      ))}
-                     {(!activeJournal.highlights || JSON.parse(activeJournal.highlights).length === 0) && <div className="text-xs font-bold text-gray-400 text-center py-6 bg-gray-50 rounded-2xl border border-gray-100 border-dashed">ハイライトはありません</div>}
+                     {parseHighlights(activeJournal.highlights).length === 0 && <div className="text-xs font-bold text-gray-400 text-center py-6 bg-gray-50 rounded-2xl border border-gray-100 border-dashed">ハイライトはありません</div>}
                   </div>
 
                   <button onClick={handleSaveFeedback} className="mt-auto bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-blue-500/30 text-lg active:scale-95 transition-all w-full flex justify-center items-center gap-2"><Icon path={Icons.Send} /> 保存して返却する</button>
@@ -1039,91 +1366,65 @@
     };
 
     // ==========================================
-    // 🚀 初期設定（オンボーディング）画面
-    //    DB 未接続のユーザーに表示し、新規作成 or 既存紐付けを行う
+    // 🏫 クラス作成（先生の初回オンボーディング / クラス追加）
     // ==========================================
-    const OnboardingApp = ({ tenant }) => {
-      const { call, isLoading, toast, setToast, showToast } = useGas();
-      const [linkInput, setLinkInput] = useState("");
-      const [done, setDone] = useState(false);
-
-      const finishAndReload = (delay) => {
-        setDone(true);
-        setTimeout(() => window.appReload(), delay || 1200);
-      };
+    const CreateClassScreen = ({ server, onCreated, onCancel, ownerEmail }) => {
+      const { owner, isLoading, toast, setToast, showToast } = server;
+      const [className, setClassName] = useState("");
+      const [adoptUrl, setAdoptUrl] = useState("");
+      const [done, setDone] = useState(null);
 
       const handleCreate = async () => {
-        try {
-          const res = await call('createMyDatabase', 'ふりかえりジャーナル_DB');
-          if (res && res.success) {
-            showToast(res.method === 'template' ? 'テンプレートからデータベースを作成しました！' : 'データベースを作成しました！');
-            finishAndReload(1200);
-          } else {
-            showToast((res && res.error) || 'データベースの作成に失敗しました。', 'error');
-          }
-        } catch (e) {
-          showToast('通信エラーが発生しました。もう一度お試しください。', 'error');
-        }
+        if (!className.trim()) return showToast('クラス名を入力してください', 'error');
+        const res = await owner('opCreateTenant', className.trim());
+        if (res && res.success) { setDone(res); setTimeout(() => onCreated(res.tenantCode), 2500); }
+        else showToast(failMsg(res, 'クラスを作成できませんでした'), 'error');
       };
 
-      const handleLink = async () => {
-        if (!linkInput.trim()) { showToast('スプレッドシートのURLまたはIDを入力してください。', 'error'); return; }
-        try {
-          const res = await call('linkMyDatabase', linkInput.trim());
-          if (res && res.success) {
-            if (res.warning) { showToast(res.warning, 'error'); finishAndReload(3000); }
-            else { showToast('「' + (res.spreadsheetName || 'スプレッドシート') + '」を紐付けました！'); finishAndReload(1200); }
-          } else {
-            showToast((res && res.error) || '紐付けに失敗しました。', 'error');
-          }
-        } catch (e) {
-          showToast('通信エラーが発生しました。もう一度お試しください。', 'error');
-        }
+      const handleAdopt = async () => {
+        if (!className.trim()) return showToast('クラス名を入力してください', 'error');
+        if (!adoptUrl.trim()) return showToast('スプレッドシートのURLを入力してください', 'error');
+        const res = await owner('opAdoptTenant', adoptUrl.trim(), className.trim());
+        if (res && res.success) { setDone(res); setTimeout(() => onCreated(res.tenantCode), 2500); }
+        else showToast(failMsg(res, '取り込みできませんでした'), 'error');
       };
 
       return (
         <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto">
-          {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
+          {isLoading && <div className="fixed inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
           <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8">
-            <div className="text-center mb-8">
-              <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"><Icon path={Icons.Book} className="w-10 h-10"/></div>
-              <h1 className="text-3xl font-black text-gray-800 mb-2">はじめまして！</h1>
-              <p className="text-gray-500 font-medium leading-relaxed">「ふりかえりジャーナル」を使うための<br/>あなた専用のデータベースを設定しましょう。</p>
-              {tenant && tenant.email && <p className="mt-3 text-xs font-bold text-gray-400 bg-gray-50 inline-block px-4 py-1.5 rounded-full">ログイン中: {tenant.email}</p>}
-              {tenant && tenant.error && <p className="mt-3 text-xs font-bold text-red-500 bg-red-50 px-4 py-2 rounded-xl">前回のデータベースに接続できませんでした（{tenant.error}）。再設定してください。</p>}
-            </div>
-
             {done ? (
-              <div className="text-center py-8">
+              <div className="text-center py-4">
                 <div className="w-16 h-16 mx-auto rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4"><Icon path={Icons.Check} className="w-8 h-8"/></div>
-                <p className="font-black text-gray-700 text-lg">設定が完了しました！</p>
-                <p className="text-sm text-gray-400 font-medium mt-1">アプリを読み込み直しています…</p>
+                <p className="font-black text-gray-700 text-lg mb-2">クラス「{done.tenantName}」を作成しました！</p>
+                <p className="text-sm text-gray-500 font-medium mb-4">クラスコード: <span className="font-mono font-black tracking-widest text-orange-600">{done.tenantCode}</span></p>
+                <p className="text-xs text-gray-400">ダッシュボードを読み込んでいます…</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-6">
-                {/* 新規作成 */}
-                <div className="border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6">
-                  <h2 className="font-black text-gray-800 mb-1 flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-5 h-5 text-orange-500"/> 新しくデータベースを作成</h2>
-                  <p className="text-sm text-gray-500 mb-4 leading-relaxed">あなたの Google Drive に専用のスプレッドシートを自動作成します。<span className="font-bold">先生（管理者）はこちら</span>がおすすめです。{tenant && tenant.templateConfigured && <span className="block text-xs text-orange-500 font-bold mt-1">✨ 配布元のテンプレートから作成されます</span>}</p>
-                  <button onClick={handleCreate} disabled={isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">🎒 新しくはじめる</button>
+              <>
+                <div className="text-center mb-8">
+                  <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"><Icon path={Icons.Book} className="w-10 h-10"/></div>
+                  <h1 className="text-3xl font-black text-gray-800 mb-2">クラスをつくろう</h1>
+                  <p className="text-gray-500 font-medium leading-relaxed">クラス専用のデータベースが<br/>あなたの Google Drive に自動作成されます。</p>
+                  {ownerEmail && <p className="mt-3 text-xs font-bold text-gray-400 bg-gray-50 inline-block px-4 py-1.5 rounded-full">ログイン中: {ownerEmail}</p>}
                 </div>
 
-                {/* 既存紐付け */}
-                <div className="border-2 border-blue-100 bg-blue-50/40 rounded-3xl p-6">
-                  <h2 className="font-black text-gray-800 mb-1 flex items-center gap-2"><Icon path="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" className="w-5 h-5 text-blue-500"/> 既存のスプレッドシートを紐付け</h2>
-                  <p className="text-sm text-gray-500 mb-4 leading-relaxed">先生から共有されたDBのURL、または以前使っていたDBのURLを貼り付けてください。<span className="font-bold">児童のみなさんはこちら</span>です。</p>
-                  <input
-                    type="text"
-                    value={linkInput}
-                    onChange={(e) => setLinkInput(e.target.value)}
-                    placeholder="https://docs.google.com/spreadsheets/d/... または ID"
-                    className="w-full border-2 border-blue-100 rounded-2xl p-3.5 text-sm text-gray-700 outline-none focus:border-blue-400 bg-white font-mono mb-3 transition-colors"
-                  />
-                  <button onClick={handleLink} disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50">🔗 このスプレッドシートを使う</button>
+                <div className="border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6 mb-5">
+                  <h2 className="font-black text-gray-800 mb-1 flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-5 h-5 text-orange-500"/> 新しいクラスを作成</h2>
+                  <p className="text-sm text-gray-500 mb-4 leading-relaxed">作成すると「児童用URL」が発行されます。URLを配るだけで児童が参加できます。</p>
+                  <input type="text" value={className} onChange={e=>setClassName(e.target.value)} placeholder="クラス名（例: 6年1組）" className="w-full border-2 border-orange-100 rounded-2xl p-3.5 text-sm outline-none focus:border-orange-400 bg-white font-bold mb-3 transition-colors"/>
+                  <button onClick={handleCreate} disabled={isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">🎒 クラスを作成する</button>
                 </div>
 
-                <p className="text-[11px] text-gray-400 text-center leading-relaxed">設定はあなたの Google アカウントにのみ保存され、他の利用者には影響しません。<br/>あとから紐付けを解除・変更することもできます。</p>
-              </div>
+                <details className="border-2 border-blue-100 bg-blue-50/40 rounded-3xl p-6">
+                  <summary className="font-black text-gray-800 cursor-pointer flex items-center gap-2 list-none"><Icon path={Icons.Link} className="w-5 h-5 text-blue-500"/> 以前のスプレッドシートを取り込む（引っ越し）</summary>
+                  <p className="text-sm text-gray-500 my-3 leading-relaxed">旧バージョンで使っていたDBスプレッドシート（あなたが編集権限を持つもの）をクラスとして登録できます。</p>
+                  <input type="text" value={adoptUrl} onChange={e=>setAdoptUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." className="w-full border-2 border-blue-100 rounded-2xl p-3.5 text-sm outline-none focus:border-blue-400 bg-white font-mono mb-3 transition-colors"/>
+                  <button onClick={handleAdopt} disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50">🔗 このスプレッドシートを取り込む</button>
+                </details>
+
+                {onCancel && <button onClick={onCancel} className="w-full mt-5 py-3 rounded-2xl font-bold bg-gray-50 text-gray-500 hover:bg-gray-100 transition-colors">もどる</button>}
+              </>
             )}
           </div>
           {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
@@ -1131,32 +1432,204 @@
       );
     };
 
-    const App = () => {
-      const data = window.APP_DATA;
-      // 描画完了をPWAシェルへ通知（シェル外では無害）
-      useEffect(() => { if (window.notifyShellReady) window.notifyShellReady(); }, []);
-      if (!data) return <div className="h-screen flex items-center justify-center bg-gray-50"><div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div></div>;
-      if (data.tenant && !data.tenant.linked) return <OnboardingApp tenant={data.tenant} />;
-      const isTeacher = data.user && data.user.role === '担任';
-      const isGuest = !data.user || data.user.role === '未登録';
+    // ==========================================
+    // 🧑‍🏫 先生ポータルのルート（デプロイ A）
+    // ==========================================
+    const OwnerRoot = () => {
+      const server = useServer();
+      const [phase, setPhase] = useState('loading');   // loading | create | app | error
+      const [tenants, setTenants] = useState([]);
+      const [ownerEmail, setOwnerEmail] = useState('');
+      const [selectedCode, setSelectedCode] = useState(null);
+      const [tenantData, setTenantData] = useState(null);
+      const [errorMsg, setErrorMsg] = useState('');
+
+      const loadTenants = async (preferCode) => {
+        const res = await window.callOwnerApi('opListTenants').catch(e => ({ success: false, error: e.message }));
+        if (!res || !res.success) {
+          setErrorMsg(res && res.error || 'ポータルに接続できませんでした');
+          setPhase('error');
+          return;
+        }
+        setOwnerEmail(res.ownerEmail || '');
+        setTenants(res.tenants || []);
+        if (!res.tenants || res.tenants.length === 0) { setPhase('create'); return; }
+        let code = preferCode || localStorage.getItem('rj_selectedClass');
+        if (!res.tenants.some(t => t.tenantCode === code)) code = res.tenants[0].tenantCode;
+        // 同じクラスを選び直した場合は useEffect が発火しないため直接読み込む
+        if (code === selectedCode) loadTenantData(code);
+        else setSelectedCode(code);
+      };
+
+      const loadTenantData = async (code) => {
+        setPhase('loading');
+        const res = await server.owner('opGetTenantData', code);
+        if (res && res.success) {
+          setTenantData(res);
+          localStorage.setItem('rj_selectedClass', code);
+          setPhase('app');
+        } else {
+          setErrorMsg(failMsg(res, 'クラスのデータを読み込めませんでした'));
+          setPhase('error');
+        }
+      };
+
+      useEffect(() => { loadTenants(); }, []);
+      useEffect(() => { if (selectedCode) loadTenantData(selectedCode); }, [selectedCode]);
+
+      if (phase === 'loading') return <FullScreenSpinner color="border-blue-500" />;
+
+      if (phase === 'error') return (
+        <CenterCard icon="⚠️">
+          <h1 className="text-2xl font-black text-gray-800 mb-3">読み込めませんでした</h1>
+          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap">{errorMsg}</p>
+          <button onClick={()=>{ setPhase('loading'); loadTenants(); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう一度読み込む</button>
+        </CenterCard>
+      );
+
+      if (phase === 'create') return (
+        <CreateClassScreen
+          server={server}
+          ownerEmail={ownerEmail}
+          onCreated={(code) => { loadTenants(code); }}
+          onCancel={tenants.length > 0 ? () => setSelectedCode(tenants[0].tenantCode) : null}
+        />
+      );
 
       return (
         <div className="h-screen w-full flex flex-col bg-gray-50 text-gray-800 font-sans selection:bg-orange-200">
-          <header className={`flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b ${isTeacher ? 'border-blue-500' : 'border-orange-500'} shadow-[0_2px_10px_rgba(0,0,0,0.02)]`}>
+          <header className="flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-blue-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
             <div className="flex items-center gap-2 md:gap-3 min-w-0">
-              <div className={`p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 ${isTeacher ? 'bg-gradient-to-br from-blue-500 to-blue-600' : 'bg-gradient-to-br from-orange-400 to-orange-500'}`}><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
-              <h1 className={`text-lg md:text-2xl font-black tracking-tight truncate ${isTeacher ? 'text-blue-600' : 'text-orange-600'}`}>{isTeacher ? "教員ダッシュボード" : "ふりかえりジャーナル"}</h1>
+              <div className="p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-blue-500 to-blue-600"><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
+              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-blue-600">教員ダッシュボード <span className="text-gray-300 font-medium hidden sm:inline">|</span> <span className="text-gray-600 text-base md:text-xl hidden sm:inline">{tenantData.tenant.tenantName}</span></h1>
             </div>
-            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-400 shrink-0" /> <span className="truncate">{data.user ? data.user.name : "ゲスト"} {isTeacher ? "先生" : "さん"}</span></div>
+            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-400 shrink-0" /> <span className="truncate">{ownerEmail} 先生</span></div>
           </header>
-          <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">{isGuest ? <div className="flex flex-col items-center justify-center h-full text-center px-4"><h2 className="text-2xl font-black text-gray-700 mb-3">アクセス権がありません</h2><p className="text-sm text-gray-400 font-bold leading-relaxed">先生に名簿への登録をお願いしてください。<br/>（このアカウント: {data.tenant && data.tenant.email}）</p></div> : isTeacher ? <TeacherApp data={data} /> : <StudentApp data={data} />}</div></main>
-          
+          <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
+            <TeacherApp
+              data={tenantData}
+              tenants={tenants}
+              server={server}
+              refresh={() => loadTenantData(selectedCode)}
+              onSwitchTenant={(code) => setSelectedCode(code)}
+              onCreateNew={() => setPhase('create')}
+            />
+          </div></main>
           <footer className="flex-none w-full text-center text-gray-400 py-3 bg-white border-t border-gray-100 text-sm">
             <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
           </footer>
         </div>
       );
     };
+
+    // ==========================================
+    // 🎒 児童アプリのルート（デプロイ B）
+    //    シェルから ID トークン + クラスコードを受け取り、
+    //    参加状態に応じて 参加申請 / 承認待ち / 本体 を出し分ける
+    // ==========================================
+    const MemberRoot = () => {
+      const server = useServer();
+      const [phase, setPhase] = useState('connecting');  // connecting | join | pending | app | error
+      const [statusInfo, setStatusInfo] = useState({});
+      const [data, setData] = useState(null);
+      const [joinName, setJoinName] = useState('');
+      const [errorMsg, setErrorMsg] = useState('');
+
+      const sync = async () => {
+        const res = await window.callMemberApi('mbSync').catch(e => ({ success: false, error: e.message }));
+        if (res && res.success) {
+          setData({ user: res.me, todayTheme: res.todayTheme, journals: res.journals, tenantName: res.tenantName });
+          setPhase('app');
+          return;
+        }
+        if (res && (res.code === 'NOT_MEMBER' || res.code === 'MEMBER_PENDING')) { await checkStatus(); return; }
+        setErrorMsg(failMsg(res, 'つながりませんでした。もう一度ためしてね'));
+        setPhase('error');
+      };
+
+      const checkStatus = async () => {
+        const res = await window.callMemberApi('mbGetStatus').catch(e => ({ success: false, error: e.message }));
+        if (!res || !res.success) {
+          setErrorMsg(failMsg(res, 'つながりませんでした。もう一度ためしてね'));
+          setPhase('error');
+          return;
+        }
+        setStatusInfo(res);
+        if (res.status === 'active') { await sync(); }
+        else if (res.status === 'pending') setPhase('pending');
+        else setPhase('join');
+      };
+
+      useEffect(() => { checkStatus(); }, []);
+
+      const handleJoin = async () => {
+        if (!joinName.trim()) return server.showToast('名前を入力してね', 'error');
+        const res = await server.memberWrite('mbRequestJoin', joinName.trim());
+        if (res && res.success) {
+          if (res.status === 'active') { server.showToast('参加できたよ！'); await sync(); }
+          else setPhase('pending');
+        } else server.showToast(failMsg(res, '参加できませんでした'), 'error');
+      };
+
+      if (phase === 'connecting') return <FullScreenSpinner />;
+
+      if (phase === 'error') return (
+        <CenterCard icon="😢">
+          <h1 className="text-2xl font-black text-gray-800 mb-3">つながりませんでした</h1>
+          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap">{errorMsg}</p>
+          <button onClick={()=>window.appReload()} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう<ruby>一度<rt className="text-[0.6em]">いちど</rt></ruby>ひらく</button>
+        </CenterCard>
+      );
+
+      if (phase === 'join') return (
+        <CenterCard icon="🎒">
+          <h1 className="text-2xl font-black text-gray-800 mb-2">{statusInfo.tenantName || 'クラス'} に<ruby>参加<rt className="text-[0.5em]">さんか</rt></ruby>する</h1>
+          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>名前<rt className="text-[0.6em]">なまえ</rt></ruby>を<ruby>入力<rt className="text-[0.6em]">にゅうりょく</rt></ruby>して、<ruby>参加<rt className="text-[0.6em]">さんか</rt></ruby>ボタンをおしてね。</p>
+          {statusInfo.joinOpen ? (
+            <>
+              <input type="text" value={joinName} onChange={e=>setJoinName(e.target.value)} placeholder="なまえ（例: やまだ たろう）" className="w-full border-2 border-orange-100 rounded-2xl p-4 text-base outline-none focus:border-orange-400 bg-white font-bold mb-4 transition-colors text-center"/>
+              <button onClick={handleJoin} disabled={server.isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">✋ クラスに<ruby>参加<rt className="text-[0.5em]">さんか</rt></ruby>する</button>
+            </>
+          ) : (
+            <p className="text-sm font-bold text-red-500 bg-red-50 px-4 py-3 rounded-xl">いまは参加の受付が止まっています。先生に確認してね。</p>
+          )}
+          {server.toast && <Toast message={server.toast.message} type={server.toast.type} onClose={() => server.setToast(null)} />}
+        </CenterCard>
+      );
+
+      if (phase === 'pending') return (
+        <CenterCard icon="⏳">
+          <h1 className="text-2xl font-black text-gray-800 mb-3"><ruby>先生<rt className="text-[0.5em]">せんせい</rt></ruby>の<ruby>承認<rt className="text-[0.5em]">しょうにん</rt></ruby>をまっています</h1>
+          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>先生<rt className="text-[0.6em]">せんせい</rt></ruby>がOKしたら<ruby>使<rt className="text-[0.6em]">つか</rt></ruby>えるようになるよ。<br/>しばらくしてから、もう<ruby>一度<rt className="text-[0.6em]">いちど</rt></ruby>ためしてね。</p>
+          <button onClick={()=>{ setPhase('connecting'); checkStatus(); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう一度たしかめる</button>
+        </CenterCard>
+      );
+
+      return (
+        <div className="h-screen w-full flex flex-col bg-gray-50 text-gray-800 font-sans selection:bg-orange-200">
+          <header className="flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-orange-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+            <div className="flex items-center gap-2 md:gap-3 min-w-0">
+              <div className="p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-orange-400 to-orange-500"><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
+              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-orange-600">ふりかえりジャーナル <span className="text-gray-300 font-medium hidden sm:inline">|</span> <span className="text-gray-500 text-sm md:text-lg hidden sm:inline">{data.tenantName}</span></h1>
+            </div>
+            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-400 shrink-0" /> <span className="truncate">{data.user.name} さん</span></div>
+          </header>
+          <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
+            <StudentApp data={data} server={server} refresh={sync} />
+          </div></main>
+          <footer className="flex-none w-full text-center text-gray-400 py-3 bg-white border-t border-gray-100 text-sm">
+            <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+          </footer>
+        </div>
+      );
+    };
+
+    const App = () => {
+      // 描画完了をPWAシェルへ通知（シェル外では無害）
+      useEffect(() => { if (window.notifyShellReady) window.notifyShellReady(); }, []);
+      return window.BOOT.mode === 'member' ? <MemberRoot /> : <OwnerRoot />;
+    };
+
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
