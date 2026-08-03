@@ -16,34 +16,52 @@
  * 新しい Service Worker が有効になった瞬間、その端末に入っていた
  * 児童むけアプリ（Qalc・KANJI_Town など）のオフライン用データまで消えていた。
  * 児童がオフラインで開いても起動せず、しかも原因がそのアプリ側に見えないため
- * 「たまに開かなくなる」という再現しにくい不具合になっていた。 */
+ * 「たまに開かなくなる」という再現しにくい不具合になっていた。
+ *
+ * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'v4';
+const APP_VERSION = 'v5';   // ← リリースごとに必ず上げる
+const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',
   './diag.html',
   './config.js',
   './manifest.webmanifest',
+  './offline.html',
   './icon-180.png',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './icon-maskable-192.png',
+  './icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)).then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // 1本でも失敗すると addAll 全体が落ちる。個別に入れて、取れなかったものは
+    // 飛ばす（校内Wi-Fiが混んでいても導入できるようにするため）。
+    await Promise.all(SHELL_ASSETS.map((u) =>
+      cache.add(new Request(u, { cache: 'reload' }))
+        .catch((err) => console.warn('[sw] precache skipped', u, err))));
+    // ここでは skipWaiting しない。児童が書いている最中に突然切り替わらないよう、
+    // 画面側で「さいしんに する」を押してもらってから切り替える（下の message）。
+  })());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys
-        .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
-        .map((k) => caches.delete(k)))   // ← 自アプリ分だけ削除
-    ).then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys
+      .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+      .map((k) => caches.delete(k)));      // ← 自アプリ分だけ削除
+    await self.clients.claim();
+  })());
+});
+
+// 画面側で「さいしんに する」が押されたときだけ切り替える
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (event) => {
@@ -53,6 +71,21 @@ self.addEventListener('fetch', (event) => {
   // GAS へのリクエストは常にネットワーク直行。
   if (url.origin !== self.location.origin) return;
   if (event.request.method !== 'GET') return;
+
+  // 画面遷移は network-first。更新をすぐ届け、圏外ならキャッシュ済みの
+  // シェルを返し、それも無ければ offline.html を出す。
+  if (event.request.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        return await fetch(event.request);
+      } catch (e) {
+        return (await caches.match('./index.html'))
+          || (await caches.match('./offline.html'))
+          || Response.error();
+      }
+    })());
+    return;
+  }
 
   // シェル資産: キャッシュ優先 + バックグラウンド更新（stale-while-revalidate）
   event.respondWith(

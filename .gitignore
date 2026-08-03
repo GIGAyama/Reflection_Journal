@@ -1,0 +1,17 @@
+# clasp の設定。scriptId が入るのでコミットしない。
+# （scriptId が漏れても直ちに読まれるわけではないが、
+#   どの GAS プロジェクトが本番かを公開する必要はない）
+.clasp.json
+.clasprc.json
+
+# clasp clone で本番を取ってきたときの作業ディレクトリ
+_live/
+
+# 環境変数。鍵を書く場所なので絶対にコミットしない。
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.local
+node_modules

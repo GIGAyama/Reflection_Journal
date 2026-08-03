@@ -14,6 +14,12 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+
+  <!-- インストールの合図を「いちばん先に」受け取る。
+       Chrome は条件が揃うと即座に beforeinstallprompt を出すため、
+       ページの下のほうで待ち構えていると、通信が遅い端末では
+       すでに合図が飛んだ後になり「インストール」の案内が出なくなる。 -->
+  <script src="pwa-install-hook.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ふりかえりジャーナル</title>
   <meta name="description" content="毎日の5分間で児童のメタ認知を育むふりかえりジャーナル">
@@ -111,6 +117,60 @@
     }
     #install-bar .install { background: #f97316; color: #fff; white-space: nowrap; }
     #install-bar .close { background: transparent; color: #9ca3af; padding: 6px 8px; font-size: 16px; }
+
+    /* ── GIGA Standard v4 Part I の追補 ───────────────────────── */
+
+    /* 画面幅に応じて伸び縮みする文字サイズ。
+       320px のスマホから 4K の電子黒板まで1本の式でまかなう。 */
+    :root {
+      --fs-body: clamp(14px, 1.2vw + 9px, 17px);
+      --fs-note: clamp(13px, 1vw + 8px, 15px);
+    }
+    body { font-size: var(--fs-body); line-height: 1.8; }
+
+    /* 低学年の指でも押せる大きさを下限にする。
+       ダブルタップズームの300ms遅延も消す。 */
+    button, a[role="button"], .btn {
+      touch-action: manipulation;
+    }
+    button, .btn { min-height: 44px; }
+
+    /* キーボードで操作している人に、いまどこにいるかを必ず見せる */
+    :focus-visible { outline: 3px solid #9a3412; outline-offset: 2px; }
+
+    /* 更新のお知らせ帯（スクリプトが差し込む）。
+       下端に固定するので、ホームバーのぶんを足す。 */
+    #sw-update-banner {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      gap: 12px; flex-wrap: wrap; max-width: calc(100vw - 32px);
+      padding: 12px 16px; background: #1e293b; color: #fff;
+      border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.3);
+      font-weight: 700; font-size: var(--fs-note); line-height: 1.5;
+    }
+    #sw-update-banner button {
+      min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px;
+      font: inherit; cursor: pointer; touch-action: manipulation;
+    }
+    #sw-update-apply { background: #fb923c; color: #1e293b; }
+    #sw-update-close { background: transparent; color: #cbd5e1; }
+    #sw-update-banner button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+    /* 感覚過敏の児童に配慮して、動きを止められるようにする */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    /* 背景色が無効化されても「押せる」と分かるようにする */
+    @media (forced-colors: active) {
+      button, .btn, #sw-update-banner button { border: 2px solid ButtonText; }
+    }
   </style>
 </head>
 <body>
@@ -375,7 +435,40 @@
 
   // ── Service Worker（シェル資産のみキャッシュ） ──
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
-    window.addEventListener('load', function () { navigator.serviceWorker.register('./sw.js').catch(function () {}); });
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').then(function (reg) {
+        // 新しい版が用意できたら、児童にも分かる言葉で知らせる。
+        // 黙って切り替えると、ふりかえりを書いている最中に画面が変わってしまう。
+        reg.addEventListener('updatefound', function () {
+          var sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', function () {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+              showUpdateBanner(function () {
+                sw.postMessage({ type: 'SKIP_WAITING' });
+                location.reload();
+              });
+            }
+          });
+        });
+      }).catch(function () {});
+    });
+  }
+
+  // 更新のお知らせ帯。どの画面の上にも同じように乗せられるよう素の DOM で作る。
+  function showUpdateBanner(onApply) {
+    if (document.getElementById('sw-update-banner')) return;
+    var bar = document.createElement('div');
+    bar.id = 'sw-update-banner';
+    bar.setAttribute('role', 'status');
+    bar.setAttribute('aria-live', 'polite');
+    bar.innerHTML =
+      '<span>あたらしい バージョンが あります</span>' +
+      '<button type="button" id="sw-update-apply">さいしんに する</button>' +
+      '<button type="button" id="sw-update-close">あとで</button>';
+    document.body.appendChild(bar);
+    document.getElementById('sw-update-apply').addEventListener('click', function () { bar.remove(); onApply(); });
+    document.getElementById('sw-update-close').addEventListener('click', function () { bar.remove(); });
   }
 
   // ── アプリとしてインストール（Chrome / Edge / Android と iOS Safari） ──
@@ -405,17 +498,29 @@
     installBar.classList.add('visible');
   }
 
-  window.addEventListener('beforeinstallprompt', function (e) {
-    e.preventDefault();
-    deferredInstallPrompt = e;
+  // 合図の受け取り自体は <head> 最上部の pwa-install-hook.js で済ませてある。
+  // ここでは、その結果を案内バーに反映するだけ。
+  function adoptInstallPrompt() {
+    if (!window.__deferredInstallPrompt) return;
+    deferredInstallPrompt = window.__deferredInstallPrompt;
     showInstallBar('このアプリを端末にインストールできます', true);
+  }
+  window.addEventListener('pwa-installable', adoptInstallPrompt);
+  window.addEventListener('pwa-installed', function () {
+    deferredInstallPrompt = null;
+    window.__deferredInstallPrompt = null;
+    installBar.classList.remove('visible');
   });
+  adoptInstallPrompt();   // このスクリプトに来る前に合図が飛んでいた場合
 
   installBtn.addEventListener('click', function () {
     if (!deferredInstallPrompt) return;
     installBar.classList.remove('visible');
-    deferredInstallPrompt.prompt();
+    var p = deferredInstallPrompt;
+    // 合図は一度きりしか使えない。先に手放してから出す。
     deferredInstallPrompt = null;
+    window.__deferredInstallPrompt = null;
+    try { p.prompt(); } catch (e) { /* noop */ }
   });
 
   document.getElementById('install-close').addEventListener('click', function () {
