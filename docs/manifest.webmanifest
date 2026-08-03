@@ -4,22 +4,52 @@
   "description": "毎日の5分間で児童のメタ認知を育み、先生との深い信頼関係を築くふりかえりジャーナル",
   "lang": "ja",
   "dir": "ltr",
-
   "id": "/Reflection_Journal/",
   "start_url": "/Reflection_Journal/",
   "scope": "/Reflection_Journal/",
-
   "display": "standalone",
-  "display_override": ["standalone", "fullscreen", "minimal-ui"],
-  "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
+  "display_override": [
+    "standalone",
+    "fullscreen",
+    "minimal-ui"
+  ],
+  "launch_handler": {
+    "client_mode": [
+      "navigate-existing",
+      "auto"
+    ]
+  },
   "orientation": "any",
   "background_color": "#fff7ed",
   "theme_color": "#f97316",
-  "categories": ["education", "kids"],
+  "categories": [
+    "education",
+    "kids"
+  ],
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
