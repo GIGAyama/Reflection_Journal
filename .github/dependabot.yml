@@ -1,0 +1,12 @@
+version: 2
+
+updates:
+  # このリポジトリは npm に依存していない（GAS + 素の HTML/JS）。
+  # 更新対象は GitHub Actions 自体のみ。
+  # 学校での利用中に壊れると復旧が難しいため、通知は月1回にまとめる。
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
