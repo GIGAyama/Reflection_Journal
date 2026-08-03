@@ -6,7 +6,19 @@
 // 認証・データがあるため【絶対にキャッシュしない】。
 // ============================================================
 
-const CACHE_NAME = 'rj-shell-v4';
+/* 【重要】キャッシュの掃除は、かならず自アプリのぶんだけに限る。
+ *
+ * gigayama.github.io は数十本の学習アプリが同じドメインを共有している。
+ * ブラウザのキャッシュはドメイン単位なので、caches.keys() はこのアプリのものだけでなく、
+ * 同居する全アプリのキャッシュを返す。
+ *
+ * これまでは「CACHE_NAME 以外ぜんぶ」を消していたため、ふりかえりジャーナルを開いて
+ * 新しい Service Worker が有効になった瞬間、その端末に入っていた
+ * 児童むけアプリ（Qalc・KANJI_Town など）のオフライン用データまで消えていた。
+ * 児童がオフラインで開いても起動せず、しかも原因がそのアプリ側に見えないため
+ * 「たまに開かなくなる」という再現しにくい不具合になっていた。 */
+const CACHE_PREFIX = 'rj-shell-';
+const CACHE_NAME = CACHE_PREFIX + 'v4';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -27,7 +39,9 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys
+        .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+        .map((k) => caches.delete(k)))   // ← 自アプリ分だけ削除
     ).then(() => self.clients.claim())
   );
 });
