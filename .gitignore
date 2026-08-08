@@ -15,3 +15,6 @@ _live/
 .DS_Store
 *.local
 node_modules
+
+# ビルドの作業ディレクトリ
+dist/

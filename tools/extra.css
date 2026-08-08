@@ -1,0 +1,45 @@
+/* 学校のフィルタリングで Web フォントが届かなくても字が崩れないよう、
+   端末側の日本語フォントを必ず後ろに並べる */
+body {
+  font-family: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic UI',
+               'Hiragino Kaku Gothic ProN', 'Noto Sans JP', system-ui, sans-serif;
+  background-color: #f8fafc;
+  overflow: hidden;
+}
+
+/* モバイルブラウザのアドレスバーで下部が見切れる 100vh 問題対策（iOS Safari 等） */
+@supports (height: 100dvh) {
+  .h-screen { height: 100dvh !important; }
+}
+/* タッチ端末でのタップハイライト抑制と快適なスクロール */
+* { -webkit-tap-highlight-color: transparent; }
+.overflow-y-auto, .overflow-x-auto, .overflow-auto { -webkit-overflow-scrolling: touch; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f8fafc; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.lined-paper {
+  line-height: 40px;
+  background-image: linear-gradient(transparent, transparent 39px, #e2e8f0 39px, #e2e8f0 40px);
+  background-size: 100% 40px;
+  background-attachment: local;
+}
+
+.highlight-marker { background-color: #fef08a; padding: 0.1rem 0; border-radius: 0.2rem; cursor: pointer; transition: all 0.2s; }
+.highlight-marker:hover { background-color: #fde047; box-shadow: 0 0 8px rgba(253, 224, 71, 0.8); }
+.shadow-premium { box-shadow: 0 4px 25px -2px rgba(0, 0, 0, 0.04), 0 0 5px rgba(0,0,0,0.01); }
+
+@keyframes fadeInScale { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+.animate-fade-in { animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+@keyframes slideDownBounce {
+  0% { opacity: 0; transform: translateY(-20px); }
+  70% { transform: translateY(5px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-notification { animation: slideDownBounce 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+@keyframes dash { to { stroke-dashoffset: 0; } }
+.circle-chart-circle { animation: dash 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.tooltip-content { opacity: 0; visibility: hidden; transform: translateY(5px); transition: all 0.2s ease; }
+.group:hover .tooltip-content { opacity: 1; visibility: visible; transform: translateY(0); }

@@ -155,6 +155,17 @@ function doGet(e) {
 }
 
 /**
+ * HTML ファイルを本体へ差し込む。GAS には .gs と .html しか置けないため、
+ * CSS も JavaScript もライブラリも .html に包んで持つ。
+ *
+ * vendor / css / app は npm run build が作る生成物。手で編集しないこと
+ * （原本は src/app.jsx・tools/extra.css・tailwind.config.js）。
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
  * 接続診断エンドポイント（?diag=1）。docs/diag.html が credentials:'omit' で fetch する。
  * 秘密情報（メールアドレス・ID・トークン）は一切返さない。
  *
