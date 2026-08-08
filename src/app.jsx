@@ -1,5 +1,19 @@
 const { useState, useEffect, useRef, useMemo } = React;
 
+    // 端末の「動きを減らす」設定。紙吹雪など、止められるべき演出の判定に使う
+    const prefersReducedMotion = () =>
+      typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // モーダル共通: Esc で閉じる。開いている間は背後がスクロールしないようにする
+    const useDismissable = (isOpen, onClose) => {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+    };
+
     // XSS対策: dangerouslySetInnerHTML に渡す前に必ずエスケープする
     const escapeHtml = (s) => String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -55,16 +69,30 @@ const { useState, useEffect, useRef, useMemo } = React;
       reader.readAsDataURL(file);
     });
 
+    // ふりがなの色は CSS 側（tools/extra.css）で決める。
+    // ここで text-gray-500 と決め打ちしていたため、色のついたボタンや帯の上で
+    // 比 1.08〜1.36 になり、いちばん読めなくて困る低学年がいちばん読めなかった。
+    // <rp> は読み上げでふりがなが二重に読まれるのを防ぐ。
     const RubyText = ({ text, kana }) => (
       <ruby className="align-baseline">
         {text}
-        <rt className="text-[0.6em] text-gray-500 font-medium select-none leading-none">{kana}</rt>
+        <rp>(</rp>
+        <rt className="text-[0.6em] font-medium select-none leading-none">{kana}</rt>
+        <rp>)</rp>
       </ruby>
     );
 
-    const Icon = ({ path, className="w-5 h-5" }) => (
-      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={path} /></svg>
-    );
+    // className を渡すと既定値ごと置き換わるため、大きさを書き忘れた箇所で
+    // SVG が親いっぱいに広がっていた（時計アイコンが巨大化していた）。
+    // 大きさの指定が無いときだけ w-5 h-5 を足す。装飾なので読み上げからは外す。
+    const Icon = ({ path, className = "" }) => {
+      const hasSize = /(^|\s)(w-|h-|size-)/.test(className);
+      return (
+        <svg aria-hidden="true" focusable="false"
+             className={`${hasSize ? '' : 'w-5 h-5 '}${className}`.trim()}
+             fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={path} /></svg>
+      );
+    };
     const Icons = {
       Book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13z M4 19.5v-13", Send: "M22 2L11 13 M22 2L15 22L11 13L2 9L22 2z",
       Image: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12", Check: "M20 6L9 17l-5-5", User: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", Close: "M18 6L6 18 M6 6l12 12",
@@ -78,15 +106,20 @@ const { useState, useEffect, useRef, useMemo } = React;
 
     const Toast = ({ message, type, onClose }) => {
       useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, []);
-      const bg = type === 'error' ? 'bg-red-500' : 'bg-emerald-500';
-      return <div className={`fixed bottom-6 left-1/2 transform -translate-x-1/2 ${bg} text-white px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-2 z-50 animate-bounce font-bold tracking-wide`}><Icon path={type === 'error' ? Icons.Close : Icons.Check} /> <span>{message}</span></div>;
+      // 保存できた・できなかったを画面で見ていない人にも伝える。
+      // エラーは割り込んで読ませたいので role="alert"、それ以外は polite。
+      const bg = type === 'error' ? 'bg-red-600' : 'bg-emerald-700';
+      return <div role={type === 'error' ? 'alert' : 'status'} aria-live={type === 'error' ? 'assertive' : 'polite'}
+        className={`no-print fixed bottom-6 left-1/2 transform -translate-x-1/2 ${bg} text-white px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-2 z-50 animate-bounce font-bold tracking-wide`}><Icon path={type === 'error' ? Icons.Close : Icons.Check} className="w-5 h-5 shrink-0" /> <span>{message}</span></div>;
     };
 
     const ConfirmDialog = ({ isOpen, title, text, onConfirm, onCancel, confirmText="はい", cancelText="キャンセル", isDanger=false }) => {
+      useDismissable(isOpen, onCancel || (() => {}));
       if (!isOpen) return null;
       return (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity">
-          <div className="bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 max-w-sm w-full animate-fade-in text-center transform transition-all">
+          <div role="dialog" aria-modal="true" aria-label={title}
+               className="bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 max-w-sm w-full animate-fade-in text-center transform transition-all">
             <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${isDanger ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}><Icon path={isDanger ? Icons.Trash : Icons.Info} className="w-10 h-10" /></div>
             <h3 className="text-2xl font-black text-gray-800 mb-3">{title}</h3>
             <p className="text-gray-500 mb-8 text-sm whitespace-pre-wrap leading-relaxed">{text}</p>
@@ -119,7 +152,7 @@ const { useState, useEffect, useRef, useMemo } = React;
     const failMsg = (res, fallback) => (res && (res.message || res.error)) || fallback;
 
     // 画像の遅延読み込み（画像本体は getImage API から Data URL で取得する）
-    const LazyImage = ({ imageId, fetcher, className }) => {
+    const LazyImage = ({ imageId, fetcher, className, alt }) => {
       const [src, setSrc] = useState(null);
       const [failed, setFailed] = useState(false);
       useEffect(() => {
@@ -135,7 +168,7 @@ const { useState, useEffect, useRef, useMemo } = React;
       }, [imageId]);
       if (!imageId || failed) return null;
       if (!src) return <div className="mt-4 w-40 h-24 rounded-xl bg-gray-100 animate-pulse" />;
-      return <img src={src} className={className} />;
+      return <img src={src} alt={alt || ''} className={className} />;
     };
 
     const FullScreenSpinner = ({ color = 'border-orange-500' }) => (
@@ -164,6 +197,7 @@ const { useState, useEffect, useRef, useMemo } = React;
       const [pastCommentInput, setPastCommentInput] = useState("");
       const [currentMonth, setCurrentMonth] = useState(new Date());
       const textareaRef = useRef(null);
+      useDismissable(!!activePastJournal, () => setActivePastJournal(null));
 
       const [readJournals, setReadJournals] = useState([]);
       const [unreadJournals, setUnreadJournals] = useState([]);
@@ -243,7 +277,10 @@ const { useState, useEffect, useRef, useMemo } = React;
         });
         if (!res || !res.success) return showToast(failMsg(res, "提出できませんでした。もう一度ためしてね。"), "error");
         localStorage.removeItem(storeKey('draft'));
-        if (typeof confetti === 'function') confetti({ particleCount: 200, spread: 90, origin: { y: 0.6 }, colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981'] });
+        // 感覚過敏の児童に配慮し、「動きを減らす」設定のときは紙吹雪を出さない
+        if (typeof confetti === 'function' && !prefersReducedMotion()) {
+          confetti({ particleCount: 200, spread: 90, origin: { y: 0.6 }, colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981'] });
+        }
         showToast("先生に提出できたよ！");
         setContent(""); setEmotion(""); setImageFile(null);
         setTimeout(refresh, 2000);
@@ -287,7 +324,7 @@ const { useState, useEffect, useRef, useMemo } = React;
           const isReturned = matchedJournals.some(j => j.status === '返却済み');
 
           days.push(
-            <div key={i} className={`p-2 text-center rounded-xl text-sm font-bold transition-all relative ${hasJournal ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200 cursor-pointer hover:bg-orange-200 hover:-translate-y-0.5' : 'text-gray-400'}`}
+            <div key={i} className={`p-2 text-center rounded-xl text-sm font-bold transition-all relative ${hasJournal ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200 cursor-pointer hover:bg-orange-200 hover:-translate-y-0.5' : 'text-gray-500'}`}
                  onClick={() => { if(hasJournal) { openJournalModal(matchedJournals[0]); } }}>
               {i}
               {isReturned && <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[8px] text-white animate-pulse">💬</div>}
@@ -302,7 +339,7 @@ const { useState, useEffect, useRef, useMemo } = React;
           {isLoading && <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
 
           {unreadJournals.length > 0 && (
-            <div className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 p-4 rounded-[2rem] shadow-lg shadow-blue-500/30 flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center animate-notification border border-blue-400">
+            <div className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 p-4 rounded-[2rem] shadow-lg shadow-blue-600/30 flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center animate-notification border border-blue-400">
               <div className="flex items-center gap-3 md:gap-4 text-white min-w-0">
                 <div className="text-3xl animate-bounce shrink-0">💌</div>
                 <div className="min-w-0">
@@ -321,11 +358,11 @@ const { useState, useEffect, useRef, useMemo } = React;
             <div className="w-full lg:w-[280px] flex flex-col gap-5 order-2 lg:order-1">
                <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5">
                   <div className="flex justify-between items-center mb-5">
-                    <button onClick={()=>setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth()-1)))} className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-orange-500 hover:bg-orange-50 transition-colors"><Icon path="M15 18l-6-6 6-6" className="w-4 h-4" /></button>
+                    <button onClick={()=>setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth()-1)))} aria-label="前の月" className="tap-44 p-2 bg-gray-50 rounded-full text-gray-500 hover:text-orange-500 hover:bg-orange-50 transition-colors"><Icon path="M15 18l-6-6 6-6" className="w-4 h-4" /></button>
                     <h3 className="font-black text-gray-700">{currentMonth.getFullYear()}<RubyText text="年" kana="ねん"/> {currentMonth.getMonth()+1}<RubyText text="月" kana="がつ"/></h3>
-                    <button onClick={()=>setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth()+1)))} className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-orange-500 hover:bg-orange-50 transition-colors"><Icon path="M9 18l6-6-6-6" className="w-4 h-4"/></button>
+                    <button onClick={()=>setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth()+1)))} aria-label="次の月" className="tap-44 p-2 bg-gray-50 rounded-full text-gray-500 hover:text-orange-500 hover:bg-orange-50 transition-colors"><Icon path="M9 18l6-6-6-6" className="w-4 h-4"/></button>
                   </div>
-                  <div className="grid grid-cols-7 gap-1 text-xs text-center text-gray-400 font-bold mb-3"><div className="text-red-400">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div className="text-blue-400">土</div></div>
+                  <div className="grid grid-cols-7 gap-1 text-xs text-center text-gray-500 font-bold mb-3"><div className="text-red-600">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div className="text-blue-600">土</div></div>
                   <div className="grid grid-cols-7 gap-1.5">{renderCalendarDays()}</div>
                </div>
                <button onClick={showRandomPastJournal} className="bg-gradient-to-br from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 text-indigo-600 border border-indigo-100 font-black py-4 px-4 rounded-[2rem] shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95 group">
@@ -339,7 +376,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                 <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-5 border-b border-orange-100 flex items-center gap-4">
                   <span className="bg-gradient-to-br from-orange-400 to-orange-600 text-white p-3 rounded-2xl shadow-sm shadow-orange-500/30"><Icon path={Icons.Book} className="w-6 h-6"/></span>
                   <div className="flex-1">
-                    <p className="text-xs text-orange-600 font-black tracking-wider mb-1"><span><RubyText text="今日" kana="きょう" />のテーマ</span></p>
+                    <p className="text-xs text-orange-700 font-black tracking-wider mb-1"><span><RubyText text="今日" kana="きょう" />のテーマ</span></p>
                     <h2 className="text-xl font-black text-gray-800">{data.todayTheme}</h2>
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -359,7 +396,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                   <div className="absolute inset-x-0 bottom-0 bg-white/95 backdrop-blur-md border-t-2 border-yellow-200 p-6 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] rounded-t-[2rem] z-20 animate-[fadeInScale_0.3s_ease-out]">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="font-black text-yellow-800 text-lg flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-5 h-5"/> <RubyText text="書" kana="か"/>くことを<RubyText text="見" kana="み"/>つける<RubyText text="魔法" kana="まほう"/>のヒント</h3>
-                      <button onClick={() => setShowHints(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-600 p-2 rounded-full font-bold transition-colors"><Icon path={Icons.Close} className="w-5 h-5"/></button>
+                      <button onClick={() => setShowHints(false)} aria-label="ヒントを閉じる" className="tap-44 bg-gray-100 hover:bg-gray-200 text-gray-600 p-2 rounded-full font-bold transition-colors"><Icon path={Icons.Close} className="w-5 h-5"/></button>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       {hintDictionary.map((cat, idx) => (
@@ -367,15 +404,15 @@ const { useState, useEffect, useRef, useMemo } = React;
                           <h4 className="font-bold text-yellow-700 text-sm mb-2">{cat.icon} {cat.title}</h4>
                           <div className="space-y-2">
                             {cat.items.map((item, i) => (
-                              <button key={i} onClick={() => insertTextAtCursor(item.text)} className="w-full text-left text-xs bg-white hover:bg-yellow-100 border border-yellow-200 p-2.5 rounded-xl text-gray-700 font-medium transition-colors shadow-sm hover:shadow active:scale-95 leading-snug">
-                                {item.display} <span className="text-yellow-500 float-right">＋</span>
+                              <button key={i} onClick={() => insertTextAtCursor(item.text)} className="w-full min-h-[44px] text-left text-xs bg-white hover:bg-yellow-100 border border-yellow-300 p-3 rounded-xl text-gray-700 font-medium transition-colors shadow-sm hover:shadow active:scale-95 leading-snug">
+                                {item.display} <span className="text-yellow-700 float-right">＋</span>
                               </button>
                             ))}
                           </div>
                         </div>
                       ))}
                     </div>
-                    <p className="text-center text-xs text-gray-400 mt-4">ボタンを<RubyText text="押" kana="お"/>すと、そのままノートに<RubyText text="入" kana="はい"/>るよ！</p>
+                    <p className="text-center text-xs text-gray-500 mt-4">ボタンを<RubyText text="押" kana="お"/>すと、そのままノートに<RubyText text="入" kana="はい"/>るよ！</p>
                   </div>
                 )}
               </div>
@@ -389,13 +426,13 @@ const { useState, useEffect, useRef, useMemo } = React;
                      <Icon path={Icons.Sparkles} className="w-5 h-5"/> 💡 ヒントを<RubyText text="開" kana="ひら"/>く
                    </button>
                 </div>
-                <p className="text-xs font-bold text-gray-400 mb-2">▼ テンプレート（<RubyText text="形" kana="かたち"/>）を<RubyText text="使" kana="つか"/>う</p>
+                <p className="text-xs font-bold text-gray-500 mb-2">▼ テンプレート（<RubyText text="形" kana="かたち"/>）を<RubyText text="使" kana="つか"/>う</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
-                  {Object.keys(templates).map(k => <button key={k} onClick={() => insertTextAtCursor(templates[k])} className="text-xs py-2.5 px-2 bg-gray-50 text-gray-600 border border-gray-200 rounded-xl hover:bg-white hover:border-gray-300 hover:shadow-sm transition-all font-bold active:scale-95">{k === 'ywt' ? <><RubyText text="YWT法" kana="ほう"/></> : k === 'kpt' ? <><RubyText text="KPT法" kana="ほう"/></> : k === '5w1h' ? '5W1H' : '3つのきづき'}</button>)}
+                  {Object.keys(templates).map(k => <button key={k} onClick={() => insertTextAtCursor(templates[k])} className="text-xs min-h-[44px] py-3 px-2 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl hover:bg-white hover:border-gray-400 hover:shadow-sm transition-all font-bold active:scale-95">{k === 'ywt' ? <><RubyText text="YWT法" kana="ほう"/></> : k === 'kpt' ? <><RubyText text="KPT法" kana="ほう"/></> : k === '5w1h' ? '5W1H' : '3つのきづき'}</button>)}
                 </div>
-                <p className="text-xs font-bold text-gray-400 mb-2">▼ ランダムな<RubyText text="書" kana="か"/>き<RubyText text="出" kana="だ"/>し</p>
+                <p className="text-xs font-bold text-gray-500 mb-2">▼ ランダムな<RubyText text="書" kana="か"/>き<RubyText text="出" kana="だ"/>し</p>
                 <div className="flex gap-2">
-                   <button onClick={() => insertTextAtCursor(starters[Math.floor(Math.random() * starters.length)])} className="flex-1 text-xs py-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors font-bold active:scale-95">🎯 <RubyText text="書" kana="か"/>き<RubyText text="出" kana="だ"/>しを追加(ついか)</button>
+                   <button onClick={() => insertTextAtCursor(starters[Math.floor(Math.random() * starters.length)])} className="flex-1 text-xs min-h-[44px] py-3 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-colors font-bold active:scale-95">🎯 <RubyText text="書" kana="か"/>き<RubyText text="出" kana="だ"/>しを追加(ついか)</button>
                 </div>
               </div>
 
@@ -411,10 +448,10 @@ const { useState, useEffect, useRef, useMemo } = React;
                   <Icon path={Icons.Image} /> <span>{imageFile ? imageFile.name : <><RubyText text="画像" kana="がぞう" />をのせる</>}</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handleImage} />
                 </label>
-                {imageFile && <img src={imageFile.dataUrl} className="mt-3 rounded-xl max-h-32 mx-auto object-cover shadow-sm"/>}
+                {imageFile && <img src={imageFile.dataUrl} alt="のせる画像のプレビュー" className="mt-3 rounded-xl max-h-32 mx-auto object-cover shadow-sm"/>}
               </div>
 
-              <button onClick={handleSubmit} className="mt-auto bg-gradient-to-b from-orange-400 to-orange-600 hover:from-orange-500 hover:to-orange-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-orange-500/40 flex justify-center items-center gap-2 text-lg active:scale-95 transition-all">
+              <button onClick={handleSubmit} className="mt-auto bg-gradient-to-b from-orange-700 to-orange-800 hover:from-orange-800 hover:to-orange-900 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-orange-500/40 flex justify-center items-center gap-2 text-lg active:scale-95 transition-all">
                 <Icon path={Icons.Send} /> <span><RubyText text="提出" kana="ていしゅつ" />する</span>
               </button>
             </div>
@@ -422,11 +459,12 @@ const { useState, useEffect, useRef, useMemo } = React;
 
           {activePastJournal && (
              <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in border border-gray-100">
+               <div role="dialog" aria-modal="true" aria-label="むかしの記録"
+                    className="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in border border-gray-100">
 
                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 flex justify-between items-center border-b border-indigo-100 shrink-0">
                     <h3 className="font-black text-indigo-800 text-lg flex items-center gap-2"><Icon path="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" className="text-indigo-500"/> {activePastJournal.date} <RubyText text="の記録" kana="のきろく"/></h3>
-                    <button onClick={()=>setActivePastJournal(null)} className="p-2 bg-white rounded-full text-gray-500 hover:text-indigo-600 shadow-sm transition-colors"><Icon path={Icons.Close}/></button>
+                    <button onClick={()=>setActivePastJournal(null)} aria-label="閉じる" className="tap-44 p-2 bg-white rounded-full text-gray-500 hover:text-indigo-600 shadow-sm transition-colors"><Icon path={Icons.Close}/></button>
                  </div>
 
                  <div className="p-8 overflow-y-auto flex-1 bg-white">
@@ -447,7 +485,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                         return <div dangerouslySetInnerHTML={{__html: html}} />;
                       })()}
                     </div>
-                    <LazyImage imageId={activePastJournal.imageId} fetcher={(id) => window.callMemberApi('mbGetImage', id)} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
+                    <LazyImage imageId={activePastJournal.imageId} fetcher={(id) => window.callMemberApi('mbGetImage', id)} alt="この日にのせた画像" className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
                  </div>
 
                  <div className="bg-gray-50 p-6 border-t border-gray-100 shrink-0">
@@ -563,6 +601,7 @@ const { useState, useEffect, useRef, useMemo } = React;
       const [rosterData, setRosterData] = useState(data.rosterAll || []);
       const [apiKeyInput, setApiKeyInput] = useState("");
       const [copied, setCopied] = useState(false);
+      useDismissable(!!activeJournal, () => setActiveJournal(null));
 
       useEffect(() => {
         setJournals(data.journals);
@@ -756,20 +795,20 @@ const { useState, useEffect, useRef, useMemo } = React;
 
           <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
             <div className="flex gap-2 bg-white/60 backdrop-blur-md p-1.5 rounded-2xl shadow-sm border border-gray-200/50 self-start max-w-full overflow-x-auto whitespace-nowrap">
-               <button onClick={()=>setActiveTab('dashboard')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='dashboard'?'bg-white text-blue-600 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path="M3 3v18h18 M18 17V9 M13 17V5 M8 17v-3" className="w-5 h-5"/> ジャーナル管理</button>
-               <button onClick={()=>setActiveTab('vitals')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='vitals'?'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-pink-500/20':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Pulse} className="w-5 h-5"/> 心のバイタル</button>
-               <button onClick={()=>setActiveTab('admin')} className={`shrink-0 px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='admin'?'bg-white text-gray-800 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}>
+               <button onClick={()=>setActiveTab('dashboard')} className={`shrink-0 min-h-[44px] px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='dashboard'?'bg-white text-blue-600 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path="M3 3v18h18 M18 17V9 M13 17V5 M8 17v-3" className="w-5 h-5"/> ジャーナル管理</button>
+               <button onClick={()=>setActiveTab('vitals')} className={`shrink-0 min-h-[44px] px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='vitals'?'bg-gradient-to-r from-rose-600 to-pink-700 text-white shadow-md shadow-pink-600/20':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}><Icon path={Icons.Pulse} className="w-5 h-5"/> 心のバイタル</button>
+               <button onClick={()=>setActiveTab('admin')} className={`shrink-0 min-h-[44px] px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab==='admin'?'bg-white text-gray-800 shadow-sm':'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`}>
                  <Icon path={Icons.Settings} className="w-5 h-5"/> クラス設定
-                 {pendingMembers.length > 0 && <span className="bg-rose-500 text-white text-xs font-black px-2 py-0.5 rounded-full">{pendingMembers.length}</span>}
+                 {pendingMembers.length > 0 && <span className="bg-rose-600 text-white text-xs font-black px-2 py-0.5 rounded-full">{pendingMembers.length}</span>}
                </button>
             </div>
 
             {/* クラス切り替え */}
             <div className="flex items-center gap-2 self-start lg:self-auto">
-              <select value={code} onChange={e => onSwitchTenant(e.target.value)} className="bg-white border border-gray-200 text-sm font-bold text-gray-700 outline-none rounded-xl px-3 py-2.5 cursor-pointer shadow-sm max-w-[220px]">
+              <select value={code} onChange={e => onSwitchTenant(e.target.value)} className="min-h-[44px] bg-white border border-gray-200 text-sm font-bold text-gray-700 outline-none rounded-xl px-3 py-2.5 cursor-pointer shadow-sm max-w-[220px]">
                 {tenants.map(t => <option key={t.tenantCode} value={t.tenantCode}>{t.tenantName}</option>)}
               </select>
-              <button onClick={onCreateNew} className="bg-white border border-gray-200 hover:border-blue-400 hover:text-blue-600 text-gray-500 rounded-xl px-3 py-2.5 shadow-sm font-bold text-sm flex items-center gap-1 transition-colors"><Icon path={Icons.Plus} className="w-4 h-4"/> クラス追加</button>
+              <button onClick={onCreateNew} className="min-h-[44px] bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-700 text-gray-600 rounded-xl px-3 py-2.5 shadow-sm font-bold text-sm flex items-center gap-1 transition-colors"><Icon path={Icons.Plus} className="w-4 h-4"/> クラス追加</button>
             </div>
           </div>
 
@@ -807,12 +846,18 @@ const { useState, useEffect, useRef, useMemo } = React;
                          <div className="mt-4 pt-4 border-t border-gray-200">
                            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                               {['mon','tue','wed','thu','fri'].map((d,i) => (
-                                 <div key={d}><label className="text-xs font-bold text-gray-500 block mb-1.5 px-1">{['月','火','水','木','金'][i]}曜日</label>
-                                 <input type="text" value={weeklyThemes[d]} onChange={e=>setWeeklyThemes({...weeklyThemes, [d]: e.target.value})} className="w-full text-sm p-2.5 bg-white border border-gray-200 rounded-xl focus:border-blue-400 outline-none transition-colors" placeholder="テーマ"/></div>
+                                 <div key={d}>
+                                   {/* 入力欄をラベルの中に入れる。ラベル部分を押しても入力に入れるようになり、
+                                       当たり判定も 44px を超える（input は疑似要素を持てないため） */}
+                                   <label className="block">
+                                     <span className="text-xs font-bold text-gray-600 block mb-1.5 px-1">{['月','火','水','木','金'][i]}曜日</span>
+                                     <input type="text" value={weeklyThemes[d]} onChange={e=>setWeeklyThemes({...weeklyThemes, [d]: e.target.value})} className="w-full min-h-[44px] text-sm p-2.5 bg-white border border-gray-200 rounded-xl focus:border-blue-500 outline-none transition-colors" placeholder="テーマ"/>
+                                   </label>
+                                 </div>
                               ))}
                            </div>
                            <div className="mt-4 flex justify-end">
-                             <button onClick={handleSaveWeekly} className="text-sm bg-gray-800 hover:bg-gray-900 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">スケジュールを保存</button>
+                             <button onClick={handleSaveWeekly} className="text-sm min-h-[44px] bg-gray-800 hover:bg-gray-900 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">スケジュールを保存</button>
                            </div>
                          </div>
                       </details>
@@ -825,26 +870,26 @@ const { useState, useEffect, useRef, useMemo } = React;
                  <div className="p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50">
                     <div className="flex w-full lg:w-auto items-center gap-3">
                       <div className="relative flex-1 lg:w-64">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400"><Icon path={Icons.Search} className="w-5 h-5" /></div>
-                        <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="名前や内容で検索..." className="w-full pl-11 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-colors font-medium text-sm"/>
+                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500"><Icon path={Icons.Search} className="w-5 h-5" /></div>
+                        <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="名前や内容で検索..." className="w-full min-h-[44px] pl-11 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-blue-500 transition-colors font-medium text-sm"/>
                       </div>
-                      <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} className="bg-white border border-gray-200 text-sm font-bold text-gray-600 outline-none rounded-xl px-3 py-2.5 cursor-pointer">
+                      <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} className="min-h-[44px] bg-white border border-gray-200 text-sm font-bold text-gray-600 outline-none rounded-xl px-3 py-2.5 cursor-pointer">
                          <option value="all">全状況</option><option value="未返却">未返却</option><option value="返却済み">返却済</option>
                       </select>
                     </div>
 
                     <div className="flex w-full lg:w-auto items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
-                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"AIコメント作成", text:"未返却のジャーナルに温かいコメント案を作ります。", onConfirm: ()=>executeAiAction('simple'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-purple-50 text-purple-600 hover:bg-purple-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-4 h-4"/> AIシンプル</button>
-                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"AI高度分析", text:"未返却のジャーナルを分析し、ハイライトとコメント案を作ります。", onConfirm: ()=>executeAiAction('full'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" className="w-4 h-4"/> AI高度分析</button>
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"AIコメント作成", text:"未返却のジャーナルに温かいコメント案を作ります。", onConfirm: ()=>executeAiAction('simple'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 min-h-[44px] bg-purple-50 text-purple-700 hover:bg-purple-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-4 h-4"/> AIシンプル</button>
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"AI高度分析", text:"未返却のジャーナルを分析し、ハイライトとコメント案を作ります。", onConfirm: ()=>executeAiAction('full'), onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 min-h-[44px] bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"><Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" className="w-4 h-4"/> AI高度分析</button>
                        <div className="w-px h-6 bg-gray-300 mx-1"></div>
-                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"一括返却", text:"コメントが付いている未返却ジャーナルを全て返却済みにしますか？", onConfirm: executeBatchReturn, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-sm transition-colors flex items-center gap-2 active:scale-95"><Icon path="M5 13l4 4L19 7" className="w-4 h-4"/> 一括返却</button>
+                       <button onClick={()=>setConfirmConfig({isOpen:true, title:"一括返却", text:"コメントが付いている未返却ジャーナルを全て返却済みにしますか？", onConfirm: executeBatchReturn, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="shrink-0 min-h-[44px] bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-sm transition-colors flex items-center gap-2 active:scale-95"><Icon path="M5 13l4 4L19 7" className="w-4 h-4"/> 一括返却</button>
                     </div>
                  </div>
 
                  <div className="overflow-auto flex-1 p-0">
                     <table className="w-full min-w-[640px] text-left border-collapse">
                       <thead className="bg-gray-50/80 backdrop-blur sticky top-0 z-10 shadow-sm border-b border-gray-100">
-                        <tr><th className="p-4 pl-6 font-black text-gray-400 text-xs tracking-wider uppercase">日付</th><th className="p-4 font-black text-gray-400 text-xs tracking-wider uppercase">児童名</th><th className="p-4 font-black text-gray-400 text-xs tracking-wider uppercase">状況</th><th className="p-4 pr-6 font-black text-gray-400 text-xs tracking-wider uppercase text-right">アクション</th></tr>
+                        <tr><th className="p-4 pl-6 font-black text-gray-500 text-xs tracking-wider uppercase">日付</th><th className="p-4 font-black text-gray-500 text-xs tracking-wider uppercase">児童名</th><th className="p-4 font-black text-gray-500 text-xs tracking-wider uppercase">状況</th><th className="p-4 pr-6 font-black text-gray-500 text-xs tracking-wider uppercase text-right">アクション</th></tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {filteredJournals.map(j => (
@@ -860,10 +905,10 @@ const { useState, useEffect, useRef, useMemo } = React;
                             <td className="p-4 pr-6 flex gap-2 justify-end items-center">
                               {j.status === '未返却' ? (
                                 <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 mr-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-                                  {['😊','👏','💪','⭐'].map(s => <button key={s} onClick={()=>handleQuickAction(j.journalId, 'stamp', s)} className="hover:scale-125 hover:bg-white hover:shadow-sm rounded transition-all px-2 py-0.5 text-lg" title={`${s}で即返却`}>{s}</button>)}
+                                  {['😊','👏','💪','⭐'].map(s => <button key={s} onClick={()=>handleQuickAction(j.journalId, 'stamp', s)} aria-label={`${s} のスタンプで返却する`} className="tap-44 hover:scale-125 hover:bg-white hover:shadow-sm rounded transition-all px-2 py-0.5 text-lg" title={`${s}で即返却`}>{s}</button>)}
                                 </div>
-                              ) : <button onClick={()=>handleQuickAction(j.journalId, 'revert')} className="text-xs text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-xl font-bold mr-2 transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100">取消</button>}
-                              <button onClick={() => {setActiveJournal({...j}); setFeedback(j.teacherComment || "");}} className="bg-white border-2 border-gray-100 hover:border-blue-400 hover:text-blue-600 text-gray-700 px-4 md:px-5 py-2 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-all whitespace-nowrap">詳細を開く</button>
+                              ) : <button onClick={()=>handleQuickAction(j.journalId, 'revert')} className="tap-44 text-xs text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-xl font-bold mr-2 transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100">取消</button>}
+                              <button onClick={() => {setActiveJournal({...j}); setFeedback(j.teacherComment || "");}} className="min-h-[44px] bg-white border-2 border-gray-200 hover:border-blue-500 hover:text-blue-700 text-gray-700 px-4 md:px-5 py-2 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-all whitespace-nowrap">詳細を開く</button>
                             </td>
                           </tr>
                         ))}
@@ -880,7 +925,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                    <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2 text-lg"><div className="p-1.5 bg-rose-100 text-rose-600 rounded-lg"><Icon path="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" className="w-5 h-5"/></div> 気にかけたい児童 (AI解析)</h3>
                    <div className="flex flex-wrap gap-4">
                      {vitalData.students.filter(s => s.alerts.length > 0).length === 0 ? (
-                        <p className="text-gray-400 font-bold text-sm p-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200 w-full text-center">現在、特筆すべきアラートはありません。クラスの心は安定しています✨</p>
+                        <p className="text-gray-500 font-bold text-sm p-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200 w-full text-center">現在、特筆すべきアラートはありません。クラスの心は安定しています✨</p>
                      ) : (
                         vitalData.students.filter(s => s.alerts.length > 0).map(s => (
                            <div key={s.email} className="flex-1 min-w-[250px] bg-rose-50/50 border border-rose-100 p-4 rounded-2xl">
@@ -906,7 +951,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                    <div className="overflow-x-auto pb-4 custom-scrollbar">
                      <div className="min-w-[800px]">
                        <div className="flex mb-3 pl-32">
-                         {vitalData.dates.map((d, i) => <div key={i} className="flex-1 text-center text-[10px] font-bold text-gray-400 transform -rotate-45 origin-bottom-left whitespace-nowrap">{d.split('/')[1] + '/' + d.split('/')[2]}</div>)}
+                         {vitalData.dates.map((d, i) => <div key={i} className="flex-1 text-center text-[10px] font-bold text-gray-500 transform -rotate-45 origin-bottom-left whitespace-nowrap">{d.split('/')[1] + '/' + d.split('/')[2]}</div>)}
                        </div>
                        <div className="space-y-3">
                          {vitalData.students.map(s => (
@@ -951,18 +996,18 @@ const { useState, useEffect, useRef, useMemo } = React;
                         <button onClick={handleCopyUrl} className={`shrink-0 font-bold px-6 py-3 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-gray-800 hover:bg-black text-white'}`}><Icon path={copied ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copied ? 'コピーしました' : 'URLをコピー'}</button>
                       </div>
                       <div className="flex flex-wrap gap-3 items-center">
-                        <label className="flex items-center gap-2 text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
-                          <input type="checkbox" checked={!!data.tenant.joinOpen} onChange={e=>handleJoinPolicy(e.target.checked, data.tenant.requireApproval)} className="accent-blue-600 w-4 h-4"/> 参加を受け付ける
+                        <label className="flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                          <input type="checkbox" checked={!!data.tenant.joinOpen} onChange={e=>handleJoinPolicy(e.target.checked, data.tenant.requireApproval)} className="accent-blue-600 w-5 h-5"/> 参加を受け付ける
                         </label>
-                        <label className="flex items-center gap-2 text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
-                          <input type="checkbox" checked={!!data.tenant.requireApproval} onChange={e=>handleJoinPolicy(data.tenant.joinOpen, e.target.checked)} className="accent-blue-600 w-4 h-4"/> 参加は先生の承認制にする
+                        <label className="flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                          <input type="checkbox" checked={!!data.tenant.requireApproval} onChange={e=>handleJoinPolicy(data.tenant.joinOpen, e.target.checked)} className="accent-blue-600 w-5 h-5"/> 参加は先生の承認制にする
                         </label>
-                        <button onClick={()=>setConfirmConfig({isOpen:true, title:"コードの再発行", text:"クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？", confirmText:"再発行する", onConfirm: handleRegenerateCode, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="text-sm font-bold text-gray-500 hover:text-red-500 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> コード再発行</button>
+                        <button onClick={()=>setConfirmConfig({isOpen:true, title:"コードの再発行", text:"クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？", confirmText:"再発行する", onConfirm: handleRegenerateCode, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="min-h-[44px] text-sm font-bold text-gray-600 hover:text-red-600 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> コード再発行</button>
                       </div>
                     </div>
                     <div className="shrink-0 mx-auto md:mx-0 text-center">
                       <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(data.tenant.memberUrl)}`} width="160" height="160" className="rounded-2xl border border-gray-200 shadow-sm" alt="児童用URLのQRコード"/>
-                      <p className="text-xs font-bold text-gray-400 mt-2">QRコードで配布</p>
+                      <p className="text-xs font-bold text-gray-500 mt-2">QRコードで配布</p>
                     </div>
                   </div>
                 </div>
@@ -978,11 +1023,11 @@ const { useState, useEffect, useRef, useMemo } = React;
                         <div key={m.email} className="bg-white rounded-2xl border border-amber-100 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
                           <div className="flex-1 min-w-0">
                             <p className="font-black text-gray-800">{m.name}</p>
-                            <p className="text-xs text-gray-400 font-mono truncate">{m.email}</p>
+                            <p className="text-xs text-gray-500 font-mono truncate">{m.email}</p>
                           </div>
                           <div className="flex gap-2 shrink-0">
-                            <button onClick={()=>handleApprove(m.email, true)} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center gap-1.5"><Icon path={Icons.Check} className="w-4 h-4"/> 承認</button>
-                            <button onClick={()=>handleApprove(m.email, false)} className="bg-white hover:bg-red-50 text-red-500 border border-red-200 font-bold px-5 py-2.5 rounded-xl active:scale-95 transition-all">却下</button>
+                            <button onClick={()=>handleApprove(m.email, true)} className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center gap-1.5"><Icon path={Icons.Check} className="w-4 h-4"/> 承認</button>
+                            <button onClick={()=>handleApprove(m.email, false)} className="bg-white hover:bg-red-50 text-red-600 border border-red-300 font-bold px-5 py-2.5 rounded-xl active:scale-95 transition-all">却下</button>
                           </div>
                         </div>
                       ))}
@@ -996,12 +1041,12 @@ const { useState, useEffect, useRef, useMemo } = React;
                     <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg">
                       <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Icon path={Icons.User} className="w-5 h-5"/></div> 児童名簿の管理
                     </h3>
-                    <button onClick={handleSaveRoster} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">保存して更新</button>
+                    <button onClick={handleSaveRoster} className="min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all">保存して更新</button>
                   </div>
 
                   <div className="overflow-auto max-h-[400px] bg-gray-50/50 rounded-2xl border border-gray-200 p-2 custom-scrollbar">
                     <table className="w-full min-w-[640px] text-left">
-                      <thead className="text-xs text-gray-500 font-bold bg-gray-100/80 rounded-xl sticky top-0 z-10">
+                      <thead className="text-xs text-gray-600 font-bold bg-gray-100/80 rounded-xl sticky top-0 z-10">
                         <tr>
                            <th className="p-3 pl-4 rounded-l-xl w-24">役割</th>
                            <th className="p-3">氏名</th>
@@ -1014,34 +1059,34 @@ const { useState, useEffect, useRef, useMemo } = React;
                         {rosterData.map((r, i) => (
                            <tr key={i} className="hover:bg-white transition-colors group">
                              <td className="p-2 pl-4">
-                               <select value={r.role} onChange={(e)=>handleRosterChange(i, 'role', e.target.value)} className="w-full bg-transparent border-none outline-none font-bold text-gray-700 cursor-pointer">
+                               <select value={r.role} onChange={(e)=>handleRosterChange(i, 'role', e.target.value)} className="w-full min-h-[44px] bg-transparent border-none outline-none font-bold text-gray-700 cursor-pointer">
                                  <option value="児童">児童</option>
                                  <option value="担任">担任</option>
                                </select>
                              </td>
                              <td className="p-2">
-                               <input type="text" value={r.name} onChange={(e)=>handleRosterChange(i, 'name', e.target.value)} placeholder="例: 山田 太郎" className="w-full bg-transparent border-none outline-none font-bold text-gray-800 focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all"/>
+                               <input type="text" value={r.name} onChange={(e)=>handleRosterChange(i, 'name', e.target.value)} placeholder="例: 山田 太郎" className="w-full min-h-[44px] bg-transparent border-none outline-none font-bold text-gray-800 focus:ring-2 focus:ring-blue-200 rounded px-2 py-1.5 transition-all"/>
                              </td>
                              <td className="p-2">
-                               <input type="text" value={r.email} onChange={(e)=>handleRosterChange(i, 'email', e.target.value)} placeholder="例: yamada@school.ed.jp" className="w-full bg-transparent border-none outline-none text-gray-600 text-sm focus:ring-2 focus:ring-blue-100 rounded px-2 py-1.5 transition-all font-mono"/>
+                               <input type="text" value={r.email} onChange={(e)=>handleRosterChange(i, 'email', e.target.value)} placeholder="例: yamada@school.ed.jp" className="w-full min-h-[44px] bg-transparent border-none outline-none text-gray-700 text-sm focus:ring-2 focus:ring-blue-200 rounded px-2 py-1.5 transition-all font-mono"/>
                              </td>
                              <td className="p-2">
                                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${r.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{r.status === 'pending' ? '承認待ち' : '参加中'}</span>
                              </td>
                              <td className="p-2 pr-4 text-right">
-                               <button onClick={()=>handleRemoveRoster(i)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"><Icon path={Icons.Trash} className="w-4 h-4"/></button>
+                               <button onClick={()=>handleRemoveRoster(i)} aria-label={`${r.name || "この行"} を名簿から削除する`} className="tap-44 p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"><Icon path={Icons.Trash} className="w-4 h-4"/></button>
                              </td>
                            </tr>
                         ))}
                       </tbody>
                     </table>
                     <div className="p-2 mt-2">
-                      <button onClick={handleAddRoster} className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-500 font-bold rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.99]">
+                      <button onClick={handleAddRoster} className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-600 font-bold rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.99]">
                         <Icon path={Icons.Plus} className="w-5 h-5"/> あたらしい行を追加する
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400 mt-3 leading-relaxed">💡 名簿に登録した児童は、児童用URLからサインインするだけで参加できます（承認不要）。名簿に無いアカウントは「参加申請」として届きます。</p>
+                  <p className="text-xs text-gray-500 mt-3 leading-relaxed">💡 名簿に登録した児童は、児童用URLからサインインするだけで参加できます（承認不要）。名簿に無いアカウントは「参加申請」として届きます。</p>
                </div>
 
                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
@@ -1051,7 +1096,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                     <h3 className="font-black text-gray-800 mb-2 text-center">Gemini AI 設定</h3>
                     <p className="text-sm text-gray-500 mb-4 text-center">{data.settings && data.settings.hasApiKey ? `設定済み: ${data.settings.apiKeyMasked}` : 'AIコメント機能にはAPIキーが必要です。'}</p>
                     <input type="password" value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder="Gemini APIキーを貼り付け" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-purple-400 mb-3"/>
-                    <button onClick={handleSaveApiKey} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-xl transition-all active:scale-95 mt-auto">保存</button>
+                    <button onClick={handleSaveApiKey} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95 mt-auto">保存</button>
                  </div>
 
                  {/* データベース */}
@@ -1059,7 +1104,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                     <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 text-emerald-500"><Icon path={Icons.Link} className="w-8 h-8"/></div>
                     <h3 className="font-black text-gray-800 mb-2">データベース</h3>
                     <p className="text-sm text-gray-500 mb-6">このクラスの記録は、あなたのDrive内のスプレッドシートに保存されています。</p>
-                    <a href={data.spreadsheetUrl} target="_blank" rel="noopener noreferrer" className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-bold py-3 rounded-xl transition-all active:scale-95">シートを開く</a>
+                    <a href={data.spreadsheetUrl} target="_blank" rel="noopener noreferrer" className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold py-3 rounded-xl transition-all active:scale-95">シートを開く</a>
                  </div>
 
                  {/* エクスポート */}
@@ -1069,7 +1114,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                     <p className="text-sm text-gray-500 mb-6">CSVをダウンロード、または印刷用の帳票（PDF保存可）を開きます。</p>
                     <div className="flex gap-2 w-full">
                        <button onClick={()=>handleExport('csv')} className="flex-1 bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-xl transition-all active:scale-95">CSV</button>
-                       <button onClick={()=>handleExport('pdf')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl transition-all active:scale-95">印刷/PDF</button>
+                       <button onClick={()=>handleExport('pdf')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-3 rounded-xl transition-all active:scale-95">印刷/PDF</button>
                     </div>
                  </div>
 
@@ -1077,8 +1122,8 @@ const { useState, useEffect, useRef, useMemo } = React;
                  <div className="bg-red-50 p-8 rounded-[2rem] shadow-premium border border-red-100 flex flex-col justify-center items-center text-center">
                     <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"><Icon path={Icons.Trash} className="w-8 h-8"/></div>
                     <h3 className="font-black text-red-800 mb-2">危険な操作</h3>
-                    <p className="text-sm text-red-600 mb-6">このクラスの全ジャーナルデータを削除します。年度替わりなどに使用してください。</p>
-                    <button onClick={()=>setConfirmConfig({isOpen:true, isDanger:true, title:"データ全削除", text:"本当にこのクラスのすべてのジャーナルデータを削除しますか？\nこの操作は元に戻せません。", confirmText:"削除する", onConfirm: executeDataReset, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all">全データを削除</button>
+                    <p className="text-sm text-red-700 mb-6">このクラスの全ジャーナルデータを削除します。年度替わりなどに使用してください。</p>
+                    <button onClick={()=>setConfirmConfig({isOpen:true, isDanger:true, title:"データ全削除", text:"本当にこのクラスのすべてのジャーナルデータを削除しますか？\nこの操作は元に戻せません。", confirmText:"削除する", onConfirm: executeDataReset, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-600/30 active:scale-95 transition-all">全データを削除</button>
                  </div>
                </div>
              </div>
@@ -1086,10 +1131,11 @@ const { useState, useEffect, useRef, useMemo } = React;
 
           {activeJournal && (
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-2 md:p-8 transition-opacity">
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-full max-h-[92vh] md:max-h-[85vh] flex flex-col md:flex-row overflow-hidden animate-fade-in border border-gray-100">
+              <div role="dialog" aria-modal="true" aria-label={`${activeJournal.studentName} さんのジャーナル`}
+                   className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-full max-h-[92vh] md:max-h-[85vh] flex flex-col md:flex-row overflow-hidden animate-fade-in border border-gray-100">
                 <div className="flex-1 min-h-[35%] bg-gradient-to-br from-orange-50/50 to-amber-50/50 p-4 md:p-8 border-b md:border-b-0 md:border-r overflow-y-auto relative" onMouseUp={handleTextSelect} onTouchEnd={handleTextSelect}>
                   <div className="flex justify-between items-start mb-6">
-                    <div><p className="text-sm font-bold text-gray-400 mb-1">{activeJournal.date}</p><h2 className="text-3xl font-black text-gray-800">{activeJournal.studentName} <span className="text-xl font-medium text-gray-400">さん</span></h2></div>
+                    <div><p className="text-sm font-bold text-gray-500 mb-1">{activeJournal.date}</p><h2 className="text-3xl font-black text-gray-800">{activeJournal.studentName} <span className="text-xl font-medium text-gray-500">さん</span></h2></div>
                     <span className="text-3xl bg-white px-4 py-2 rounded-2xl shadow-sm border border-orange-100">{activeJournal.emotion || '📝'}</span>
                   </div>
                   <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-orange-100 min-h-[250px] whitespace-pre-wrap text-lg lined-paper text-gray-800 leading-[40px] font-medium select-text relative">
@@ -1101,10 +1147,10 @@ const { useState, useEffect, useRef, useMemo } = React;
                         return <div dangerouslySetInnerHTML={{__html: html}} />;
                      })()}
                   </div>
-                  <LazyImage imageId={activeJournal.imageId} fetcher={(id) => window.callOwnerApi('opGetImage', code, id)} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
+                  <LazyImage imageId={activeJournal.imageId} fetcher={(id) => window.callOwnerApi('opGetImage', code, id)} alt={`${activeJournal.studentName} さんがのせた画像`} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
                 </div>
                 <div className="w-full md:w-[420px] shrink-0 max-h-[55%] md:max-h-none p-5 md:p-8 bg-white flex flex-col relative overflow-y-auto">
-                  <button onClick={() => setActiveJournal(null)} className="absolute top-6 right-6 p-2 text-gray-400 hover:text-gray-600 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"><Icon path={Icons.Close} /></button>
+                  <button onClick={() => setActiveJournal(null)} aria-label="閉じる" className="tap-44 absolute top-6 right-6 p-2 text-gray-500 hover:text-gray-700 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"><Icon path={Icons.Close} /></button>
                   <h3 className="text-lg font-black text-blue-600 mb-4 flex items-center gap-2"><div className="p-1.5 bg-blue-50 rounded-lg"><Icon path={Icons.Pen} className="w-5 h-5"/></div> 全体コメント</h3>
                   <textarea value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="温かいコメントを入力..." className="w-full border-2 border-gray-100 rounded-2xl p-4 text-gray-700 outline-none focus:border-blue-400 focus:bg-blue-50/30 transition-colors resize-none mb-6 min-h-[160px] font-medium" />
 
@@ -1112,15 +1158,15 @@ const { useState, useEffect, useRef, useMemo } = React;
                   <div className="flex-1 overflow-y-auto space-y-3 mb-6 pr-1 custom-scrollbar">
                      {parseHighlights(activeJournal.highlights).map(h => (
                         <div key={h.id} className="bg-yellow-50/50 border border-yellow-200 p-4 rounded-2xl relative group hover:bg-yellow-50 transition-colors">
-                           <button onClick={()=>removeHighlight(h.id)} className="absolute top-3 right-3 text-yellow-400 hover:text-red-500 bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"><Icon path={Icons.Close} className="w-3 h-3"/></button>
+                           <button onClick={()=>removeHighlight(h.id)} aria-label="このハイライトを消す" className="tap-44 absolute top-3 right-3 text-yellow-600 hover:text-red-600 bg-white rounded-full p-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-sm"><Icon path={Icons.Close} className="w-3 h-3"/></button>
                            <p className="text-sm font-bold text-gray-800 mb-3 border-l-4 border-yellow-400 pl-3 leading-relaxed">"{h.textToHighlight}"</p>
                            <input type="text" placeholder="コメント (任意)" value={h.suggestedComment||''} onChange={e=>updateHighlight(h.id, 'suggestedComment', e.target.value)} className="w-full text-xs p-2.5 rounded-xl border border-yellow-200 outline-none focus:border-yellow-400 mb-3 font-medium bg-white" />
                            <div className="flex gap-1.5 overflow-x-auto pb-1">
-                              {['😄','👏','🤔','😭','👍','✨','💪','🌱'].map(s=>(<button key={s} onClick={()=>updateHighlight(h.id, 'suggestedStamp', s)} className={`shrink-0 text-base p-1.5 rounded-lg hover:bg-yellow-100 transition-colors ${h.suggestedStamp===s?'bg-yellow-200 border-yellow-400 shadow-sm transform scale-110':''}`}>{s}</button>))}
+                              {['😄','👏','🤔','😭','👍','✨','💪','🌱'].map(s=>(<button key={s} onClick={()=>updateHighlight(h.id, 'suggestedStamp', s)} aria-label={`スタンプ ${s} を選ぶ`} className={`tap-44 shrink-0 text-base p-1.5 rounded-lg hover:bg-yellow-100 transition-colors ${h.suggestedStamp===s?'bg-yellow-200 border-yellow-400 shadow-sm transform scale-110':''}`}>{s}</button>))}
                            </div>
                         </div>
                      ))}
-                     {parseHighlights(activeJournal.highlights).length === 0 && <div className="text-xs font-bold text-gray-400 text-center py-6 bg-gray-50 rounded-2xl border border-gray-100 border-dashed">ハイライトはありません</div>}
+                     {parseHighlights(activeJournal.highlights).length === 0 && <div className="text-xs font-bold text-gray-500 text-center py-6 bg-gray-50 rounded-2xl border border-gray-100 border-dashed">ハイライトはありません</div>}
                   </div>
 
                   <button onClick={handleSaveFeedback} className="mt-auto bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-blue-500/30 text-lg active:scale-95 transition-all w-full flex justify-center items-center gap-2"><Icon path={Icons.Send} /> 保存して返却する</button>
@@ -1166,7 +1212,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                 <div className="w-16 h-16 mx-auto rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4"><Icon path={Icons.Check} className="w-8 h-8"/></div>
                 <p className="font-black text-gray-700 text-lg mb-2">クラス「{done.tenantName}」を作成しました！</p>
                 <p className="text-sm text-gray-500 font-medium mb-4">クラスコード: <span className="font-mono font-black tracking-widest text-orange-600">{done.tenantCode}</span></p>
-                <p className="text-xs text-gray-400">ダッシュボードを読み込んでいます…</p>
+                <p className="text-xs text-gray-500">ダッシュボードを読み込んでいます…</p>
               </div>
             ) : (
               <>
@@ -1174,7 +1220,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                   <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"><Icon path={Icons.Book} className="w-10 h-10"/></div>
                   <h1 className="text-3xl font-black text-gray-800 mb-2">クラスをつくろう</h1>
                   <p className="text-gray-500 font-medium leading-relaxed">クラス専用のデータベースが<br/>あなたの Google Drive に自動作成されます。</p>
-                  {ownerEmail && <p className="mt-3 text-xs font-bold text-gray-400 bg-gray-50 inline-block px-4 py-1.5 rounded-full">ログイン中: {ownerEmail}</p>}
+                  {ownerEmail && <p className="mt-3 text-xs font-bold text-gray-500 bg-gray-50 inline-block px-4 py-1.5 rounded-full">ログイン中: {ownerEmail}</p>}
                 </div>
 
                 <div className="border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6 mb-5">
@@ -1269,9 +1315,9 @@ const { useState, useEffect, useRef, useMemo } = React;
           <header className="flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-blue-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
             <div className="flex items-center gap-2 md:gap-3 min-w-0">
               <div className="p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-blue-500 to-blue-600"><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
-              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-blue-600">教員ダッシュボード <span className="text-gray-300 font-medium hidden sm:inline">|</span> <span className="text-gray-600 text-base md:text-xl hidden sm:inline">{tenantData.tenant.tenantName}</span></h1>
+              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-blue-600">教員ダッシュボード <span aria-hidden="true" className="hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"></span> <span className="text-gray-600 text-base md:text-xl hidden sm:inline">{tenantData.tenant.tenantName}</span></h1>
             </div>
-            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-400 shrink-0" /> <span className="truncate">{ownerEmail} 先生</span></div>
+            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-500 shrink-0" /> <span className="truncate">{ownerEmail} 先生</span></div>
           </header>
           <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
             <TeacherApp
@@ -1283,8 +1329,8 @@ const { useState, useEffect, useRef, useMemo } = React;
               onCreateNew={() => setPhase('create')}
             />
           </div></main>
-          <footer className="flex-none w-full text-center text-gray-400 py-3 bg-white border-t border-gray-100 text-sm">
-            <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+          <footer className="flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm">
+            <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
           </footer>
         </div>
       );
@@ -1345,18 +1391,18 @@ const { useState, useEffect, useRef, useMemo } = React;
         <CenterCard icon="😢">
           <h1 className="text-2xl font-black text-gray-800 mb-3">つながりませんでした</h1>
           <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap">{errorMsg}</p>
-          <button onClick={()=>window.appReload()} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう<ruby>一度<rt className="text-[0.6em]">いちど</rt></ruby>ひらく</button>
+          <button onClick={()=>window.appReload()} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう<ruby>一度<rp>(</rp><rt className="text-[0.6em]">いちど</rt><rp>)</rp></ruby>ひらく</button>
         </CenterCard>
       );
 
       if (phase === 'join') return (
         <CenterCard icon="🎒">
-          <h1 className="text-2xl font-black text-gray-800 mb-2">{statusInfo.tenantName || 'クラス'} に<ruby>参加<rt className="text-[0.5em]">さんか</rt></ruby>する</h1>
-          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>名前<rt className="text-[0.6em]">なまえ</rt></ruby>を<ruby>入力<rt className="text-[0.6em]">にゅうりょく</rt></ruby>して、<ruby>参加<rt className="text-[0.6em]">さんか</rt></ruby>ボタンをおしてね。</p>
+          <h1 className="text-2xl font-black text-gray-800 mb-2">{statusInfo.tenantName || 'クラス'} に<ruby>参加<rp>(</rp><rt className="text-[0.5em]">さんか</rt><rp>)</rp></ruby>する</h1>
+          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>名前<rp>(</rp><rt className="text-[0.6em]">なまえ</rt><rp>)</rp></ruby>を<ruby>入力<rp>(</rp><rt className="text-[0.6em]">にゅうりょく</rt><rp>)</rp></ruby>して、<ruby>参加<rp>(</rp><rt className="text-[0.6em]">さんか</rt><rp>)</rp></ruby>ボタンをおしてね。</p>
           {statusInfo.joinOpen ? (
             <>
               <input type="text" value={joinName} onChange={e=>setJoinName(e.target.value)} placeholder="なまえ（例: やまだ たろう）" className="w-full border-2 border-orange-100 rounded-2xl p-4 text-base outline-none focus:border-orange-400 bg-white font-bold mb-4 transition-colors text-center"/>
-              <button onClick={handleJoin} disabled={server.isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">✋ クラスに<ruby>参加<rt className="text-[0.5em]">さんか</rt></ruby>する</button>
+              <button onClick={handleJoin} disabled={server.isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">✋ クラスに<ruby>参加<rp>(</rp><rt className="text-[0.5em]">さんか</rt><rp>)</rp></ruby>する</button>
             </>
           ) : (
             <p className="text-sm font-bold text-red-500 bg-red-50 px-4 py-3 rounded-xl">いまは参加の受付が止まっています。先生に確認してね。</p>
@@ -1367,8 +1413,8 @@ const { useState, useEffect, useRef, useMemo } = React;
 
       if (phase === 'pending') return (
         <CenterCard icon="⏳">
-          <h1 className="text-2xl font-black text-gray-800 mb-3"><ruby>先生<rt className="text-[0.5em]">せんせい</rt></ruby>の<ruby>承認<rt className="text-[0.5em]">しょうにん</rt></ruby>をまっています</h1>
-          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>先生<rt className="text-[0.6em]">せんせい</rt></ruby>がOKしたら<ruby>使<rt className="text-[0.6em]">つか</rt></ruby>えるようになるよ。<br/>しばらくしてから、もう<ruby>一度<rt className="text-[0.6em]">いちど</rt></ruby>ためしてね。</p>
+          <h1 className="text-2xl font-black text-gray-800 mb-3"><ruby>先生<rp>(</rp><rt className="text-[0.5em]">せんせい</rt><rp>)</rp></ruby>の<ruby>承認<rp>(</rp><rt className="text-[0.5em]">しょうにん</rt><rp>)</rp></ruby>をまっています</h1>
+          <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>先生<rp>(</rp><rt className="text-[0.6em]">せんせい</rt><rp>)</rp></ruby>がOKしたら<ruby>使<rp>(</rp><rt className="text-[0.6em]">つか</rt><rp>)</rp></ruby>えるようになるよ。<br/>しばらくしてから、もう<ruby>一度<rp>(</rp><rt className="text-[0.6em]">いちど</rt><rp>)</rp></ruby>ためしてね。</p>
           <button onClick={()=>{ setPhase('connecting'); checkStatus(); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう一度たしかめる</button>
         </CenterCard>
       );
@@ -1378,15 +1424,15 @@ const { useState, useEffect, useRef, useMemo } = React;
           <header className="flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-orange-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
             <div className="flex items-center gap-2 md:gap-3 min-w-0">
               <div className="p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-orange-400 to-orange-500"><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
-              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-orange-600">ふりかえりジャーナル <span className="text-gray-300 font-medium hidden sm:inline">|</span> <span className="text-gray-500 text-sm md:text-lg hidden sm:inline">{data.tenantName}</span></h1>
+              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-orange-700">ふりかえりジャーナル <span aria-hidden="true" className="hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"></span> <span className="text-gray-500 text-sm md:text-lg hidden sm:inline">{data.tenantName}</span></h1>
             </div>
-            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-400 shrink-0" /> <span className="truncate">{data.user.name} さん</span></div>
+            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-500 shrink-0" /> <span className="truncate">{data.user.name} さん</span></div>
           </header>
           <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
             <StudentApp data={data} server={server} refresh={sync} />
           </div></main>
-          <footer className="flex-none w-full text-center text-gray-400 py-3 bg-white border-t border-gray-100 text-sm">
-            <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+          <footer className="flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm">
+            <span>© 2026 ふりかえりジャーナル <a href="https://note.com/cute_borage86" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
           </footer>
         </div>
       );

@@ -1,22 +1,71 @@
-/* 学校のフィルタリングで Web フォントが届かなくても字が崩れないよう、
-   端末側の日本語フォントを必ず後ろに並べる */
+/* Tailwind で書けない部分だけを持つ追加スタイル。
+   ここは原本。生成物は css.html（npm run build で作られる）。 */
+
+:root {
+  /* 学校のフィルタリングで Web フォントが届かなくても字が崩れないよう、
+     端末側の日本語フォントを必ず後ろに並べる。 */
+  --font-ui: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic UI',
+             'Hiragino Kaku Gothic ProN', 'Noto Sans JP', system-ui, sans-serif;
+}
+
 body {
-  font-family: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic UI',
-               'Hiragino Kaku Gothic ProN', 'Noto Sans JP', system-ui, sans-serif;
+  font-family: var(--font-ui);
   background-color: #f8fafc;
   overflow: hidden;
+  /* ダブルタップ拡大の 300ms 遅延を消す。拡大そのものは禁止しない（見えづらい子のため） */
+  touch-action: manipulation;
 }
 
 /* モバイルブラウザのアドレスバーで下部が見切れる 100vh 問題対策（iOS Safari 等） */
 @supports (height: 100dvh) {
   .h-screen { height: 100dvh !important; }
 }
+
 /* タッチ端末でのタップハイライト抑制と快適なスクロール */
 * { -webkit-tap-highlight-color: transparent; }
 .overflow-y-auto, .overflow-x-auto, .overflow-auto { -webkit-overflow-scrolling: touch; }
+.overflow-y-auto, .overflow-auto { overscroll-behavior: contain; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f8fafc; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* キーボードで操作している人に、いまどこにいるかを必ず見せる */
+:focus-visible { outline: 3px solid #9a3412; outline-offset: 2px; }
+
+/* ── ふりがな（rt）の色 ──
+   #6b7280 と決め打ちしていたため、色のついた面の上で読めなくなっていた。
+   実測: 提出ボタンの上で比 1.36 / おへんじ帯の上で比 1.08。
+   ふりがなが要るのは低学年の児童なので、いちばん読めなくて困る人が
+   いちばん読めない形になっていた。
+   白地では少し淡い既定色を使い、色のついた面では親の色を継がせる。
+   1か所ずつ潰すと必ず漏れるので、まとめて継がせる。 */
+rt { color: #5f6368; font-weight: 500; }
+button rt,
+a rt,
+label rt,
+[class*="bg-"] rt,
+[class*="bg-gradient"] rt,
+[class*="text-white"] rt,
+[class*="text-orange"] rt,
+[class*="text-blue"] rt,
+[class*="text-indigo"] rt,
+[class*="text-yellow"] rt,
+[class*="text-gray-7"] rt,
+[class*="text-gray-8"] rt { color: inherit; }
+
+/* ── タップ領域 44px ──
+   ボタン自体を大きくすると、詰めて組んであるツールバーが折り返して別の破綻を生む。
+   疑似要素で当たり判定だけを広げる。
+   （input は疑似要素を持てないので、囲みの label 側で min-height を確保する） */
+.tap-44 { position: relative; }
+.tap-44::after {
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%; height: 100%;
+  min-width: 44px; min-height: 44px;
+}
 
 .lined-paper {
   line-height: 40px;
@@ -43,3 +92,29 @@ body {
 .circle-chart-circle { animation: dash 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .tooltip-content { opacity: 0; visibility: hidden; transform: translateY(5px); transition: all 0.2s ease; }
 .group:hover .tooltip-content { opacity: 1; visibility: visible; transform: translateY(0); }
+
+/* ── 動きの配慮（感覚過敏の児童に配慮して、動きを止められるようにする） ──
+   .01ms であって 0 ではない。0 にすると animation-fill-mode: forwards が効かなくなり、
+   fadeIn 系を使っている要素が opacity: 0 のまま消える。
+   「動きを止める」つもりが「中身を消す」ことになる。
+   紙吹雪は src/app.jsx 側で、この設定のときは出さないようにしている。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 背景色が無効化されても「押せる」と分かるようにする */
+@media (forced-colors: active) {
+  button, [role="button"], .tap-44 { border: 2px solid ButtonText; }
+}
+
+/* 印刷（先生の帳票は別ウィンドウで開くが、画面をそのまま刷る人もいる） */
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; overflow: visible; }
+  .no-print, header, footer, nav { display: none !important; }
+}

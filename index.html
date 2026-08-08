@@ -2,7 +2,11 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <!-- 拡大を禁止しない。誤ズーム防止より「見えづらい子が拡大できない」害のほうが大きい。
+       誤ズームは touch-action: manipulation と、手書き領域の touch-action: none で防ぐ。
+       ⚠️ viewport は Main.gs の addMetaTag にもある。片方だけ直しても効かないので必ず両方直すこと。 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
   <title>ふりかえりジャーナル</title>
 
   <script>
