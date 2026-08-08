@@ -1,0 +1,34 @@
+# CI — pull_request と push の両方で動かす。
+# push: branches: [main] だけだと、PR の時点で落ちていることに気づけない。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 依存を入れる
+        run: npm ci
+
+      - name: ビルド（原本 → GAS へ貼る生成物）
+        run: npm run build
+
+      - name: 生成物が原本と一致しているか
+        run: node scripts/check-generated.mjs
+
+      - name: 品質ゲート（GIGA Standard v5 Part I）
+        run: npm run check
+
+      - name: 品質ゲート自体が動いているか（わざと壊して落ちることを見る）
+        run: node scripts/selftest-check.mjs

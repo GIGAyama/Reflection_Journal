@@ -122,7 +122,18 @@
 | `Db.gs` | テナントDBのシートスキーマ定義とI/O（名簿・ジャーナル・テーマ・設定・画像・_meta） |
 | `OwnerApi.gs` | 先生用API（クラス作成/取り込み・名簿・返却・AI・エクスポート・設定） |
 | `MemberApi.gs` | 児童用API。**第1引数は常に idToken** |
-| `index.html` | SPA本体（先生/児童 両モード）+ シェル連携ブリッジ。GASに `index` として貼る |
+| `index.html` | GAS へ貼るシェル。ブート情報・シェル連携ブリッジ・`include()` の貼り合わせ |
+| `src/app.jsx` | **SPA本体の原本**（先生/児童 両モード）。画面を直すときはここ |
+| `tools/extra.css` | Tailwind で書けない追加スタイルの原本（ふりがなの色・動きの配慮など） |
+| `tools/build.mjs` | 原本 → 生成物 のビルド |
+| `tools/make-icons.py` | アイコン一式の生成（原本は `tools/icon-source.png`） |
+| `tailwind.config.js` | 使うクラスだけを事前生成するための設定 |
+| `vendor.html` | **生成物**。React / ReactDOM / canvas-confetti |
+| `css.html` | **生成物**。Tailwind が生成した CSS + `tools/extra.css` |
+| `app.html` | **生成物**。`src/app.jsx` をコンパイルした JS |
+| `scripts/check-project.mjs` | 品質ゲート（Part I の静的検査） |
+| `scripts/selftest-check.mjs` | 品質ゲート自体が働いているかを、わざと壊して確かめる |
+| `.github/workflows/ci.yml` | CI（`pull_request` と `push` の両方で動く） |
 | `docs/index.html` | GitHub Pagesシェル（GIS・iframe・postMessage・PWA・インストール案内） |
 | `docs/config.js` | exec URL 2本とクライアントID（**設置時に書き換える唯一のファイル**） |
 | `docs/diag.html` | 接続診断ページ（`?diag=1` をCookieなしで叩いて設定ミスを切り分ける） |
@@ -158,8 +169,11 @@
 ### Step 1: GAS プロジェクト作成
 
 1.  **アプリアカウントで** [script.google.com](https://script.google.com) から**スタンドアロン**プロジェクトを作成します（スプレッドシートには紐付けません）。
-2.  本リポジトリの `Main.gs` / `Auth.gs` / `Registry.gs` / `Tenant.gs` / `Db.gs` / `OwnerApi.gs` / `MemberApi.gs` を同名のスクリプトファイルとして、`index.html` を HTML ファイル `index` として貼り付けます（[clasp](https://github.com/google/clasp) 推奨: `clasp push`）。
-3.  プロジェクトの設定（⚙️）で「`appsscript.json` マニフェスト ファイルをエディタで表示する」をオンにし、本リポジトリの内容で置き換えます。
+2.  本リポジトリの `Main.gs` / `Auth.gs` / `Registry.gs` / `Tenant.gs` / `Db.gs` / `OwnerApi.gs` / `MemberApi.gs` を同名のスクリプトファイルとして貼り付けます。
+3.  HTML ファイルを **4つ** 作って貼り付けます（名前は拡張子を除いた形で一致させること）。
+    `index` ← `index.html` / `vendor` ← `vendor.html` / `css` ← `css.html` / `app` ← `app.html`
+    （[clasp](https://github.com/google/clasp) を使うなら `clasp push` で一度に入ります）
+4.  プロジェクトの設定（⚙️）で「`appsscript.json` マニフェスト ファイルをエディタで表示する」をオンにし、本リポジトリの内容で置き換えます。
 
 ### Step 2: OAuth クライアント ID（GIS 用）を作成
 
@@ -214,7 +228,18 @@ GAS エディタ「プロジェクトの設定 > スクリプト プロパティ
 
 ### コードを更新したとき
 
-**GAS 側（`*.gs` / `index.html`）を変えた場合**
+**画面（児童・先生のUI）を変えた場合**
+原本は `src/app.jsx` と `tools/extra.css` です。`vendor.html` / `css.html` / `app.html` は**生成物なので手で編集しません**。
+
+```bash
+npm ci          # 最初の1回だけ
+npm run build   # 原本 → 生成物
+npm run check   # 品質ゲート（Part I の静的検査）
+```
+
+生成物を作り直さずに push すると、GAS には古い画面が出たままになります。CI（`.github/workflows/ci.yml`）がその食い違いを検知して止めます。
+
+**GAS 側（`*.gs` / `index.html` / 生成物）を変えた場合**
 GAS はコードを保存しても既存デプロイは古いバージョンのまま動きます。
 「デプロイ > デプロイを管理 > ✏️（編集）> バージョン: **新バージョン** > デプロイ」を **A / B 両方**に対して行ってください。
 exec URL を変えないため、「新しいデプロイ」ではなく既存の編集で行うこと。
@@ -288,7 +313,9 @@ exec URL を変えないため、「新しいデプロイ」ではなく既存�
 
 ### 外部に出る通信（把握しておくべき点）
 
-*   `docs/` と `index.html` は React / Babel / Tailwind / canvas-confetti / Google Fonts を **CDNから読み込みます**（オフラインでは動作しません）。
+*   **実行コード（React / Tailwind / canvas-confetti）はすべて自分側に持っています。** 学校のネットワークが `unpkg.com` / `cdn.jsdelivr.net` / `cdn.tailwindcss.com` を塞いでいても画面は出ます（実測で確認済み）。
+*   Google Fonts だけは CDN のままです。届かなくても**字の形が変わるだけ**で動くため、端末側の日本語フォントを後ろに並べて対処しています。
+*   アプリの利用そのものには通信が要ります（記録は先生のスプレッドシートに保存されるため）。
 *   先生の「クラス設定」タブのQRコードは、外部サービス `api.qrserver.com` に**児童用URLを渡して**画像生成しています。組織のポリシー上これが問題になる場合は、当該 `<img>` をローカル生成に差し替えてください。
 *   Gemini API へは、AI機能を実行したときにだけ**ジャーナル本文**が送信されます（先生がAPIキーを設定した場合のみ）。
 
@@ -305,6 +332,7 @@ exec URL を変えないため、「新しいデプロイ」ではなく既存�
 
 | 項目 | 上限（無料アカウント） | 対策 |
 | --- | --- | --- |
+| 初回に読むJS | 目標 300KB | 実測 **271KB**（ビルド時同梱。以前は CDN から 3,153.9KB を読んでいた） |
 | 同時実行 | 約30 | 書き込みはScriptLockで直列化。競合（`LOCK_BUSY`）時は児童側の書き込みが指数バックオフで最大3回リトライ |
 | UrlFetch | 日次20,000回 | トークン検証をCacheServiceで前置（TTL 300秒） |
 | ScriptProperties | 1値9KB / 全体500KB | レジストリ以外を置かない。クラス情報の読み取りはCache前置（TTL 600秒） |
@@ -342,7 +370,8 @@ exec URL を変えないため、「新しいデプロイ」ではなく既存�
 ## 📱 技術スタック
 
 *   **Backend**: Google Apps Script (GAS) — 2デプロイ構成
-*   **Frontend**: React 18, Babel (Standalone), Tailwind CSS (CDN), canvas-confetti
+*   **Frontend**: React 18, Tailwind CSS, canvas-confetti — **すべてビルド時に同梱**（ブラウザ内コンパイルも CDN 依存もしません）
+*   **Build**: Node.js（`@babel/core` + `@babel/preset-react`、Tailwind CLI）
 *   **Auth**: Google Identity Services (GIS) + IDトークンサーバー検証
 *   **AI Integration**: Google Gemini API (gemini-2.5-flash)
 *   **Storage**: Google Spreadsheet（クラスごと・先生所有）
@@ -351,6 +380,7 @@ exec URL を変えないため、「新しいデプロイ」ではなく既存�
 ## 👨‍💻 作者 / 関連リンク
 
 *   **企画・設計**: [GIGA山](https://note.com/cute_borage86) (Google認定教育者)
+*   **品質基準**: GIGA Standard v5（実測値は [AUDIT.md](AUDIT.md) 参照）
 *   小学校現場での実践に基づき、プログラミング未経験の先生でも導入できる「神アプリ」を目指して開発されました。
 
 ## 📜 ライセンス

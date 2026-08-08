@@ -1,0 +1,2402 @@
+<!-- 生成物。手で編集しない（原本は src/app.jsx） -->
+<script>
+const {
+  useState,
+  useEffect,
+  useRef,
+  useMemo
+} = React;
+const prefersReducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const useDismissable = (isOpen, onClose) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = e => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+};
+const escapeHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const parseHighlights = raw => {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+};
+const buildHighlightedHtml = (rawContent, highlights, markBuilder) => {
+  let html = escapeHtml(rawContent);
+  highlights.forEach(h => {
+    if (!h || !h.textToHighlight) return;
+    const escapedTarget = escapeHtml(h.textToHighlight);
+    if (html.includes(escapedTarget)) {
+      html = html.replace(escapedTarget, markBuilder(escapedTarget, h));
+    }
+  });
+  return html;
+};
+const compressImage = (file, maxSize = 1024) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('画像を読み込めませんでした'));
+  reader.onload = ev => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('画像を読み込めませんでした'));
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      let quality = 0.85;
+      let dataUrl = canvas.toDataURL('image/jpeg', quality);
+      while (dataUrl.length > 700000 && quality > 0.3) {
+        quality -= 0.15;
+        dataUrl = canvas.toDataURL('image/jpeg', quality);
+      }
+      if (dataUrl.length > 700000) reject(new Error('画像が大きすぎます。小さい画像でためしてね'));else resolve(dataUrl);
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+const RubyText = ({
+  text,
+  kana
+}) => React.createElement("ruby", {
+  className: "align-baseline"
+}, text, React.createElement("rp", null, "("), React.createElement("rt", {
+  className: "text-[0.6em] font-medium select-none leading-none"
+}, kana), React.createElement("rp", null, ")"));
+const Icon = ({
+  path,
+  className = ""
+}) => {
+  const hasSize = /(^|\s)(w-|h-|size-)/.test(className);
+  return React.createElement("svg", {
+    "aria-hidden": "true",
+    focusable: "false",
+    className: `${hasSize ? '' : 'w-5 h-5 '}${className}`.trim(),
+    fill: "none",
+    stroke: "currentColor",
+    viewBox: "0 0 24 24",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, React.createElement("path", {
+    d: path
+  }));
+};
+const Icons = {
+  Book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13z M4 19.5v-13",
+  Send: "M22 2L11 13 M22 2L15 22L11 13L2 9L22 2z",
+  Image: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12",
+  Check: "M20 6L9 17l-5-5",
+  User: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+  Close: "M18 6L6 18 M6 6l12 12",
+  Trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+  Sparkles: "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 5.6l2.1 2.1",
+  Info: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 16v-4 M12 8h.01",
+  Settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z",
+  Search: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+  Pulse: "M4.318 16.318a4.5 4.5 0 000 6.364L12 20.364l7.682 2.318a4.5 4.5 0 000-6.364M12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0M12 7.636l1.318-1.318a4.5 4.5 0 016.364 0M12 7.636v-6",
+  Pen: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z",
+  Save: "M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4",
+  Plus: "M12 4v16m8-8H4",
+  Download: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
+  Link: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1",
+  Copy: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z",
+  Refresh: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+};
+const Toast = ({
+  message,
+  type,
+  onClose
+}) => {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+  const bg = type === 'error' ? 'bg-red-600' : 'bg-emerald-700';
+  return React.createElement("div", {
+    role: type === 'error' ? 'alert' : 'status',
+    "aria-live": type === 'error' ? 'assertive' : 'polite',
+    className: `no-print fixed bottom-6 left-1/2 transform -translate-x-1/2 ${bg} text-white px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-2 z-50 animate-bounce font-bold tracking-wide`
+  }, React.createElement(Icon, {
+    path: type === 'error' ? Icons.Close : Icons.Check,
+    className: "w-5 h-5 shrink-0"
+  }), " ", React.createElement("span", null, message));
+};
+const ConfirmDialog = ({
+  isOpen,
+  title,
+  text,
+  onConfirm,
+  onCancel,
+  confirmText = "はい",
+  cancelText = "キャンセル",
+  isDanger = false
+}) => {
+  useDismissable(isOpen, onCancel || (() => {}));
+  if (!isOpen) return null;
+  return React.createElement("div", {
+    className: "fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity"
+  }, React.createElement("div", {
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-label": title,
+    className: "bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 max-w-sm w-full animate-fade-in text-center transform transition-all"
+  }, React.createElement("div", {
+    className: `w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${isDanger ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`
+  }, React.createElement(Icon, {
+    path: isDanger ? Icons.Trash : Icons.Info,
+    className: "w-10 h-10"
+  })), React.createElement("h3", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, title), React.createElement("p", {
+    className: "text-gray-500 mb-8 text-sm whitespace-pre-wrap leading-relaxed"
+  }, text), React.createElement("div", {
+    className: "flex gap-3"
+  }, React.createElement("button", {
+    onClick: onCancel,
+    className: "flex-1 py-3.5 rounded-2xl font-bold bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
+  }, cancelText), React.createElement("button", {
+    onClick: onConfirm,
+    className: `flex-1 py-3.5 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-95 ${isDanger ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'}`
+  }, confirmText))));
+};
+const useServer = () => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [toast, setToast] = useState(null);
+  const wrap = async promise => {
+    setIsLoading(true);
+    try {
+      return await promise;
+    } catch (e) {
+      setToast({
+        message: e && e.message || '通信エラー',
+        type: 'error'
+      });
+      return {
+        success: false,
+        error: e && e.message || '通信エラー'
+      };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  const owner = (fn, ...args) => wrap(window.callOwnerApi(fn, ...args));
+  const member = (fn, ...args) => wrap(window.callMemberApi(fn, ...args));
+  const memberWrite = (fn, ...args) => wrap(window.callMemberApiWithBackoff(fn, ...args));
+  return {
+    owner,
+    member,
+    memberWrite,
+    isLoading,
+    toast,
+    setToast,
+    showToast: (msg, type = "success") => setToast({
+      message: msg,
+      type
+    })
+  };
+};
+const failMsg = (res, fallback) => res && (res.message || res.error) || fallback;
+const LazyImage = ({
+  imageId,
+  fetcher,
+  className,
+  alt
+}) => {
+  const [src, setSrc] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setSrc(null);
+    setFailed(false);
+    if (!imageId) return;
+    fetcher(imageId).then(res => {
+      if (!alive) return;
+      if (res && res.success && res.dataUrl) setSrc(res.dataUrl);else setFailed(true);
+    }).catch(() => {
+      if (alive) setFailed(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [imageId]);
+  if (!imageId || failed) return null;
+  if (!src) return React.createElement("div", {
+    className: "mt-4 w-40 h-24 rounded-xl bg-gray-100 animate-pulse"
+  });
+  return React.createElement("img", {
+    src: src,
+    alt: alt || '',
+    className: className
+  });
+};
+const FullScreenSpinner = ({
+  color = 'border-orange-500'
+}) => React.createElement("div", {
+  className: "h-screen flex items-center justify-center bg-gray-50"
+}, React.createElement("div", {
+  className: `w-16 h-16 border-4 ${color} border-t-transparent rounded-full animate-spin`
+}));
+const CenterCard = ({
+  icon,
+  children
+}) => React.createElement("div", {
+  className: "h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto"
+}, React.createElement("div", {
+  className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8 text-center"
+}, React.createElement("div", {
+  className: "w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30 text-3xl"
+}, icon), children));
+const StudentApp = ({
+  data,
+  server,
+  refresh
+}) => {
+  const {
+    member,
+    memberWrite,
+    isLoading,
+    toast,
+    setToast,
+    showToast
+  } = server;
+  const [content, setContent] = useState("");
+  const [emotion, setEmotion] = useState("");
+  const [imageFile, setImageFile] = useState(null);
+  const [showHints, setShowHints] = useState(false);
+  const [activePastJournal, setActivePastJournal] = useState(null);
+  const [pastCommentInput, setPastCommentInput] = useState("");
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const textareaRef = useRef(null);
+  useDismissable(!!activePastJournal, () => setActivePastJournal(null));
+  const [readJournals, setReadJournals] = useState([]);
+  const [unreadJournals, setUnreadJournals] = useState([]);
+  const storeKey = prefix => `${prefix}_${data.user.uid}`;
+  useEffect(() => {
+    const savedDraft = localStorage.getItem(storeKey('draft'));
+    if (savedDraft && !content) setContent(savedDraft);
+    const savedRead = JSON.parse(localStorage.getItem(storeKey('read_journals')) || "[]");
+    setReadJournals(savedRead);
+    const unreads = data.journals.filter(j => j.status === '返却済み' && !savedRead.includes(j.journalId));
+    setUnreadJournals(unreads);
+  }, []);
+  const handleContentChange = e => {
+    const val = e.target.value;
+    setContent(val);
+    localStorage.setItem(storeKey('draft'), val);
+  };
+  const emotions = ["😊 うれしい", "😠 くやしい", "💡 なるほど", "🤔 もやもや"];
+  const templates = {
+    ywt: "【Y: やったこと】\n\n【W: わかったこと】\n\n【T: つぎにやること】\n",
+    kpt: "【K: Keep よかったこと・つづけること】\n\n【P: Problem こまったこと・やめること】\n\n【T: Try つぎにためすこと】\n",
+    '5w1h': "【いつ】\n\n【どこで】\n\n【だれが】\n\n【なにを】\n\n【なぜ】\n\n【どのように】\n",
+    '3notice': "【わかったこと】\n\n【おどろいたこと】\n\n【もっとしりたいこと】\n"
+  };
+  const starters = ["今日いちばん心にのこったのは、", "今日、はじめてできたことは、", "今日うれしかったのは、", "明日がんばりたいことは、"];
+  const hintDictionary = [{
+    icon: "😊",
+    title: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+      text: "\u6C17\u6301",
+      kana: "\u304D\u3082"
+    }), "\u3061"),
+    items: [{
+      text: "今日、いちばんうれしかったことは、",
+      display: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+        text: "\u4ECA\u65E5",
+        kana: "\u304D\u3087\u3046"
+      }), "\u3001\u3044\u3061\u3070\u3093\u3046\u308C\u3057\u304B\u3063\u305F\u3053\u3068\u306F\u3001")
+    }, {
+      text: "くやしかったこと・かなしかったことは、",
+      display: React.createElement(React.Fragment, null, "\u304F\u3084\u3057\u304B\u3063\u305F\u3053\u3068\u30FB\u304B\u306A\u3057\u304B\u3063\u305F\u3053\u3068\u306F\u3001")
+    }, {
+      text: "ドキドキ・ワクワクした瞬間は、",
+      display: React.createElement(React.Fragment, null, "\u30C9\u30AD\u30C9\u30AD\u30FB\u30EF\u30AF\u30EF\u30AF\u3057\u305F", React.createElement(RubyText, {
+        text: "\u77AC\u9593",
+        kana: "\u3057\u3085\u3093\u304B\u3093"
+      }), "\u306F\u3001")
+    }]
+  }, {
+    icon: "📚",
+    title: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+      text: "\u5B66",
+      kana: "\u307E\u306A"
+    }), "\u3073"),
+    items: [{
+      text: "新しくわかったこと・できたことは、",
+      display: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+        text: "\u65B0",
+        kana: "\u3042\u305F\u3089"
+      }), "\u3057\u304F\u308F\u304B\u3063\u305F\u3053\u3068\u30FB\u3067\u304D\u305F\u3053\u3068\u306F\u3001")
+    }, {
+      text: "「なぜだろう？」と思ったことは、",
+      display: React.createElement(React.Fragment, null, "\u300C\u306A\u305C\u3060\u308D\u3046\uFF1F\u300D\u3068", React.createElement(RubyText, {
+        text: "\u601D",
+        kana: "\u304A\u3082"
+      }), "\u3063\u305F\u3053\u3068\u306F\u3001")
+    }, {
+      text: "もっと調べたい・知りたいことは、",
+      display: React.createElement(React.Fragment, null, "\u3082\u3063\u3068", React.createElement(RubyText, {
+        text: "\u8ABF",
+        kana: "\u3057\u3089"
+      }), "\u3079\u305F\u3044\u30FB", React.createElement(RubyText, {
+        text: "\u77E5",
+        kana: "\u3057"
+      }), "\u308A\u305F\u3044\u3053\u3068\u306F\u3001")
+    }]
+  }, {
+    icon: "🤝",
+    title: "つながり",
+    items: [{
+      text: "友だちに「ありがとう」と言いたいことは、",
+      display: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+        text: "\u53CB",
+        kana: "\u3068\u3082"
+      }), "\u3060\u3061\u306B\u300C\u3042\u308A\u304C\u3068\u3046\u300D\u3068", React.createElement(RubyText, {
+        text: "\u8A00",
+        kana: "\u3044"
+      }), "\u3044\u305F\u3044\u3053\u3068\u306F\u3001")
+    }, {
+      text: "だれかの「すごいな」と思ったところは、",
+      display: React.createElement(React.Fragment, null, "\u3060\u308C\u304B\u306E\u300C\u3059\u3054\u3044\u306A\u300D\u3068", React.createElement(RubyText, {
+        text: "\u601D",
+        kana: "\u304A\u3082"
+      }), "\u3063\u305F\u3068\u3053\u308D\u306F\u3001")
+    }, {
+      text: "みんなで協力してできたことは、",
+      display: React.createElement(React.Fragment, null, "\u307F\u3093\u306A\u3067", React.createElement(RubyText, {
+        text: "\u5354\u529B",
+        kana: "\u304D\u3087\u3046\u308A\u3087\u304F"
+      }), "\u3057\u3066\u3067\u304D\u305F\u3053\u3068\u306F\u3001")
+    }]
+  }, {
+    icon: "🚀",
+    title: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+      text: "\u6B21",
+      kana: "\u3064\u304E"
+    }), "\u3078"),
+    items: [{
+      text: "明日がんばりたいことは、",
+      display: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+        text: "\u660E\u65E5",
+        kana: "\u3042\u3057\u305F"
+      }), "\u304C\u3093\u3070\u308A\u305F\u3044\u3053\u3068\u306F\u3001")
+    }, {
+      text: "もう一度やるなら、どうする？",
+      display: React.createElement(React.Fragment, null, "\u3082\u3046", React.createElement(RubyText, {
+        text: "\u4E00\u5EA6",
+        kana: "\u3044\u3061\u3069"
+      }), "\u3084\u308B\u306A\u3089\u3001\u3069\u3046\u3059\u308B\uFF1F")
+    }, {
+      text: "今日の自分にひとこと言うなら、",
+      display: React.createElement(React.Fragment, null, React.createElement(RubyText, {
+        text: "\u4ECA\u65E5",
+        kana: "\u304D\u3087\u3046"
+      }), "\u306E", React.createElement(RubyText, {
+        text: "\u81EA\u5206",
+        kana: "\u3058\u3076\u3093"
+      }), "\u306B\u3072\u3068\u3053\u3068", React.createElement(RubyText, {
+        text: "\u8A00",
+        kana: "\u3044"
+      }), "\u3046\u306A\u3089\u3001")
+    }]
+  }];
+  const insertTextAtCursor = textToInsert => {
+    const ta = textareaRef.current;
+    if (ta) {
+      const startPos = ta.selectionStart;
+      const endPos = ta.selectionEnd;
+      const newContent = content.substring(0, startPos) + textToInsert + content.substring(endPos);
+      setContent(newContent);
+      localStorage.setItem(storeKey('draft'), newContent);
+      setTimeout(() => {
+        ta.focus();
+        ta.setSelectionRange(startPos + textToInsert.length, startPos + textToInsert.length);
+      }, 0);
+    } else {
+      setContent(prev => prev + textToInsert);
+    }
+    setShowHints(false);
+  };
+  const handleImage = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    compressImage(file).then(dataUrl => {
+      setImageFile({
+        name: file.name,
+        dataUrl: dataUrl
+      });
+    }).catch(err => showToast(err.message, "error"));
+  };
+  const handleSubmit = async () => {
+    if (!content.trim()) return showToast("本文を書いてね！", "error");
+    const res = await memberWrite('mbSaveJournal', {
+      content,
+      emotion,
+      imageDataUrl: imageFile ? imageFile.dataUrl : ''
+    });
+    if (!res || !res.success) return showToast(failMsg(res, "提出できませんでした。もう一度ためしてね。"), "error");
+    localStorage.removeItem(storeKey('draft'));
+    if (typeof confetti === 'function' && !prefersReducedMotion()) {
+      confetti({
+        particleCount: 200,
+        spread: 90,
+        origin: {
+          y: 0.6
+        },
+        colors: ['#f97316', '#fbbf24', '#3b82f6', '#10b981']
+      });
+    }
+    showToast("先生に提出できたよ！");
+    setContent("");
+    setEmotion("");
+    setImageFile(null);
+    setTimeout(refresh, 2000);
+  };
+  const openJournalModal = journal => {
+    setActivePastJournal(journal);
+    setPastCommentInput(journal.pastComment || "");
+    if (journal.status === '返却済み' && !readJournals.includes(journal.journalId)) {
+      const newRead = [...readJournals, journal.journalId];
+      setReadJournals(newRead);
+      localStorage.setItem(storeKey('read_journals'), JSON.stringify(newRead));
+      setUnreadJournals(prev => prev.filter(j => j.journalId !== journal.journalId));
+    }
+  };
+  const showRandomPastJournal = () => {
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const pasts = data.journals.filter(j => new Date(j.timestamp) < oneMonthAgo);
+    if (pasts.length === 0) return showToast("1ヶ月以上前の記録がまだないよ", "error");
+    openJournalModal(pasts[Math.floor(Math.random() * pasts.length)]);
+  };
+  const handleSavePastComment = async () => {
+    if (!pastCommentInput.trim()) return;
+    const res = await memberWrite('mbAddPastComment', activePastJournal.journalId, pastCommentInput);
+    if (res && res.success) {
+      showToast("過去の自分にメッセージを送りました！");
+      setActivePastJournal(null);
+    } else showToast(failMsg(res, "保存できませんでした"), "error");
+  };
+  const renderCalendarDays = () => {
+    const y = currentMonth.getFullYear(),
+      m = currentMonth.getMonth();
+    const firstDay = new Date(y, m, 1).getDay(),
+      lastDate = new Date(y, m + 1, 0).getDate();
+    let days = [];
+    for (let i = 0; i < firstDay; i++) days.push(React.createElement("div", {
+      key: `empty-${i}`,
+      className: "p-2"
+    }));
+    for (let i = 1; i <= lastDate; i++) {
+      const ds = new Date(y, m, i).toLocaleDateString('ja-JP');
+      const matchedJournals = data.journals.filter(j => new Date(j.timestamp).toLocaleDateString('ja-JP') === ds);
+      const hasJournal = matchedJournals.length > 0;
+      const isReturned = matchedJournals.some(j => j.status === '返却済み');
+      days.push(React.createElement("div", {
+        key: i,
+        className: `p-2 text-center rounded-xl text-sm font-bold transition-all relative ${hasJournal ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200 cursor-pointer hover:bg-orange-200 hover:-translate-y-0.5' : 'text-gray-500'}`,
+        onClick: () => {
+          if (hasJournal) {
+            openJournalModal(matchedJournals[0]);
+          }
+        }
+      }, i, isReturned && React.createElement("div", {
+        className: "absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[8px] text-white animate-pulse"
+      }, "\uD83D\uDCAC")));
+    }
+    return days;
+  };
+  return React.createElement("div", {
+    className: "flex flex-col h-full gap-6 relative animate-fade-in"
+  }, isLoading && React.createElement("div", {
+    className: "absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"
+  }, React.createElement("div", {
+    className: "w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"
+  })), unreadJournals.length > 0 && React.createElement("div", {
+    className: "w-full bg-gradient-to-r from-blue-600 to-indigo-700 p-4 rounded-[2rem] shadow-lg shadow-blue-600/30 flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center animate-notification border border-blue-400"
+  }, React.createElement("div", {
+    className: "flex items-center gap-3 md:gap-4 text-white min-w-0"
+  }, React.createElement("div", {
+    className: "text-3xl animate-bounce shrink-0"
+  }, "\uD83D\uDC8C"), React.createElement("div", {
+    className: "min-w-0"
+  }, React.createElement("h3", {
+    className: "font-black text-base md:text-lg"
+  }, React.createElement(RubyText, {
+    text: "\u5148\u751F",
+    kana: "\u305B\u3093\u305B\u3044"
+  }), "\u304B\u3089\u306E\u304A\u3078\u3093\u3058\u304C", React.createElement(RubyText, {
+    text: "\u5C4A",
+    kana: "\u3068\u3069"
+  }), "\u3044\u3066\u308B\u3088\uFF01"), React.createElement("p", {
+    className: "text-sm font-bold opacity-90"
+  }, unreadJournals.length, "\u4EF6\u306E\u3042\u305F\u3089\u3057\u3044\u304A\u3078\u3093\u3058"))), React.createElement("button", {
+    onClick: () => openJournalModal(unreadJournals[0]),
+    className: "bg-white text-blue-600 hover:bg-blue-50 font-black px-6 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all shrink-0"
+  }, React.createElement(RubyText, {
+    text: "\u8AAD",
+    kana: "\u3088"
+  }), "\u3080")), React.createElement("div", {
+    className: "flex flex-col lg:flex-row h-full gap-6"
+  }, React.createElement("div", {
+    className: "w-full lg:w-[280px] flex flex-col gap-5 order-2 lg:order-1"
+  }, React.createElement("div", {
+    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-5"
+  }, React.createElement("button", {
+    onClick: () => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1))),
+    "aria-label": "\u524D\u306E\u6708",
+    className: "tap-44 p-2 bg-gray-50 rounded-full text-gray-500 hover:text-orange-500 hover:bg-orange-50 transition-colors"
+  }, React.createElement(Icon, {
+    path: "M15 18l-6-6 6-6",
+    className: "w-4 h-4"
+  })), React.createElement("h3", {
+    className: "font-black text-gray-700"
+  }, currentMonth.getFullYear(), React.createElement(RubyText, {
+    text: "\u5E74",
+    kana: "\u306D\u3093"
+  }), " ", currentMonth.getMonth() + 1, React.createElement(RubyText, {
+    text: "\u6708",
+    kana: "\u304C\u3064"
+  })), React.createElement("button", {
+    onClick: () => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1))),
+    "aria-label": "\u6B21\u306E\u6708",
+    className: "tap-44 p-2 bg-gray-50 rounded-full text-gray-500 hover:text-orange-500 hover:bg-orange-50 transition-colors"
+  }, React.createElement(Icon, {
+    path: "M9 18l6-6-6-6",
+    className: "w-4 h-4"
+  }))), React.createElement("div", {
+    className: "grid grid-cols-7 gap-1 text-xs text-center text-gray-500 font-bold mb-3"
+  }, React.createElement("div", {
+    className: "text-red-600"
+  }, "\u65E5"), React.createElement("div", null, "\u6708"), React.createElement("div", null, "\u706B"), React.createElement("div", null, "\u6C34"), React.createElement("div", null, "\u6728"), React.createElement("div", null, "\u91D1"), React.createElement("div", {
+    className: "text-blue-600"
+  }, "\u571F")), React.createElement("div", {
+    className: "grid grid-cols-7 gap-1.5"
+  }, renderCalendarDays())), React.createElement("button", {
+    onClick: showRandomPastJournal,
+    className: "bg-gradient-to-br from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 text-indigo-600 border border-indigo-100 font-black py-4 px-4 rounded-[2rem] shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95 group"
+  }, React.createElement(Icon, {
+    path: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+    className: "group-hover:rotate-12 transition-transform"
+  }), " ", React.createElement("span", null, React.createElement(RubyText, {
+    text: "\u904E\u53BB",
+    kana: "\u304B\u3053"
+  }), "\u306E", React.createElement(RubyText, {
+    text: "\u81EA\u5206",
+    kana: "\u3058\u3076\u3093"
+  }), "\u3068", React.createElement(RubyText, {
+    text: "\u5BFE\u8A71",
+    kana: "\u305F\u3044\u308F"
+  }), "\u3059\u308B"))), React.createElement("div", {
+    className: "flex-1 flex flex-col relative transition-all order-1 lg:order-2 min-h-[60vh] lg:min-h-0"
+  }, React.createElement("div", {
+    className: "flex-1 bg-white rounded-[2rem] shadow-premium border border-orange-100 flex flex-col overflow-hidden hover:shadow-lg transition-shadow relative"
+  }, React.createElement("div", {
+    className: "bg-gradient-to-r from-orange-50 to-amber-50 p-5 border-b border-orange-100 flex items-center gap-4"
+  }, React.createElement("span", {
+    className: "bg-gradient-to-br from-orange-400 to-orange-600 text-white p-3 rounded-2xl shadow-sm shadow-orange-500/30"
+  }, React.createElement(Icon, {
+    path: Icons.Book,
+    className: "w-6 h-6"
+  })), React.createElement("div", {
+    className: "flex-1"
+  }, React.createElement("p", {
+    className: "text-xs text-orange-700 font-black tracking-wider mb-1"
+  }, React.createElement("span", null, React.createElement(RubyText, {
+    text: "\u4ECA\u65E5",
+    kana: "\u304D\u3087\u3046"
+  }), "\u306E\u30C6\u30FC\u30DE")), React.createElement("h2", {
+    className: "text-xl font-black text-gray-800"
+  }, data.todayTheme)), React.createElement("div", {
+    className: "flex flex-col items-end gap-1"
+  }, content.length > 0 && React.createElement("span", {
+    className: "text-xs text-emerald-500 font-bold flex items-center gap-1"
+  }, React.createElement(Icon, {
+    path: Icons.Save,
+    className: "w-3 h-3"
+  }), " ", React.createElement(RubyText, {
+    text: "\u81EA\u52D5",
+    kana: "\u3058\u3069\u3046"
+  }), React.createElement(RubyText, {
+    text: "\u4FDD\u5B58\u6E08",
+    kana: "\u307B\u305E\u3093\u305A"
+  }), "\u307F"))), React.createElement("textarea", {
+    ref: textareaRef,
+    value: content,
+    onChange: handleContentChange,
+    placeholder: "\u3053\u3053\u3092\u30BF\u30C3\u30D7\u3057\u3066\u304B\u304D\u306F\u3058\u3081\u3088\u3046...",
+    className: "flex-1 w-full px-8 pt-[40px] pb-8 text-lg lined-paper resize-none outline-none text-gray-800 font-medium tracking-wide"
+  }), showHints && React.createElement("div", {
+    className: "absolute inset-x-0 bottom-0 bg-white/95 backdrop-blur-md border-t-2 border-yellow-200 p-6 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] rounded-t-[2rem] z-20 animate-[fadeInScale_0.3s_ease-out]"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-4"
+  }, React.createElement("h3", {
+    className: "font-black text-yellow-800 text-lg flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Sparkles,
+    className: "w-5 h-5"
+  }), " ", React.createElement(RubyText, {
+    text: "\u66F8",
+    kana: "\u304B"
+  }), "\u304F\u3053\u3068\u3092", React.createElement(RubyText, {
+    text: "\u898B",
+    kana: "\u307F"
+  }), "\u3064\u3051\u308B", React.createElement(RubyText, {
+    text: "\u9B54\u6CD5",
+    kana: "\u307E\u307B\u3046"
+  }), "\u306E\u30D2\u30F3\u30C8"), React.createElement("button", {
+    onClick: () => setShowHints(false),
+    "aria-label": "\u30D2\u30F3\u30C8\u3092\u9589\u3058\u308B",
+    className: "tap-44 bg-gray-100 hover:bg-gray-200 text-gray-600 p-2 rounded-full font-bold transition-colors"
+  }, React.createElement(Icon, {
+    path: Icons.Close,
+    className: "w-5 h-5"
+  }))), React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+  }, hintDictionary.map((cat, idx) => React.createElement("div", {
+    key: idx,
+    className: "bg-yellow-50/50 rounded-2xl p-3 border border-yellow-100"
+  }, React.createElement("h4", {
+    className: "font-bold text-yellow-700 text-sm mb-2"
+  }, cat.icon, " ", cat.title), React.createElement("div", {
+    className: "space-y-2"
+  }, cat.items.map((item, i) => React.createElement("button", {
+    key: i,
+    onClick: () => insertTextAtCursor(item.text),
+    className: "w-full min-h-[44px] text-left text-xs bg-white hover:bg-yellow-100 border border-yellow-300 p-3 rounded-xl text-gray-700 font-medium transition-colors shadow-sm hover:shadow active:scale-95 leading-snug"
+  }, item.display, " ", React.createElement("span", {
+    className: "text-yellow-700 float-right"
+  }, "\uFF0B"))))))), React.createElement("p", {
+    className: "text-center text-xs text-gray-500 mt-4"
+  }, "\u30DC\u30BF\u30F3\u3092", React.createElement(RubyText, {
+    text: "\u62BC",
+    kana: "\u304A"
+  }), "\u3059\u3068\u3001\u305D\u306E\u307E\u307E\u30CE\u30FC\u30C8\u306B", React.createElement(RubyText, {
+    text: "\u5165",
+    kana: "\u306F\u3044"
+  }), "\u308B\u3088\uFF01")))), React.createElement("div", {
+    className: "w-full lg:w-[280px] flex flex-col gap-5 order-3"
+  }, React.createElement("div", {
+    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5"
+  }, React.createElement("p", {
+    className: "font-black text-gray-700 mb-3 text-sm flex items-center gap-2"
+  }, React.createElement("span", {
+    className: "p-1.5 bg-gray-100 rounded-lg"
+  }, React.createElement(Icon, {
+    path: Icons.Pen,
+    className: "w-4 h-4 text-gray-600"
+  })), " ", React.createElement("span", null, "\u30B5\u30DD\u30FC\u30C8\u30C4\u30FC\u30EB")), React.createElement("div", {
+    className: "grid grid-cols-1 gap-2 mb-4"
+  }, React.createElement("button", {
+    onClick: () => setShowHints(true),
+    className: "w-full py-3.5 bg-gradient-to-r from-yellow-50 to-amber-50 text-yellow-700 border border-yellow-200 rounded-xl hover:shadow-md transition-all font-black active:scale-95 flex items-center justify-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Sparkles,
+    className: "w-5 h-5"
+  }), " \uD83D\uDCA1 \u30D2\u30F3\u30C8\u3092", React.createElement(RubyText, {
+    text: "\u958B",
+    kana: "\u3072\u3089"
+  }), "\u304F")), React.createElement("p", {
+    className: "text-xs font-bold text-gray-500 mb-2"
+  }, "\u25BC \u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\uFF08", React.createElement(RubyText, {
+    text: "\u5F62",
+    kana: "\u304B\u305F\u3061"
+  }), "\uFF09\u3092", React.createElement(RubyText, {
+    text: "\u4F7F",
+    kana: "\u3064\u304B"
+  }), "\u3046"), React.createElement("div", {
+    className: "grid grid-cols-2 gap-2 mb-4"
+  }, Object.keys(templates).map(k => React.createElement("button", {
+    key: k,
+    onClick: () => insertTextAtCursor(templates[k]),
+    className: "text-xs min-h-[44px] py-3 px-2 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl hover:bg-white hover:border-gray-400 hover:shadow-sm transition-all font-bold active:scale-95"
+  }, k === 'ywt' ? React.createElement(React.Fragment, null, React.createElement(RubyText, {
+    text: "YWT\u6CD5",
+    kana: "\u307B\u3046"
+  })) : k === 'kpt' ? React.createElement(React.Fragment, null, React.createElement(RubyText, {
+    text: "KPT\u6CD5",
+    kana: "\u307B\u3046"
+  })) : k === '5w1h' ? '5W1H' : '3つのきづき'))), React.createElement("p", {
+    className: "text-xs font-bold text-gray-500 mb-2"
+  }, "\u25BC \u30E9\u30F3\u30C0\u30E0\u306A", React.createElement(RubyText, {
+    text: "\u66F8",
+    kana: "\u304B"
+  }), "\u304D", React.createElement(RubyText, {
+    text: "\u51FA",
+    kana: "\u3060"
+  }), "\u3057"), React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement("button", {
+    onClick: () => insertTextAtCursor(starters[Math.floor(Math.random() * starters.length)]),
+    className: "flex-1 text-xs min-h-[44px] py-3 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-colors font-bold active:scale-95"
+  }, "\uD83C\uDFAF ", React.createElement(RubyText, {
+    text: "\u66F8",
+    kana: "\u304B"
+  }), "\u304D", React.createElement(RubyText, {
+    text: "\u51FA",
+    kana: "\u3060"
+  }), "\u3057\u3092\u8FFD\u52A0(\u3064\u3044\u304B)"))), React.createElement("div", {
+    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5"
+  }, React.createElement("p", {
+    className: "font-black text-gray-700 mb-3 text-sm flex items-center gap-2"
+  }, React.createElement("span", {
+    className: "p-1.5 bg-gray-100 rounded-lg text-base leading-none"
+  }, "\uD83D\uDE0A"), " ", React.createElement("span", null, React.createElement(RubyText, {
+    text: "\u6C17\u6301",
+    kana: "\u304D\u3082"
+  }), "\u3061\u3092\u3048\u3089\u307C\u3046")), React.createElement("div", {
+    className: "grid grid-cols-2 gap-2"
+  }, emotions.map(e => React.createElement("button", {
+    key: e,
+    onClick: () => setEmotion(e),
+    className: `py-3 px-2 text-sm rounded-xl border-2 transition-all active:scale-95 ${emotion === e ? 'border-orange-500 bg-orange-50 font-black text-orange-600 shadow-sm shadow-orange-500/20' : 'border-gray-100 hover:border-orange-200 text-gray-600 hover:bg-orange-50/50'}`
+  }, e)))), React.createElement("div", {
+    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-5"
+  }, React.createElement("label", {
+    className: "flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 hover:border-gray-400 transition-colors text-gray-500 font-bold text-sm"
+  }, React.createElement(Icon, {
+    path: Icons.Image
+  }), " ", React.createElement("span", null, imageFile ? imageFile.name : React.createElement(React.Fragment, null, React.createElement(RubyText, {
+    text: "\u753B\u50CF",
+    kana: "\u304C\u305E\u3046"
+  }), "\u3092\u306E\u305B\u308B")), React.createElement("input", {
+    type: "file",
+    accept: "image/*",
+    className: "hidden",
+    onChange: handleImage
+  })), imageFile && React.createElement("img", {
+    src: imageFile.dataUrl,
+    alt: "\u306E\u305B\u308B\u753B\u50CF\u306E\u30D7\u30EC\u30D3\u30E5\u30FC",
+    className: "mt-3 rounded-xl max-h-32 mx-auto object-cover shadow-sm"
+  })), React.createElement("button", {
+    onClick: handleSubmit,
+    className: "mt-auto bg-gradient-to-b from-orange-700 to-orange-800 hover:from-orange-800 hover:to-orange-900 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-orange-500/40 flex justify-center items-center gap-2 text-lg active:scale-95 transition-all"
+  }, React.createElement(Icon, {
+    path: Icons.Send
+  }), " ", React.createElement("span", null, React.createElement(RubyText, {
+    text: "\u63D0\u51FA",
+    kana: "\u3066\u3044\u3057\u3085\u3064"
+  }), "\u3059\u308B")))), activePastJournal && React.createElement("div", {
+    className: "fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+  }, React.createElement("div", {
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-label": "\u3080\u304B\u3057\u306E\u8A18\u9332",
+    className: "bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in border border-gray-100"
+  }, React.createElement("div", {
+    className: "bg-gradient-to-r from-blue-50 to-indigo-50 p-5 flex justify-between items-center border-b border-indigo-100 shrink-0"
+  }, React.createElement("h3", {
+    className: "font-black text-indigo-800 text-lg flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+    className: "text-indigo-500"
+  }), " ", activePastJournal.date, " ", React.createElement(RubyText, {
+    text: "\u306E\u8A18\u9332",
+    kana: "\u306E\u304D\u308D\u304F"
+  })), React.createElement("button", {
+    onClick: () => setActivePastJournal(null),
+    "aria-label": "\u9589\u3058\u308B",
+    className: "tap-44 p-2 bg-white rounded-full text-gray-500 hover:text-indigo-600 shadow-sm transition-colors"
+  }, React.createElement(Icon, {
+    path: Icons.Close
+  }))), React.createElement("div", {
+    className: "p-8 overflow-y-auto flex-1 bg-white"
+  }, activePastJournal.status === '返却済み' && React.createElement("div", {
+    className: "bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 p-6 rounded-3xl mb-8 shadow-sm relative"
+  }, React.createElement("div", {
+    className: "absolute -top-3 -right-3 text-4xl rotate-12"
+  }, activePastJournal.teacherStamp), React.createElement("h4", {
+    className: "font-black text-blue-700 mb-3 flex items-center gap-2 text-lg"
+  }, React.createElement("span", {
+    className: "text-2xl"
+  }, "\uD83D\uDC69\u200D\uD83C\uDFEB"), " ", React.createElement(RubyText, {
+    text: "\u5148\u751F",
+    kana: "\u305B\u3093\u305B\u3044"
+  }), "\u304B\u3089\u306E\u304A\u3078\u3093\u3058"), activePastJournal.teacherComment && React.createElement("p", {
+    className: "text-gray-800 whitespace-pre-wrap font-bold leading-relaxed"
+  }, activePastJournal.teacherComment)), React.createElement("div", {
+    className: "text-gray-700 whitespace-pre-wrap lined-paper text-lg leading-[40px] font-medium mb-6"
+  }, (() => {
+    const hls = parseHighlights(activePastJournal.highlights);
+    if (hls.length === 0) return activePastJournal.content;
+    const html = buildHighlightedHtml(activePastJournal.content, hls, escapedText => `<mark class="bg-yellow-200/60 border-b-2 border-yellow-400 px-1 py-0.5 rounded">${escapedText}</mark>`);
+    return React.createElement("div", {
+      dangerouslySetInnerHTML: {
+        __html: html
+      }
+    });
+  })()), React.createElement(LazyImage, {
+    imageId: activePastJournal.imageId,
+    fetcher: id => window.callMemberApi('mbGetImage', id),
+    alt: "\u3053\u306E\u65E5\u306B\u306E\u305B\u305F\u753B\u50CF",
+    className: "mt-4 rounded-xl border max-w-xs shadow-sm"
+  })), React.createElement("div", {
+    className: "bg-gray-50 p-6 border-t border-gray-100 shrink-0"
+  }, React.createElement("p", {
+    className: "text-sm font-black text-indigo-600 mb-3 flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+    className: "w-4 h-4"
+  }), " ", React.createElement("span", null, React.createElement(RubyText, {
+    text: "\u4ECA",
+    kana: "\u3044\u307E"
+  }), "\u306E", React.createElement(RubyText, {
+    text: "\u81EA\u5206",
+    kana: "\u3058\u3076\u3093"
+  }), "\u304B\u3089\u3001", React.createElement(RubyText, {
+    text: "\u904E\u53BB",
+    kana: "\u304B\u3053"
+  }), "\u306E", React.createElement(RubyText, {
+    text: "\u81EA\u5206",
+    kana: "\u3058\u3076\u3093"
+  }), "\u3078\u30E1\u30C3\u30BB\u30FC\u30B8")), React.createElement("textarea", {
+    value: pastCommentInput,
+    onChange: e => setPastCommentInput(e.target.value),
+    className: "w-full p-4 bg-white border border-gray-200 rounded-2xl resize-none outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all font-medium",
+    rows: "2",
+    placeholder: "1\u30F6\u6708\u524D\u306E\u81EA\u5206\u3001\u304C\u3093\u3070\u3063\u3066\u305F\u306D\uFF01"
+  }), React.createElement("div", {
+    className: "text-right mt-3"
+  }, React.createElement("button", {
+    onClick: handleSavePastComment,
+    className: "bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-indigo-500/30 active:scale-95 transition-all"
+  }, React.createElement(RubyText, {
+    text: "\u4FDD\u5B58",
+    kana: "\u307B\u305E\u3093"
+  }), "\u3059\u308B"))))), toast && React.createElement(Toast, {
+    message: toast.message,
+    type: toast.type,
+    onClose: () => setToast(null)
+  }));
+};
+const analyzeVitals = (journals, roster) => {
+  const studentMap = {};
+  roster.forEach(s => {
+    studentMap[s.email] = {
+      name: s.name,
+      email: s.email,
+      journals: [],
+      alerts: []
+    };
+  });
+  journals.forEach(j => {
+    if (studentMap[j.email]) studentMap[j.email].journals.push(j);
+  });
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const past14Days = Array.from({
+    length: 14
+  }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (13 - i));
+    return d.toLocaleDateString('ja-JP');
+  });
+  Object.values(studentMap).forEach(s => {
+    s.journals.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    s.heatMap = past14Days.map(dateStr => {
+      const j = s.journals.find(jj => new Date(jj.timestamp).toLocaleDateString('ja-JP') === dateStr);
+      if (!j) return {
+        date: dateStr,
+        status: 'none',
+        color: 'bg-gray-100',
+        content: '未提出'
+      };
+      const emotion = String(j.emotion ?? '');
+      let color = 'bg-gray-200';
+      if (emotion.includes('うれしい')) color = 'bg-rose-400 shadow-rose-400/40 shadow-sm';else if (emotion.includes('なるほど')) color = 'bg-amber-400 shadow-amber-400/40 shadow-sm';else if (emotion.includes('もやもや')) color = 'bg-indigo-400 shadow-indigo-400/40 shadow-sm';else if (emotion.includes('くやしい')) color = 'bg-violet-600 shadow-violet-600/40 shadow-sm';
+      return {
+        date: dateStr,
+        status: 'submitted',
+        color,
+        content: j.content,
+        emotion: emotion
+      };
+    });
+    const recent = s.journals.slice(-3);
+    if (recent.length >= 2) {
+      let nV = 0;
+      recent.forEach(j => {
+        const em = String(j.emotion ?? '');
+        if (em.includes('もやもや') || em.includes('くやしい')) nV++;
+      });
+      if (nV >= 2) s.alerts.push("ネガティブな感情が続いています");
+    }
+    if (s.journals.length >= 3) {
+      const lenOf = j => String(j.content ?? '').length;
+      const avgLen = s.journals.slice(0, -1).reduce((acc, j) => acc + lenOf(j), 0) / (s.journals.length - 1);
+      const lastLen = lenOf(s.journals[s.journals.length - 1]);
+      if (avgLen > 20 && lastLen < avgLen * 0.3) s.alerts.push("記述量が急激に減少しています");
+    }
+  });
+  return {
+    students: Object.values(studentMap).sort((a, b) => b.alerts.length - a.alerts.length),
+    dates: past14Days
+  };
+};
+const openPrintView = (journals, tenantName) => {
+  const grouped = {};
+  journals.slice().sort((a, b) => (a.studentName || '').localeCompare(b.studentName || '') || new Date(a.timestamp) - new Date(b.timestamp)).forEach(j => {
+    const k = j.studentName || '不明';
+    (grouped[k] = grouped[k] || []).push(j);
+  });
+  const pages = Object.keys(grouped).map(name => `
+        <section class="student">
+          <h2>${escapeHtml(name)}</h2>
+          ${grouped[name].map(j => `
+            <article>
+              <h3>📅 ${escapeHtml(j.date || '')}</h3>
+              ${j.theme ? `<p class="theme">テーマ: ${escapeHtml(j.theme)}</p>` : ''}
+              <p class="content">${escapeHtml(j.content || '').replace(/\n/g, '<br>')}</p>
+              ${j.teacherComment ? `<p class="comment">💬 先生より<br>${escapeHtml(j.teacherComment).replace(/\n/g, '<br>')}</p>` : ''}
+            </article>`).join('')}
+        </section>`).join('');
+  const w = window.open('', '_blank');
+  if (!w) return false;
+  w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(tenantName || '')}</title>
+        <style>
+          body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }
+          section.student { page-break-after: always; }
+          h2 { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 8px; }
+          article { border-bottom: 1px dashed #cbd5e1; padding: 12px 0; }
+          h3 { margin: 0 0 4px; font-size: 14px; }
+          .theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }
+          .content { line-height: 1.9; white-space: normal; }
+          .comment { background: #eff6ff; border-radius: 8px; padding: 10px; }
+        </style></head><body>${pages}<script>window.onload = function(){ window.print(); };<\/script></body></html>`);
+  w.document.close();
+  return true;
+};
+const TeacherApp = ({
+  data,
+  tenants,
+  server,
+  refresh,
+  onSwitchTenant,
+  onCreateNew
+}) => {
+  const {
+    owner,
+    isLoading,
+    toast,
+    setToast,
+    showToast
+  } = server;
+  const code = data.tenant.tenantCode;
+  const call = (fn, ...args) => owner(fn, code, ...args);
+  const [journals, setJournals] = useState(data.journals);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeJournal, setActiveJournal] = useState(null);
+  const [feedback, setFeedback] = useState("");
+  const [filterStudent, setFilterStudent] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [weeklyThemes, setWeeklyThemes] = useState(data.weeklyThemes || {
+    mon: '',
+    tue: '',
+    wed: '',
+    thu: '',
+    fri: ''
+  });
+  const [todayThemeInput, setTodayThemeInput] = useState(data.todayTheme);
+  const [confirmConfig, setConfirmConfig] = useState({
+    isOpen: false
+  });
+  const [rosterData, setRosterData] = useState(data.rosterAll || []);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [copied, setCopied] = useState(false);
+  useDismissable(!!activeJournal, () => setActiveJournal(null));
+  useEffect(() => {
+    setJournals(data.journals);
+    setRosterData(data.rosterAll || []);
+    setWeeklyThemes(data.weeklyThemes || {
+      mon: '',
+      tue: '',
+      wed: '',
+      thu: '',
+      fri: ''
+    });
+    setTodayThemeInput(data.todayTheme);
+  }, [data]);
+  const vitalData = useMemo(() => analyzeVitals(journals, data.classRoster), [journals, data.classRoster]);
+  const pendingMembers = data.pendingMembers || [];
+  const filteredJournals = useMemo(() => {
+    return journals.filter(j => {
+      const mStudent = filterStudent === 'all' || j.email === filterStudent;
+      const mStatus = filterStatus === 'all' || j.status === filterStatus;
+      const mSearch = !searchQuery || String(j.content ?? '').includes(searchQuery) || String(j.studentName ?? '').includes(searchQuery) || String(j.theme ?? '').includes(searchQuery);
+      return mStudent && mStatus && mSearch;
+    }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }, [journals, filterStudent, filterStatus, searchQuery]);
+  const handleTextSelect = () => {
+    const selection = window.getSelection();
+    if (!selection.isCollapsed && selection.toString().trim() !== "" && activeJournal) {
+      const text = selection.toString();
+      const newHl = {
+        id: 'hl-' + Date.now(),
+        textToHighlight: text,
+        suggestedComment: '',
+        suggestedStamp: ''
+      };
+      const currentHighlights = parseHighlights(activeJournal.highlights);
+      currentHighlights.push(newHl);
+      setActiveJournal({
+        ...activeJournal,
+        highlights: JSON.stringify(currentHighlights)
+      });
+      selection.removeAllRanges();
+    }
+  };
+  const updateHighlight = (id, field, value) => {
+    const updated = parseHighlights(activeJournal.highlights).map(h => h.id === id ? {
+      ...h,
+      [field]: value
+    } : h);
+    setActiveJournal({
+      ...activeJournal,
+      highlights: JSON.stringify(updated)
+    });
+  };
+  const removeHighlight = id => {
+    const updated = parseHighlights(activeJournal.highlights).filter(h => h.id !== id);
+    setActiveJournal({
+      ...activeJournal,
+      highlights: JSON.stringify(updated)
+    });
+  };
+  const handleSetTheme = async () => {
+    const res = await call('opSetTodayTheme', todayThemeInput);
+    if (res && res.success) showToast("今日のテーマを設定しました");else showToast(failMsg(res, "テーマを設定できませんでした"), "error");
+  };
+  const handleSaveWeekly = async () => {
+    const res = await call('opSaveWeeklyThemes', weeklyThemes);
+    if (res && res.success) showToast("週間スケジュールを保存しました");else showToast(failMsg(res, "保存できませんでした"), "error");
+  };
+  const executeAiAction = async type => {
+    setConfirmConfig({
+      isOpen: false
+    });
+    const res = await call(type === 'simple' ? 'opAiSimple' : 'opAiFull');
+    if (res && res.success) {
+      showToast(res.message);
+      setTimeout(refresh, 1500);
+    } else showToast(failMsg(res, "AI処理に失敗しました"), "error");
+  };
+  const handleSaveFeedback = async () => {
+    const res = await call('opSaveFeedback', {
+      journalId: activeJournal.journalId,
+      comment: feedback,
+      highlights: activeJournal.highlights
+    });
+    if (res && res.success) {
+      showToast("フィードバックを返却しました");
+      setJournals(journals.map(j => j.journalId === activeJournal.journalId ? {
+        ...j,
+        status: '返却済み',
+        teacherComment: feedback,
+        highlights: activeJournal.highlights
+      } : j));
+      setActiveJournal(null);
+    } else showToast(failMsg(res, "保存できませんでした"), "error");
+  };
+  const handleQuickAction = async (jId, action, value) => {
+    if (action === 'stamp') {
+      const res = await call('opQuickReturn', jId, value);
+      if (res && res.success) {
+        setJournals(journals.map(j => j.journalId === jId ? {
+          ...j,
+          status: '返却済み',
+          teacherStamp: value
+        } : j));
+        showToast(`${value} を押しました！`);
+      } else showToast(failMsg(res, "返却できませんでした"), "error");
+    } else if (action === 'revert') {
+      const res = await call('opRevertStatus', jId);
+      if (res && res.success) {
+        setJournals(journals.map(j => j.journalId === jId ? {
+          ...j,
+          status: '未返却'
+        } : j));
+        showToast("返却を取り消しました");
+      } else showToast(failMsg(res, "取り消せませんでした"), "error");
+    }
+  };
+  const executeDataReset = async () => {
+    setConfirmConfig({
+      isOpen: false
+    });
+    const res = await call('opResetData');
+    if (res && res.success) {
+      showToast("全データを削除しました");
+      setTimeout(refresh, 1500);
+    } else showToast(failMsg(res, "削除できませんでした"), "error");
+  };
+  const executeBatchReturn = async () => {
+    setConfirmConfig({
+      isOpen: false
+    });
+    const res = await call('opBatchReturnAll');
+    if (res && res.success) {
+      showToast(res.message);
+      setTimeout(refresh, 1500);
+    } else showToast(failMsg(res, "一括返却できませんでした"), "error");
+  };
+  const handleRosterChange = (index, field, value) => {
+    const newRoster = [...rosterData];
+    newRoster[index] = {
+      ...newRoster[index],
+      [field]: value
+    };
+    setRosterData(newRoster);
+  };
+  const handleAddRoster = () => {
+    setRosterData([...rosterData, {
+      role: '児童',
+      name: '',
+      email: '',
+      status: 'active'
+    }]);
+  };
+  const handleRemoveRoster = index => {
+    const newRoster = [...rosterData];
+    newRoster.splice(index, 1);
+    setRosterData(newRoster);
+  };
+  const handleSaveRoster = async () => {
+    const validRows = rosterData.filter(r => String(r.name || '').trim() && String(r.email || '').trim());
+    if (validRows.length === 0) return showToast('有効なデータがありません', 'error');
+    const res = await call('opSaveRoster', validRows);
+    if (res && res.success) {
+      showToast('名簿を更新しました');
+      setTimeout(refresh, 1200);
+    } else showToast(failMsg(res, '名簿を保存できませんでした'), 'error');
+  };
+  const handleApprove = async (email, ok) => {
+    const res = await call(ok ? 'opApproveMember' : 'opRejectMember', email);
+    if (res && res.success) {
+      showToast(ok ? '参加を承認しました' : '申請を却下しました');
+      refresh();
+    } else showToast(failMsg(res, '処理できませんでした'), 'error');
+  };
+  const handleExport = async type => {
+    if (type === 'pdf') {
+      if (journals.length === 0) return showToast('データがありません', 'error');
+      if (!openPrintView(journals, data.tenant.tenantName)) showToast('ポップアップがブロックされました。許可してください', 'error');
+      return;
+    }
+    const res = await call('opExportCsv', {
+      startDate: null,
+      endDate: null,
+      email: 'all'
+    });
+    if (res && res.success) {
+      const blob = new Blob([res.csv], {
+        type: 'text/csv;charset=utf-8'
+      });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = res.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      showToast('CSVをダウンロードしました');
+    } else {
+      showToast(failMsg(res, '出力できませんでした'), "error");
+    }
+  };
+  const handleSaveApiKey = async () => {
+    if (!apiKeyInput.trim()) return showToast('APIキーを入力してください', 'error');
+    const res = await call('opSaveSettings', {
+      apiKey: apiKeyInput.trim()
+    });
+    if (res && res.success) {
+      showToast('APIキーを保存しました');
+      setApiKeyInput('');
+      refresh();
+    } else showToast(failMsg(res, '保存できませんでした'), 'error');
+  };
+  const handleCopyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(data.tenant.memberUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      window.prompt('この URL をコピーしてください', data.tenant.memberUrl);
+    }
+  };
+  const handleRegenerateCode = async () => {
+    setConfirmConfig({
+      isOpen: false
+    });
+    const res = await call('opRegenerateCode');
+    if (res && res.success) {
+      showToast('クラスコードを再発行しました。旧URLは使えなくなります');
+      refresh();
+    } else showToast(failMsg(res, '再発行できませんでした'), 'error');
+  };
+  const handleJoinPolicy = async (joinOpen, requireApproval) => {
+    const res = await call('opUpdateJoinPolicy', joinOpen, requireApproval);
+    if (res && res.success) {
+      showToast('設定を変更しました');
+      refresh();
+    } else showToast(failMsg(res, '変更できませんでした'), 'error');
+  };
+  const pct = useMemo(() => {
+    if (!data.classRoster.length) return 0;
+    const todayStr = new Date().toLocaleDateString('ja-JP');
+    const submitted = new Set(journals.filter(j => new Date(j.timestamp).toLocaleDateString('ja-JP') === todayStr).map(j => j.email));
+    return Math.min(100, Math.round(submitted.size / data.classRoster.length * 100));
+  }, [journals, data.classRoster]);
+  return React.createElement("div", {
+    className: "h-full flex flex-col gap-6 relative"
+  }, isLoading && React.createElement("div", {
+    className: "absolute inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"
+  }, React.createElement("div", {
+    className: "w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shadow-lg"
+  })), React.createElement(ConfirmDialog, confirmConfig), React.createElement("div", {
+    className: "flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between"
+  }, React.createElement("div", {
+    className: "flex gap-2 bg-white/60 backdrop-blur-md p-1.5 rounded-2xl shadow-sm border border-gray-200/50 self-start max-w-full overflow-x-auto whitespace-nowrap"
+  }, React.createElement("button", {
+    onClick: () => setActiveTab('dashboard'),
+    className: `shrink-0 min-h-[44px] px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab === 'dashboard' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`
+  }, React.createElement(Icon, {
+    path: "M3 3v18h18 M18 17V9 M13 17V5 M8 17v-3",
+    className: "w-5 h-5"
+  }), " \u30B8\u30E3\u30FC\u30CA\u30EB\u7BA1\u7406"), React.createElement("button", {
+    onClick: () => setActiveTab('vitals'),
+    className: `shrink-0 min-h-[44px] px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab === 'vitals' ? 'bg-gradient-to-r from-rose-600 to-pink-700 text-white shadow-md shadow-pink-600/20' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`
+  }, React.createElement(Icon, {
+    path: Icons.Pulse,
+    className: "w-5 h-5"
+  }), " \u5FC3\u306E\u30D0\u30A4\u30BF\u30EB"), React.createElement("button", {
+    onClick: () => setActiveTab('admin'),
+    className: `shrink-0 min-h-[44px] px-4 md:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm md:text-base ${activeTab === 'admin' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'}`
+  }, React.createElement(Icon, {
+    path: Icons.Settings,
+    className: "w-5 h-5"
+  }), " \u30AF\u30E9\u30B9\u8A2D\u5B9A", pendingMembers.length > 0 && React.createElement("span", {
+    className: "bg-rose-600 text-white text-xs font-black px-2 py-0.5 rounded-full"
+  }, pendingMembers.length))), React.createElement("div", {
+    className: "flex items-center gap-2 self-start lg:self-auto"
+  }, React.createElement("select", {
+    value: code,
+    onChange: e => onSwitchTenant(e.target.value),
+    className: "min-h-[44px] bg-white border border-gray-200 text-sm font-bold text-gray-700 outline-none rounded-xl px-3 py-2.5 cursor-pointer shadow-sm max-w-[220px]"
+  }, tenants.map(t => React.createElement("option", {
+    key: t.tenantCode,
+    value: t.tenantCode
+  }, t.tenantName))), React.createElement("button", {
+    onClick: onCreateNew,
+    className: "min-h-[44px] bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-700 text-gray-600 rounded-xl px-3 py-2.5 shadow-sm font-bold text-sm flex items-center gap-1 transition-colors"
+  }, React.createElement(Icon, {
+    path: Icons.Plus,
+    className: "w-4 h-4"
+  }), " \u30AF\u30E9\u30B9\u8FFD\u52A0"))), activeTab === 'dashboard' && React.createElement("div", {
+    className: "animate-fade-in flex flex-col gap-6 h-full"
+  }, React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-3 gap-6"
+  }, React.createElement("div", {
+    className: "col-span-1 bg-white p-7 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col relative overflow-hidden"
+  }, React.createElement("div", {
+    className: "absolute -right-10 -top-10 w-40 h-40 bg-blue-50 rounded-full blur-3xl opacity-60"
+  }), React.createElement("h3", {
+    className: "font-black text-gray-800 mb-6 flex items-center gap-2 text-lg z-10"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-blue-100 text-blue-600 rounded-lg"
+  }, React.createElement(Icon, {
+    path: "M12 20v-6 M6 20V10 M18 20V4",
+    className: "w-5 h-5"
+  })), " \u4ECA\u65E5\u306E\u63D0\u51FA\u7387"), React.createElement("div", {
+    className: "flex items-center justify-center z-10 mb-5"
+  }, React.createElement("div", {
+    className: "relative w-28 h-28"
+  }, React.createElement("svg", {
+    viewBox: "0 0 100 100",
+    className: "w-full h-full transform -rotate-90 drop-shadow-sm"
+  }, React.createElement("circle", {
+    cx: "50",
+    cy: "50",
+    r: "45",
+    fill: "none",
+    stroke: "#f1f5f9",
+    strokeWidth: "10"
+  }), React.createElement("circle", {
+    cx: "50",
+    cy: "50",
+    r: "45",
+    fill: "none",
+    stroke: "#3b82f6",
+    strokeWidth: "10",
+    strokeLinecap: "round",
+    strokeDasharray: "283",
+    strokeDashoffset: 283 - 283 * pct / 100,
+    className: "circle-chart-circle"
+  })), React.createElement("div", {
+    className: "absolute inset-0 flex flex-col items-center justify-center"
+  }, React.createElement("span", {
+    className: "text-2xl font-black text-gray-800"
+  }, pct, "%"))))), React.createElement("div", {
+    className: "col-span-1 lg:col-span-2 bg-white p-7 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col"
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 mb-6 flex items-center gap-2 text-lg"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-orange-100 text-orange-600 rounded-lg"
+  }, React.createElement(Icon, {
+    path: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z",
+    className: "w-5 h-5"
+  })), " \u30C6\u30FC\u30DE\u30FB\u30B9\u30B1\u30B8\u30E5\u30FC\u30EB\u8A2D\u5B9A"), React.createElement("div", {
+    className: "flex flex-col sm:flex-row gap-3 mb-6"
+  }, React.createElement("input", {
+    type: "text",
+    value: todayThemeInput,
+    onChange: e => setTodayThemeInput(e.target.value),
+    className: "flex-1 bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3 font-bold outline-none focus:border-blue-400 focus:bg-white transition-colors text-base md:text-lg",
+    placeholder: "\u4ECA\u65E5\u306E\u30C6\u30FC\u30DE\u3092\u5165\u529B"
+  }), React.createElement("button", {
+    onClick: handleSetTheme,
+    className: "bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all shrink-0"
+  }, "\u4ECA\u3059\u3050\u9069\u7528")), React.createElement("div", {
+    className: "mt-auto bg-gray-50/50 rounded-2xl p-5 border border-gray-100"
+  }, React.createElement("details", {
+    className: "group"
+  }, React.createElement("summary", {
+    className: "cursor-pointer text-sm font-bold text-gray-600 hover:text-blue-600 list-none flex items-center justify-between select-none"
+  }, React.createElement("span", {
+    className: "flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
+    className: "w-5 h-5"
+  }), " \u66DC\u65E5\u3054\u3068\u306E\u81EA\u52D5\u30C6\u30FC\u30DE\uFF08\u9031\u9593\u30B9\u30B1\u30B8\u30E5\u30FC\u30EB\uFF09"), React.createElement(Icon, {
+    path: "M19 9l-7 7-7-7",
+    className: "w-5 h-5 transition-transform duration-300 group-open:rotate-180"
+  })), React.createElement("div", {
+    className: "mt-4 pt-4 border-t border-gray-200"
+  }, React.createElement("div", {
+    className: "grid grid-cols-2 lg:grid-cols-5 gap-3"
+  }, ['mon', 'tue', 'wed', 'thu', 'fri'].map((d, i) => React.createElement("div", {
+    key: d
+  }, React.createElement("label", {
+    className: "block"
+  }, React.createElement("span", {
+    className: "text-xs font-bold text-gray-600 block mb-1.5 px-1"
+  }, ['月', '火', '水', '木', '金'][i], "\u66DC\u65E5"), React.createElement("input", {
+    type: "text",
+    value: weeklyThemes[d],
+    onChange: e => setWeeklyThemes({
+      ...weeklyThemes,
+      [d]: e.target.value
+    }),
+    className: "w-full min-h-[44px] text-sm p-2.5 bg-white border border-gray-200 rounded-xl focus:border-blue-500 outline-none transition-colors",
+    placeholder: "\u30C6\u30FC\u30DE"
+  }))))), React.createElement("div", {
+    className: "mt-4 flex justify-end"
+  }, React.createElement("button", {
+    onClick: handleSaveWeekly,
+    className: "text-sm min-h-[44px] bg-gray-800 hover:bg-gray-900 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all"
+  }, "\u30B9\u30B1\u30B8\u30E5\u30FC\u30EB\u3092\u4FDD\u5B58"))))))), React.createElement("div", {
+    className: "flex-1 bg-white rounded-[2rem] shadow-premium border border-gray-100 overflow-hidden flex flex-col min-h-[500px]"
+  }, React.createElement("div", {
+    className: "p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50"
+  }, React.createElement("div", {
+    className: "flex w-full lg:w-auto items-center gap-3"
+  }, React.createElement("div", {
+    className: "relative flex-1 lg:w-64"
+  }, React.createElement("div", {
+    className: "absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500"
+  }, React.createElement(Icon, {
+    path: Icons.Search,
+    className: "w-5 h-5"
+  })), React.createElement("input", {
+    type: "text",
+    value: searchQuery,
+    onChange: e => setSearchQuery(e.target.value),
+    placeholder: "\u540D\u524D\u3084\u5185\u5BB9\u3067\u691C\u7D22...",
+    className: "w-full min-h-[44px] pl-11 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-blue-500 transition-colors font-medium text-sm"
+  })), React.createElement("select", {
+    value: filterStatus,
+    onChange: e => setFilterStatus(e.target.value),
+    className: "min-h-[44px] bg-white border border-gray-200 text-sm font-bold text-gray-600 outline-none rounded-xl px-3 py-2.5 cursor-pointer"
+  }, React.createElement("option", {
+    value: "all"
+  }, "\u5168\u72B6\u6CC1"), React.createElement("option", {
+    value: "\u672A\u8FD4\u5374"
+  }, "\u672A\u8FD4\u5374"), React.createElement("option", {
+    value: "\u8FD4\u5374\u6E08\u307F"
+  }, "\u8FD4\u5374\u6E08"))), React.createElement("div", {
+    className: "flex w-full lg:w-auto items-center gap-2 overflow-x-auto pb-1 lg:pb-0"
+  }, React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      title: "AIコメント作成",
+      text: "未返却のジャーナルに温かいコメント案を作ります。",
+      onConfirm: () => executeAiAction('simple'),
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    className: "shrink-0 min-h-[44px] bg-purple-50 text-purple-700 hover:bg-purple-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Sparkles,
+    className: "w-4 h-4"
+  }), " AI\u30B7\u30F3\u30D7\u30EB"), React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      title: "AI高度分析",
+      text: "未返却のジャーナルを分析し、ハイライトとコメント案を作ります。",
+      onConfirm: () => executeAiAction('full'),
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    className: "shrink-0 min-h-[44px] bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
+    className: "w-4 h-4"
+  }), " AI\u9AD8\u5EA6\u5206\u6790"), React.createElement("div", {
+    className: "w-px h-6 bg-gray-300 mx-1"
+  }), React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      title: "一括返却",
+      text: "コメントが付いている未返却ジャーナルを全て返却済みにしますか？",
+      onConfirm: executeBatchReturn,
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    className: "shrink-0 min-h-[44px] bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-sm transition-colors flex items-center gap-2 active:scale-95"
+  }, React.createElement(Icon, {
+    path: "M5 13l4 4L19 7",
+    className: "w-4 h-4"
+  }), " \u4E00\u62EC\u8FD4\u5374"))), React.createElement("div", {
+    className: "overflow-auto flex-1 p-0"
+  }, React.createElement("table", {
+    className: "w-full min-w-[640px] text-left border-collapse"
+  }, React.createElement("thead", {
+    className: "bg-gray-50/80 backdrop-blur sticky top-0 z-10 shadow-sm border-b border-gray-100"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "p-4 pl-6 font-black text-gray-500 text-xs tracking-wider uppercase"
+  }, "\u65E5\u4ED8"), React.createElement("th", {
+    className: "p-4 font-black text-gray-500 text-xs tracking-wider uppercase"
+  }, "\u5150\u7AE5\u540D"), React.createElement("th", {
+    className: "p-4 font-black text-gray-500 text-xs tracking-wider uppercase"
+  }, "\u72B6\u6CC1"), React.createElement("th", {
+    className: "p-4 pr-6 font-black text-gray-500 text-xs tracking-wider uppercase text-right"
+  }, "\u30A2\u30AF\u30B7\u30E7\u30F3"))), React.createElement("tbody", {
+    className: "divide-y divide-gray-100"
+  }, filteredJournals.map(j => React.createElement("tr", {
+    key: j.journalId,
+    className: "hover:bg-blue-50/40 transition-colors group"
+  }, React.createElement("td", {
+    className: "p-4 pl-6 text-sm font-bold text-gray-500 whitespace-nowrap"
+  }, j.date), React.createElement("td", {
+    className: "p-4 font-black text-gray-800"
+  }, j.studentName), React.createElement("td", {
+    className: "p-4"
+  }, React.createElement("span", {
+    className: `inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold tracking-wide ${j.status === '返却済み' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700 ring-1 ring-orange-400/30'}`
+  }, j.status === '未返却' && React.createElement("span", {
+    className: "w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5 animate-pulse"
+  }), j.status)), React.createElement("td", {
+    className: "p-4 pr-6 flex gap-2 justify-end items-center"
+  }, j.status === '未返却' ? React.createElement("div", {
+    className: "flex bg-gray-50 border border-gray-100 rounded-xl p-1 mr-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"
+  }, ['😊', '👏', '💪', '⭐'].map(s => React.createElement("button", {
+    key: s,
+    onClick: () => handleQuickAction(j.journalId, 'stamp', s),
+    "aria-label": `${s} のスタンプで返却する`,
+    className: "tap-44 hover:scale-125 hover:bg-white hover:shadow-sm rounded transition-all px-2 py-0.5 text-lg",
+    title: `${s}で即返却`
+  }, s))) : React.createElement("button", {
+    onClick: () => handleQuickAction(j.journalId, 'revert'),
+    className: "tap-44 text-xs text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-xl font-bold mr-2 transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+  }, "\u53D6\u6D88"), React.createElement("button", {
+    onClick: () => {
+      setActiveJournal({
+        ...j
+      });
+      setFeedback(j.teacherComment || "");
+    },
+    className: "min-h-[44px] bg-white border-2 border-gray-200 hover:border-blue-500 hover:text-blue-700 text-gray-700 px-4 md:px-5 py-2 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-all whitespace-nowrap"
+  }, "\u8A73\u7D30\u3092\u958B\u304F"))))))))), activeTab === 'vitals' && React.createElement("div", {
+    className: "flex flex-col gap-6 animate-fade-in h-full"
+  }, React.createElement("div", {
+    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-6"
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 mb-4 flex items-center gap-2 text-lg"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-rose-100 text-rose-600 rounded-lg"
+  }, React.createElement(Icon, {
+    path: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    className: "w-5 h-5"
+  })), " \u6C17\u306B\u304B\u3051\u305F\u3044\u5150\u7AE5 (AI\u89E3\u6790)"), React.createElement("div", {
+    className: "flex flex-wrap gap-4"
+  }, vitalData.students.filter(s => s.alerts.length > 0).length === 0 ? React.createElement("p", {
+    className: "text-gray-500 font-bold text-sm p-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200 w-full text-center"
+  }, "\u73FE\u5728\u3001\u7279\u7B46\u3059\u3079\u304D\u30A2\u30E9\u30FC\u30C8\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u30AF\u30E9\u30B9\u306E\u5FC3\u306F\u5B89\u5B9A\u3057\u3066\u3044\u307E\u3059\u2728") : vitalData.students.filter(s => s.alerts.length > 0).map(s => React.createElement("div", {
+    key: s.email,
+    className: "flex-1 min-w-[250px] bg-rose-50/50 border border-rose-100 p-4 rounded-2xl"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-2"
+  }, React.createElement("span", {
+    className: "font-black text-gray-800 text-lg"
+  }, s.name), React.createElement("span", {
+    className: "text-xs font-bold text-rose-600 bg-rose-100 px-2 py-1 rounded-lg"
+  }, s.alerts.length, "\u3064\u306E\u4E88\u5146")), React.createElement("ul", {
+    className: "text-sm text-gray-600 space-y-1"
+  }, s.alerts.map((a, i) => React.createElement("li", {
+    key: i,
+    className: "flex items-center gap-1.5"
+  }, React.createElement("span", {
+    className: "w-1.5 h-1.5 rounded-full bg-rose-400"
+  }), a))))))), React.createElement("div", {
+    className: "flex-1 bg-white rounded-[2rem] shadow-premium border border-gray-100 p-6 flex flex-col overflow-hidden"
+  }, React.createElement("div", {
+    className: "flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 mb-6"
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 flex items-center gap-2 text-lg"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"
+  }, React.createElement(Icon, {
+    path: "M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5",
+    className: "w-5 h-5"
+  })), " \u30AF\u30E9\u30B9\u306E\u5FC3\u306E\u6CE2 (\u904E\u53BB14\u65E5\u9593)"), React.createElement("div", {
+    className: "flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-gray-500 bg-gray-50 px-4 py-2 rounded-xl self-start lg:self-auto"
+  }, React.createElement("div", {
+    className: "flex items-center gap-1"
+  }, React.createElement("span", {
+    className: "w-3 h-3 rounded-full bg-rose-400"
+  }), "\u3046\u308C\u3057\u3044"), React.createElement("div", {
+    className: "flex items-center gap-1"
+  }, React.createElement("span", {
+    className: "w-3 h-3 rounded-full bg-amber-400"
+  }), "\u306A\u308B\u307B\u3069"), React.createElement("div", {
+    className: "flex items-center gap-1"
+  }, React.createElement("span", {
+    className: "w-3 h-3 rounded-full bg-indigo-400"
+  }), "\u3082\u3084\u3082\u3084"), React.createElement("div", {
+    className: "flex items-center gap-1"
+  }, React.createElement("span", {
+    className: "w-3 h-3 rounded-full bg-violet-600"
+  }), "\u304F\u3084\u3057\u3044"))), React.createElement("div", {
+    className: "overflow-x-auto pb-4 custom-scrollbar"
+  }, React.createElement("div", {
+    className: "min-w-[800px]"
+  }, React.createElement("div", {
+    className: "flex mb-3 pl-32"
+  }, vitalData.dates.map((d, i) => React.createElement("div", {
+    key: i,
+    className: "flex-1 text-center text-[10px] font-bold text-gray-500 transform -rotate-45 origin-bottom-left whitespace-nowrap"
+  }, d.split('/')[1] + '/' + d.split('/')[2]))), React.createElement("div", {
+    className: "space-y-3"
+  }, vitalData.students.map(s => React.createElement("div", {
+    key: s.email,
+    className: "flex items-center group/row"
+  }, React.createElement("div", {
+    className: "w-32 pr-4 text-sm font-bold text-gray-700 truncate text-right group-hover/row:text-indigo-600 transition-colors"
+  }, s.name), React.createElement("div", {
+    className: "flex flex-1 gap-2"
+  }, s.heatMap.map((h, i) => React.createElement("div", {
+    key: i,
+    className: "flex-1 relative group flex justify-center"
+  }, React.createElement("div", {
+    className: `w-6 h-6 rounded-full transition-all duration-300 ${h.status === 'none' ? 'bg-gray-100 hover:bg-gray-200' : h.color + ' hover:scale-125 cursor-pointer'}`
+  }), h.status !== 'none' && React.createElement("div", {
+    className: "tooltip-content absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 bg-gray-900/95 backdrop-blur text-white text-xs p-3 rounded-2xl shadow-xl z-50 pointer-events-none border border-gray-700"
+  }, React.createElement("div", {
+    className: "font-bold text-gray-300 mb-1 flex justify-between"
+  }, React.createElement("span", null, h.date), React.createElement("span", null, h.emotion)), React.createElement("p", {
+    className: "line-clamp-3 leading-relaxed"
+  }, h.content), React.createElement("div", {
+    className: "absolute -bottom-2 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900/95"
+  })))))))))))), activeTab === 'admin' && React.createElement("div", {
+    className: "flex flex-col gap-6 animate-fade-in h-full"
+  }, React.createElement("div", {
+    className: "bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100"
+  }, React.createElement("div", {
+    className: "flex flex-col md:flex-row gap-6 items-start"
+  }, React.createElement("div", {
+    className: "flex-1 w-full"
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 flex items-center gap-2 text-lg mb-2"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-orange-100 text-orange-600 rounded-lg"
+  }, React.createElement(Icon, {
+    path: Icons.Link,
+    className: "w-5 h-5"
+  })), " \u5150\u7AE5\u7528URL\uFF08\u30AF\u30E9\u30B9\u30B3\u30FC\u30C9: ", React.createElement("span", {
+    className: "font-mono tracking-widest"
+  }, data.tenant.tenantCode), "\uFF09"), React.createElement("p", {
+    className: "text-sm text-gray-500 mb-4 leading-relaxed"
+  }, "\u3053\u306EURL\u3092\u5150\u7AE5\u306B\u914D\u308B\u3068\u3001\u5150\u7AE5\u306FGoogle\u3067\u30B5\u30A4\u30F3\u30A4\u30F3\u3059\u308B\u3060\u3051\u3067\u53C2\u52A0\u3067\u304D\u307E\u3059\u3002\u5150\u7AE5\u306B\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u306E\u6A29\u9650\u306F\u4E00\u5207\u4ED8\u4E0E\u3055\u308C\u307E\u305B\u3093\u3002"), React.createElement("div", {
+    className: "flex flex-col sm:flex-row gap-2 mb-4"
+  }, React.createElement("input", {
+    type: "text",
+    readOnly: true,
+    value: data.tenant.memberUrl,
+    className: "flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none"
+  }), React.createElement("button", {
+    onClick: handleCopyUrl,
+    className: `shrink-0 font-bold px-6 py-3 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-gray-800 hover:bg-black text-white'}`
+  }, React.createElement(Icon, {
+    path: copied ? Icons.Check : Icons.Copy,
+    className: "w-4 h-4"
+  }), " ", copied ? 'コピーしました' : 'URLをコピー')), React.createElement("div", {
+    className: "flex flex-wrap gap-3 items-center"
+  }, React.createElement("label", {
+    className: "flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: !!data.tenant.joinOpen,
+    onChange: e => handleJoinPolicy(e.target.checked, data.tenant.requireApproval),
+    className: "accent-blue-600 w-5 h-5"
+  }), " \u53C2\u52A0\u3092\u53D7\u3051\u4ED8\u3051\u308B"), React.createElement("label", {
+    className: "flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: !!data.tenant.requireApproval,
+    onChange: e => handleJoinPolicy(data.tenant.joinOpen, e.target.checked),
+    className: "accent-blue-600 w-5 h-5"
+  }), " \u53C2\u52A0\u306F\u5148\u751F\u306E\u627F\u8A8D\u5236\u306B\u3059\u308B"), React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      title: "コードの再発行",
+      text: "クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？",
+      confirmText: "再発行する",
+      onConfirm: handleRegenerateCode,
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    className: "min-h-[44px] text-sm font-bold text-gray-600 hover:text-red-600 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Refresh,
+    className: "w-4 h-4"
+  }), " \u30B3\u30FC\u30C9\u518D\u767A\u884C"))), React.createElement("div", {
+    className: "shrink-0 mx-auto md:mx-0 text-center"
+  }, React.createElement("img", {
+    src: `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(data.tenant.memberUrl)}`,
+    width: "160",
+    height: "160",
+    className: "rounded-2xl border border-gray-200 shadow-sm",
+    alt: "\u5150\u7AE5\u7528URL\u306EQR\u30B3\u30FC\u30C9"
+  }), React.createElement("p", {
+    className: "text-xs font-bold text-gray-500 mt-2"
+  }, "QR\u30B3\u30FC\u30C9\u3067\u914D\u5E03")))), pendingMembers.length > 0 && React.createElement("div", {
+    className: "bg-amber-50 p-8 rounded-[2rem] shadow-premium border border-amber-200"
+  }, React.createElement("h3", {
+    className: "font-black text-amber-800 flex items-center gap-2 text-lg mb-4"
+  }, React.createElement("span", {
+    className: "text-2xl"
+  }, "\u270B"), " \u53C2\u52A0\u7533\u8ACB\uFF08", pendingMembers.length, "\u4EF6\uFF09"), React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, pendingMembers.map(m => React.createElement("div", {
+    key: m.email,
+    className: "bg-white rounded-2xl border border-amber-100 p-4 flex flex-col sm:flex-row sm:items-center gap-3"
+  }, React.createElement("div", {
+    className: "flex-1 min-w-0"
+  }, React.createElement("p", {
+    className: "font-black text-gray-800"
+  }, m.name), React.createElement("p", {
+    className: "text-xs text-gray-500 font-mono truncate"
+  }, m.email)), React.createElement("div", {
+    className: "flex gap-2 shrink-0"
+  }, React.createElement("button", {
+    onClick: () => handleApprove(m.email, true),
+    className: "bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center gap-1.5"
+  }, React.createElement(Icon, {
+    path: Icons.Check,
+    className: "w-4 h-4"
+  }), " \u627F\u8A8D"), React.createElement("button", {
+    onClick: () => handleApprove(m.email, false),
+    className: "bg-white hover:bg-red-50 text-red-600 border border-red-300 font-bold px-5 py-2.5 rounded-xl active:scale-95 transition-all"
+  }, "\u5374\u4E0B")))))), React.createElement("div", {
+    className: "bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-6"
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 flex items-center gap-2 text-lg"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-blue-100 text-blue-600 rounded-lg"
+  }, React.createElement(Icon, {
+    path: Icons.User,
+    className: "w-5 h-5"
+  })), " \u5150\u7AE5\u540D\u7C3F\u306E\u7BA1\u7406"), React.createElement("button", {
+    onClick: handleSaveRoster,
+    className: "min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-md active:scale-95 transition-all"
+  }, "\u4FDD\u5B58\u3057\u3066\u66F4\u65B0")), React.createElement("div", {
+    className: "overflow-auto max-h-[400px] bg-gray-50/50 rounded-2xl border border-gray-200 p-2 custom-scrollbar"
+  }, React.createElement("table", {
+    className: "w-full min-w-[640px] text-left"
+  }, React.createElement("thead", {
+    className: "text-xs text-gray-600 font-bold bg-gray-100/80 rounded-xl sticky top-0 z-10"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "p-3 pl-4 rounded-l-xl w-24"
+  }, "\u5F79\u5272"), React.createElement("th", {
+    className: "p-3"
+  }, "\u6C0F\u540D"), React.createElement("th", {
+    className: "p-3"
+  }, "\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9 ", React.createElement("span", {
+    className: "text-[10px] font-normal"
+  }, "(Google\u30A2\u30AB\u30A6\u30F3\u30C8)")), React.createElement("th", {
+    className: "p-3 w-24"
+  }, "\u72B6\u614B"), React.createElement("th", {
+    className: "p-3 pr-4 rounded-r-xl text-right"
+  }, "\u64CD\u4F5C"))), React.createElement("tbody", {
+    className: "divide-y divide-gray-100"
+  }, rosterData.map((r, i) => React.createElement("tr", {
+    key: i,
+    className: "hover:bg-white transition-colors group"
+  }, React.createElement("td", {
+    className: "p-2 pl-4"
+  }, React.createElement("select", {
+    value: r.role,
+    onChange: e => handleRosterChange(i, 'role', e.target.value),
+    className: "w-full min-h-[44px] bg-transparent border-none outline-none font-bold text-gray-700 cursor-pointer"
+  }, React.createElement("option", {
+    value: "\u5150\u7AE5"
+  }, "\u5150\u7AE5"), React.createElement("option", {
+    value: "\u62C5\u4EFB"
+  }, "\u62C5\u4EFB"))), React.createElement("td", {
+    className: "p-2"
+  }, React.createElement("input", {
+    type: "text",
+    value: r.name,
+    onChange: e => handleRosterChange(i, 'name', e.target.value),
+    placeholder: "\u4F8B: \u5C71\u7530 \u592A\u90CE",
+    className: "w-full min-h-[44px] bg-transparent border-none outline-none font-bold text-gray-800 focus:ring-2 focus:ring-blue-200 rounded px-2 py-1.5 transition-all"
+  })), React.createElement("td", {
+    className: "p-2"
+  }, React.createElement("input", {
+    type: "text",
+    value: r.email,
+    onChange: e => handleRosterChange(i, 'email', e.target.value),
+    placeholder: "\u4F8B: yamada@school.ed.jp",
+    className: "w-full min-h-[44px] bg-transparent border-none outline-none text-gray-700 text-sm focus:ring-2 focus:ring-blue-200 rounded px-2 py-1.5 transition-all font-mono"
+  })), React.createElement("td", {
+    className: "p-2"
+  }, React.createElement("span", {
+    className: `inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${r.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`
+  }, r.status === 'pending' ? '承認待ち' : '参加中')), React.createElement("td", {
+    className: "p-2 pr-4 text-right"
+  }, React.createElement("button", {
+    onClick: () => handleRemoveRoster(i),
+    "aria-label": `${r.name || "この行"} を名簿から削除する`,
+    className: "tap-44 p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+  }, React.createElement(Icon, {
+    path: Icons.Trash,
+    className: "w-4 h-4"
+  }))))))), React.createElement("div", {
+    className: "p-2 mt-2"
+  }, React.createElement("button", {
+    onClick: handleAddRoster,
+    className: "w-full py-3 border-2 border-dashed border-blue-200 text-blue-600 font-bold rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.99]"
+  }, React.createElement(Icon, {
+    path: Icons.Plus,
+    className: "w-5 h-5"
+  }), " \u3042\u305F\u3089\u3057\u3044\u884C\u3092\u8FFD\u52A0\u3059\u308B"))), React.createElement("p", {
+    className: "text-xs text-gray-500 mt-3 leading-relaxed"
+  }, "\uD83D\uDCA1 \u540D\u7C3F\u306B\u767B\u9332\u3057\u305F\u5150\u7AE5\u306F\u3001\u5150\u7AE5\u7528URL\u304B\u3089\u30B5\u30A4\u30F3\u30A4\u30F3\u3059\u308B\u3060\u3051\u3067\u53C2\u52A0\u3067\u304D\u307E\u3059\uFF08\u627F\u8A8D\u4E0D\u8981\uFF09\u3002\u540D\u7C3F\u306B\u7121\u3044\u30A2\u30AB\u30A6\u30F3\u30C8\u306F\u300C\u53C2\u52A0\u7533\u8ACB\u300D\u3068\u3057\u3066\u5C4A\u304D\u307E\u3059\u3002")), React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6"
+  }, React.createElement("div", {
+    className: "bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col"
+  }, React.createElement("div", {
+    className: "w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4 text-purple-500 mx-auto"
+  }, React.createElement(Icon, {
+    path: Icons.Sparkles,
+    className: "w-8 h-8"
+  })), React.createElement("h3", {
+    className: "font-black text-gray-800 mb-2 text-center"
+  }, "Gemini AI \u8A2D\u5B9A"), React.createElement("p", {
+    className: "text-sm text-gray-500 mb-4 text-center"
+  }, data.settings && data.settings.hasApiKey ? `設定済み: ${data.settings.apiKeyMasked}` : 'AIコメント機能にはAPIキーが必要です。'), React.createElement("input", {
+    type: "password",
+    value: apiKeyInput,
+    onChange: e => setApiKeyInput(e.target.value),
+    placeholder: "Gemini API\u30AD\u30FC\u3092\u8CBC\u308A\u4ED8\u3051",
+    className: "w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-purple-400 mb-3"
+  }), React.createElement("button", {
+    onClick: handleSaveApiKey,
+    className: "w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95 mt-auto"
+  }, "\u4FDD\u5B58")), React.createElement("div", {
+    className: "bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center"
+  }, React.createElement("div", {
+    className: "w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 text-emerald-500"
+  }, React.createElement(Icon, {
+    path: Icons.Link,
+    className: "w-8 h-8"
+  })), React.createElement("h3", {
+    className: "font-black text-gray-800 mb-2"
+  }, "\u30C7\u30FC\u30BF\u30D9\u30FC\u30B9"), React.createElement("p", {
+    className: "text-sm text-gray-500 mb-6"
+  }, "\u3053\u306E\u30AF\u30E9\u30B9\u306E\u8A18\u9332\u306F\u3001\u3042\u306A\u305F\u306EDrive\u5185\u306E\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u306B\u4FDD\u5B58\u3055\u308C\u3066\u3044\u307E\u3059\u3002"), React.createElement("a", {
+    href: data.spreadsheetUrl,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold py-3 rounded-xl transition-all active:scale-95"
+  }, "\u30B7\u30FC\u30C8\u3092\u958B\u304F")), React.createElement("div", {
+    className: "bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100 flex flex-col justify-center items-center text-center"
+  }, React.createElement("div", {
+    className: "w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4 text-gray-600"
+  }, React.createElement(Icon, {
+    path: Icons.Download,
+    className: "w-8 h-8"
+  })), React.createElement("h3", {
+    className: "font-black text-gray-800 mb-2"
+  }, "\u30C7\u30FC\u30BF\u306E\u4E00\u62EC\u51FA\u529B"), React.createElement("p", {
+    className: "text-sm text-gray-500 mb-6"
+  }, "CSV\u3092\u30C0\u30A6\u30F3\u30ED\u30FC\u30C9\u3001\u307E\u305F\u306F\u5370\u5237\u7528\u306E\u5E33\u7968\uFF08PDF\u4FDD\u5B58\u53EF\uFF09\u3092\u958B\u304D\u307E\u3059\u3002"), React.createElement("div", {
+    className: "flex gap-2 w-full"
+  }, React.createElement("button", {
+    onClick: () => handleExport('csv'),
+    className: "flex-1 bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-xl transition-all active:scale-95"
+  }, "CSV"), React.createElement("button", {
+    onClick: () => handleExport('pdf'),
+    className: "flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-3 rounded-xl transition-all active:scale-95"
+  }, "\u5370\u5237/PDF"))), React.createElement("div", {
+    className: "bg-red-50 p-8 rounded-[2rem] shadow-premium border border-red-100 flex flex-col justify-center items-center text-center"
+  }, React.createElement("div", {
+    className: "w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"
+  }, React.createElement(Icon, {
+    path: Icons.Trash,
+    className: "w-8 h-8"
+  })), React.createElement("h3", {
+    className: "font-black text-red-800 mb-2"
+  }, "\u5371\u967A\u306A\u64CD\u4F5C"), React.createElement("p", {
+    className: "text-sm text-red-700 mb-6"
+  }, "\u3053\u306E\u30AF\u30E9\u30B9\u306E\u5168\u30B8\u30E3\u30FC\u30CA\u30EB\u30C7\u30FC\u30BF\u3092\u524A\u9664\u3057\u307E\u3059\u3002\u5E74\u5EA6\u66FF\u308F\u308A\u306A\u3069\u306B\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044\u3002"), React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      isDanger: true,
+      title: "データ全削除",
+      text: "本当にこのクラスのすべてのジャーナルデータを削除しますか？\nこの操作は元に戻せません。",
+      confirmText: "削除する",
+      onConfirm: executeDataReset,
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    className: "w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-600/30 active:scale-95 transition-all"
+  }, "\u5168\u30C7\u30FC\u30BF\u3092\u524A\u9664")))), activeJournal && React.createElement("div", {
+    className: "fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-2 md:p-8 transition-opacity"
+  }, React.createElement("div", {
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-label": `${activeJournal.studentName} さんのジャーナル`,
+    className: "bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-full max-h-[92vh] md:max-h-[85vh] flex flex-col md:flex-row overflow-hidden animate-fade-in border border-gray-100"
+  }, React.createElement("div", {
+    className: "flex-1 min-h-[35%] bg-gradient-to-br from-orange-50/50 to-amber-50/50 p-4 md:p-8 border-b md:border-b-0 md:border-r overflow-y-auto relative",
+    onMouseUp: handleTextSelect,
+    onTouchEnd: handleTextSelect
+  }, React.createElement("div", {
+    className: "flex justify-between items-start mb-6"
+  }, React.createElement("div", null, React.createElement("p", {
+    className: "text-sm font-bold text-gray-500 mb-1"
+  }, activeJournal.date), React.createElement("h2", {
+    className: "text-3xl font-black text-gray-800"
+  }, activeJournal.studentName, " ", React.createElement("span", {
+    className: "text-xl font-medium text-gray-500"
+  }, "\u3055\u3093"))), React.createElement("span", {
+    className: "text-3xl bg-white px-4 py-2 rounded-2xl shadow-sm border border-orange-100"
+  }, activeJournal.emotion || '📝')), React.createElement("div", {
+    className: "bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-orange-100 min-h-[250px] whitespace-pre-wrap text-lg lined-paper text-gray-800 leading-[40px] font-medium select-text relative"
+  }, (() => {
+    const hls = parseHighlights(activeJournal.highlights);
+    if (hls.length === 0) return activeJournal.content;
+    const html = buildHighlightedHtml(activeJournal.content, hls, (escapedText, h) => `<mark class="highlight-marker group relative" data-id="${escapeHtml(h.id)}">${escapedText}<span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg whitespace-nowrap z-10 font-bold shadow-lg">${escapeHtml(h.suggestedStamp || '')} ${escapeHtml(h.suggestedComment || '編集可')}</span></mark>`);
+    return React.createElement("div", {
+      dangerouslySetInnerHTML: {
+        __html: html
+      }
+    });
+  })()), React.createElement(LazyImage, {
+    imageId: activeJournal.imageId,
+    fetcher: id => window.callOwnerApi('opGetImage', code, id),
+    alt: `${activeJournal.studentName} さんがのせた画像`,
+    className: "mt-4 rounded-xl border max-w-xs shadow-sm"
+  })), React.createElement("div", {
+    className: "w-full md:w-[420px] shrink-0 max-h-[55%] md:max-h-none p-5 md:p-8 bg-white flex flex-col relative overflow-y-auto"
+  }, React.createElement("button", {
+    onClick: () => setActiveJournal(null),
+    "aria-label": "\u9589\u3058\u308B",
+    className: "tap-44 absolute top-6 right-6 p-2 text-gray-500 hover:text-gray-700 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"
+  }, React.createElement(Icon, {
+    path: Icons.Close
+  })), React.createElement("h3", {
+    className: "text-lg font-black text-blue-600 mb-4 flex items-center gap-2"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-blue-50 rounded-lg"
+  }, React.createElement(Icon, {
+    path: Icons.Pen,
+    className: "w-5 h-5"
+  })), " \u5168\u4F53\u30B3\u30E1\u30F3\u30C8"), React.createElement("textarea", {
+    value: feedback,
+    onChange: e => setFeedback(e.target.value),
+    placeholder: "\u6E29\u304B\u3044\u30B3\u30E1\u30F3\u30C8\u3092\u5165\u529B...",
+    className: "w-full border-2 border-gray-100 rounded-2xl p-4 text-gray-700 outline-none focus:border-blue-400 focus:bg-blue-50/30 transition-colors resize-none mb-6 min-h-[160px] font-medium"
+  }), React.createElement("h3", {
+    className: "text-sm font-black text-gray-700 mb-3 flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Link,
+    className: "w-4 h-4 text-yellow-500"
+  }), " \u62BD\u51FA\u3057\u305F\u30CF\u30A4\u30E9\u30A4\u30C8"), React.createElement("div", {
+    className: "flex-1 overflow-y-auto space-y-3 mb-6 pr-1 custom-scrollbar"
+  }, parseHighlights(activeJournal.highlights).map(h => React.createElement("div", {
+    key: h.id,
+    className: "bg-yellow-50/50 border border-yellow-200 p-4 rounded-2xl relative group hover:bg-yellow-50 transition-colors"
+  }, React.createElement("button", {
+    onClick: () => removeHighlight(h.id),
+    "aria-label": "\u3053\u306E\u30CF\u30A4\u30E9\u30A4\u30C8\u3092\u6D88\u3059",
+    className: "tap-44 absolute top-3 right-3 text-yellow-600 hover:text-red-600 bg-white rounded-full p-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-sm"
+  }, React.createElement(Icon, {
+    path: Icons.Close,
+    className: "w-3 h-3"
+  })), React.createElement("p", {
+    className: "text-sm font-bold text-gray-800 mb-3 border-l-4 border-yellow-400 pl-3 leading-relaxed"
+  }, "\"", h.textToHighlight, "\""), React.createElement("input", {
+    type: "text",
+    placeholder: "\u30B3\u30E1\u30F3\u30C8 (\u4EFB\u610F)",
+    value: h.suggestedComment || '',
+    onChange: e => updateHighlight(h.id, 'suggestedComment', e.target.value),
+    className: "w-full text-xs p-2.5 rounded-xl border border-yellow-200 outline-none focus:border-yellow-400 mb-3 font-medium bg-white"
+  }), React.createElement("div", {
+    className: "flex gap-1.5 overflow-x-auto pb-1"
+  }, ['😄', '👏', '🤔', '😭', '👍', '✨', '💪', '🌱'].map(s => React.createElement("button", {
+    key: s,
+    onClick: () => updateHighlight(h.id, 'suggestedStamp', s),
+    "aria-label": `スタンプ ${s} を選ぶ`,
+    className: `tap-44 shrink-0 text-base p-1.5 rounded-lg hover:bg-yellow-100 transition-colors ${h.suggestedStamp === s ? 'bg-yellow-200 border-yellow-400 shadow-sm transform scale-110' : ''}`
+  }, s))))), parseHighlights(activeJournal.highlights).length === 0 && React.createElement("div", {
+    className: "text-xs font-bold text-gray-500 text-center py-6 bg-gray-50 rounded-2xl border border-gray-100 border-dashed"
+  }, "\u30CF\u30A4\u30E9\u30A4\u30C8\u306F\u3042\u308A\u307E\u305B\u3093")), React.createElement("button", {
+    onClick: handleSaveFeedback,
+    className: "mt-auto bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-[2rem] shadow-lg shadow-blue-500/30 text-lg active:scale-95 transition-all w-full flex justify-center items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Send
+  }), " \u4FDD\u5B58\u3057\u3066\u8FD4\u5374\u3059\u308B")))), toast && React.createElement(Toast, {
+    message: toast.message,
+    type: toast.type,
+    onClose: () => setToast(null)
+  }));
+};
+const CreateClassScreen = ({
+  server,
+  onCreated,
+  onCancel,
+  ownerEmail
+}) => {
+  const {
+    owner,
+    isLoading,
+    toast,
+    setToast,
+    showToast
+  } = server;
+  const [className, setClassName] = useState("");
+  const [adoptUrl, setAdoptUrl] = useState("");
+  const [done, setDone] = useState(null);
+  const handleCreate = async () => {
+    if (!className.trim()) return showToast('クラス名を入力してください', 'error');
+    const res = await owner('opCreateTenant', className.trim());
+    if (res && res.success) {
+      setDone(res);
+      setTimeout(() => onCreated(res.tenantCode), 2500);
+    } else showToast(failMsg(res, 'クラスを作成できませんでした'), 'error');
+  };
+  const handleAdopt = async () => {
+    if (!className.trim()) return showToast('クラス名を入力してください', 'error');
+    if (!adoptUrl.trim()) return showToast('スプレッドシートのURLを入力してください', 'error');
+    const res = await owner('opAdoptTenant', adoptUrl.trim(), className.trim());
+    if (res && res.success) {
+      setDone(res);
+      setTimeout(() => onCreated(res.tenantCode), 2500);
+    } else showToast(failMsg(res, '取り込みできませんでした'), 'error');
+  };
+  return React.createElement("div", {
+    className: "h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto"
+  }, isLoading && React.createElement("div", {
+    className: "fixed inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"
+  }, React.createElement("div", {
+    className: "w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"
+  })), React.createElement("div", {
+    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8"
+  }, done ? React.createElement("div", {
+    className: "text-center py-4"
+  }, React.createElement("div", {
+    className: "w-16 h-16 mx-auto rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4"
+  }, React.createElement(Icon, {
+    path: Icons.Check,
+    className: "w-8 h-8"
+  })), React.createElement("p", {
+    className: "font-black text-gray-700 text-lg mb-2"
+  }, "\u30AF\u30E9\u30B9\u300C", done.tenantName, "\u300D\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F\uFF01"), React.createElement("p", {
+    className: "text-sm text-gray-500 font-medium mb-4"
+  }, "\u30AF\u30E9\u30B9\u30B3\u30FC\u30C9: ", React.createElement("span", {
+    className: "font-mono font-black tracking-widest text-orange-600"
+  }, done.tenantCode)), React.createElement("p", {
+    className: "text-xs text-gray-500"
+  }, "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u3044\u307E\u3059\u2026")) : React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "text-center mb-8"
+  }, React.createElement("div", {
+    className: "w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"
+  }, React.createElement(Icon, {
+    path: Icons.Book,
+    className: "w-10 h-10"
+  })), React.createElement("h1", {
+    className: "text-3xl font-black text-gray-800 mb-2"
+  }, "\u30AF\u30E9\u30B9\u3092\u3064\u304F\u308D\u3046"), React.createElement("p", {
+    className: "text-gray-500 font-medium leading-relaxed"
+  }, "\u30AF\u30E9\u30B9\u5C02\u7528\u306E\u30C7\u30FC\u30BF\u30D9\u30FC\u30B9\u304C", React.createElement("br", null), "\u3042\u306A\u305F\u306E Google Drive \u306B\u81EA\u52D5\u4F5C\u6210\u3055\u308C\u307E\u3059\u3002"), ownerEmail && React.createElement("p", {
+    className: "mt-3 text-xs font-bold text-gray-500 bg-gray-50 inline-block px-4 py-1.5 rounded-full"
+  }, "\u30ED\u30B0\u30A4\u30F3\u4E2D: ", ownerEmail)), React.createElement("div", {
+    className: "border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6 mb-5"
+  }, React.createElement("h2", {
+    className: "font-black text-gray-800 mb-1 flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Sparkles,
+    className: "w-5 h-5 text-orange-500"
+  }), " \u65B0\u3057\u3044\u30AF\u30E9\u30B9\u3092\u4F5C\u6210"), React.createElement("p", {
+    className: "text-sm text-gray-500 mb-4 leading-relaxed"
+  }, "\u4F5C\u6210\u3059\u308B\u3068\u300C\u5150\u7AE5\u7528URL\u300D\u304C\u767A\u884C\u3055\u308C\u307E\u3059\u3002URL\u3092\u914D\u308B\u3060\u3051\u3067\u5150\u7AE5\u304C\u53C2\u52A0\u3067\u304D\u307E\u3059\u3002"), React.createElement("input", {
+    type: "text",
+    value: className,
+    onChange: e => setClassName(e.target.value),
+    placeholder: "\u30AF\u30E9\u30B9\u540D\uFF08\u4F8B: 6\u5E741\u7D44\uFF09",
+    className: "w-full border-2 border-orange-100 rounded-2xl p-3.5 text-sm outline-none focus:border-orange-400 bg-white font-bold mb-3 transition-colors"
+  }), React.createElement("button", {
+    onClick: handleCreate,
+    disabled: isLoading,
+    className: "w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50"
+  }, "\uD83C\uDF92 \u30AF\u30E9\u30B9\u3092\u4F5C\u6210\u3059\u308B")), React.createElement("details", {
+    className: "border-2 border-blue-100 bg-blue-50/40 rounded-3xl p-6"
+  }, React.createElement("summary", {
+    className: "font-black text-gray-800 cursor-pointer flex items-center gap-2 list-none"
+  }, React.createElement(Icon, {
+    path: Icons.Link,
+    className: "w-5 h-5 text-blue-500"
+  }), " \u4EE5\u524D\u306E\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u53D6\u308A\u8FBC\u3080\uFF08\u5F15\u3063\u8D8A\u3057\uFF09"), React.createElement("p", {
+    className: "text-sm text-gray-500 my-3 leading-relaxed"
+  }, "\u65E7\u30D0\u30FC\u30B8\u30E7\u30F3\u3067\u4F7F\u3063\u3066\u3044\u305FDB\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\uFF08\u3042\u306A\u305F\u304C\u7DE8\u96C6\u6A29\u9650\u3092\u6301\u3064\u3082\u306E\uFF09\u3092\u30AF\u30E9\u30B9\u3068\u3057\u3066\u767B\u9332\u3067\u304D\u307E\u3059\u3002"), React.createElement("input", {
+    type: "text",
+    value: adoptUrl,
+    onChange: e => setAdoptUrl(e.target.value),
+    placeholder: "https://docs.google.com/spreadsheets/d/...",
+    className: "w-full border-2 border-blue-100 rounded-2xl p-3.5 text-sm outline-none focus:border-blue-400 bg-white font-mono mb-3 transition-colors"
+  }), React.createElement("button", {
+    onClick: handleAdopt,
+    disabled: isLoading,
+    className: "w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50"
+  }, "\uD83D\uDD17 \u3053\u306E\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u53D6\u308A\u8FBC\u3080")), onCancel && React.createElement("button", {
+    onClick: onCancel,
+    className: "w-full mt-5 py-3 rounded-2xl font-bold bg-gray-50 text-gray-500 hover:bg-gray-100 transition-colors"
+  }, "\u3082\u3069\u308B"))), toast && React.createElement(Toast, {
+    message: toast.message,
+    type: toast.type,
+    onClose: () => setToast(null)
+  }));
+};
+const OwnerRoot = () => {
+  const server = useServer();
+  const [phase, setPhase] = useState('loading');
+  const [tenants, setTenants] = useState([]);
+  const [ownerEmail, setOwnerEmail] = useState('');
+  const [selectedCode, setSelectedCode] = useState(null);
+  const [tenantData, setTenantData] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const loadTenants = async preferCode => {
+    const res = await window.callOwnerApi('opListTenants').catch(e => ({
+      success: false,
+      error: e.message
+    }));
+    if (!res || !res.success) {
+      setErrorMsg(res && res.error || 'ポータルに接続できませんでした');
+      setPhase('error');
+      return;
+    }
+    setOwnerEmail(res.ownerEmail || '');
+    setTenants(res.tenants || []);
+    if (!res.tenants || res.tenants.length === 0) {
+      setPhase('create');
+      return;
+    }
+    let code = preferCode || localStorage.getItem('rj_selectedClass');
+    if (!res.tenants.some(t => t.tenantCode === code)) code = res.tenants[0].tenantCode;
+    if (code === selectedCode) loadTenantData(code);else setSelectedCode(code);
+  };
+  const loadTenantData = async code => {
+    setPhase('loading');
+    const res = await server.owner('opGetTenantData', code);
+    if (res && res.success) {
+      setTenantData(res);
+      localStorage.setItem('rj_selectedClass', code);
+      setPhase('app');
+    } else {
+      setErrorMsg(failMsg(res, 'クラスのデータを読み込めませんでした'));
+      setPhase('error');
+    }
+  };
+  useEffect(() => {
+    loadTenants();
+  }, []);
+  useEffect(() => {
+    if (selectedCode) loadTenantData(selectedCode);
+  }, [selectedCode]);
+  if (phase === 'loading') return React.createElement(FullScreenSpinner, {
+    color: "border-blue-500"
+  });
+  if (phase === 'error') return React.createElement(CenterCard, {
+    icon: "\u26A0\uFE0F"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, "\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F"), React.createElement("p", {
+    className: "text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap"
+  }, errorMsg), React.createElement("button", {
+    onClick: () => {
+      setPhase('loading');
+      loadTenants();
+    },
+    className: "w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all"
+  }, "\u3082\u3046\u4E00\u5EA6\u8AAD\u307F\u8FBC\u3080"));
+  if (phase === 'create') return React.createElement(CreateClassScreen, {
+    server: server,
+    ownerEmail: ownerEmail,
+    onCreated: code => {
+      loadTenants(code);
+    },
+    onCancel: tenants.length > 0 ? () => setSelectedCode(tenants[0].tenantCode) : null
+  });
+  return React.createElement("div", {
+    className: "h-screen w-full flex flex-col bg-gray-50 text-gray-800 font-sans selection:bg-orange-200"
+  }, React.createElement("header", {
+    className: "flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-blue-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]"
+  }, React.createElement("div", {
+    className: "flex items-center gap-2 md:gap-3 min-w-0"
+  }, React.createElement("div", {
+    className: "p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-blue-500 to-blue-600"
+  }, React.createElement(Icon, {
+    path: Icons.Book,
+    className: "w-5 h-5 md:w-6 md:h-6"
+  })), React.createElement("h1", {
+    className: "text-lg md:text-2xl font-black tracking-tight truncate text-blue-600"
+  }, "\u6559\u54E1\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9 ", React.createElement("span", {
+    "aria-hidden": "true",
+    className: "hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"
+  }), " ", React.createElement("span", {
+    className: "text-gray-600 text-base md:text-xl hidden sm:inline"
+  }, tenantData.tenant.tenantName))), React.createElement("div", {
+    className: "flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"
+  }, React.createElement(Icon, {
+    path: Icons.User,
+    className: "w-4 h-4 text-gray-500 shrink-0"
+  }), " ", React.createElement("span", {
+    className: "truncate"
+  }, ownerEmail, " \u5148\u751F"))), React.createElement("main", {
+    className: "flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"
+  }, React.createElement("div", {
+    className: "max-w-[1400px] mx-auto h-full"
+  }, React.createElement(TeacherApp, {
+    data: tenantData,
+    tenants: tenants,
+    server: server,
+    refresh: () => loadTenantData(selectedCode),
+    onSwitchTenant: code => setSelectedCode(code),
+    onCreateNew: () => setPhase('create')
+  }))), React.createElement("footer", {
+    className: "flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm"
+  }, React.createElement("span", null, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
+    href: "https://note.com/cute_borage86",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity"
+  }, "GIGA\u5C71"))));
+};
+const MemberRoot = () => {
+  const server = useServer();
+  const [phase, setPhase] = useState('connecting');
+  const [statusInfo, setStatusInfo] = useState({});
+  const [data, setData] = useState(null);
+  const [joinName, setJoinName] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const sync = async () => {
+    const res = await window.callMemberApi('mbSync').catch(e => ({
+      success: false,
+      error: e.message
+    }));
+    if (res && res.success) {
+      setData({
+        user: res.me,
+        todayTheme: res.todayTheme,
+        journals: res.journals,
+        tenantName: res.tenantName
+      });
+      setPhase('app');
+      return;
+    }
+    if (res && (res.code === 'NOT_MEMBER' || res.code === 'MEMBER_PENDING')) {
+      await checkStatus();
+      return;
+    }
+    setErrorMsg(failMsg(res, 'つながりませんでした。もう一度ためしてね'));
+    setPhase('error');
+  };
+  const checkStatus = async () => {
+    const res = await window.callMemberApi('mbGetStatus').catch(e => ({
+      success: false,
+      error: e.message
+    }));
+    if (!res || !res.success) {
+      setErrorMsg(failMsg(res, 'つながりませんでした。もう一度ためしてね'));
+      setPhase('error');
+      return;
+    }
+    setStatusInfo(res);
+    if (res.status === 'active') {
+      await sync();
+    } else if (res.status === 'pending') setPhase('pending');else setPhase('join');
+  };
+  useEffect(() => {
+    checkStatus();
+  }, []);
+  const handleJoin = async () => {
+    if (!joinName.trim()) return server.showToast('名前を入力してね', 'error');
+    const res = await server.memberWrite('mbRequestJoin', joinName.trim());
+    if (res && res.success) {
+      if (res.status === 'active') {
+        server.showToast('参加できたよ！');
+        await sync();
+      } else setPhase('pending');
+    } else server.showToast(failMsg(res, '参加できませんでした'), 'error');
+  };
+  if (phase === 'connecting') return React.createElement(FullScreenSpinner, null);
+  if (phase === 'error') return React.createElement(CenterCard, {
+    icon: "\uD83D\uDE22"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, "\u3064\u306A\u304C\u308A\u307E\u305B\u3093\u3067\u3057\u305F"), React.createElement("p", {
+    className: "text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap"
+  }, errorMsg), React.createElement("button", {
+    onClick: () => window.appReload(),
+    className: "w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all"
+  }, "\u3082\u3046", React.createElement("ruby", null, "\u4E00\u5EA6", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u3044\u3061\u3069"), React.createElement("rp", null, ")")), "\u3072\u3089\u304F"));
+  if (phase === 'join') return React.createElement(CenterCard, {
+    icon: "\uD83C\uDF92"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-2"
+  }, statusInfo.tenantName || 'クラス', " \u306B", React.createElement("ruby", null, "\u53C2\u52A0", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.5em]"
+  }, "\u3055\u3093\u304B"), React.createElement("rp", null, ")")), "\u3059\u308B"), React.createElement("p", {
+    className: "text-sm text-gray-500 font-medium leading-relaxed mb-6"
+  }, React.createElement("ruby", null, "\u540D\u524D", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u306A\u307E\u3048"), React.createElement("rp", null, ")")), "\u3092", React.createElement("ruby", null, "\u5165\u529B", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u306B\u3085\u3046\u308A\u3087\u304F"), React.createElement("rp", null, ")")), "\u3057\u3066\u3001", React.createElement("ruby", null, "\u53C2\u52A0", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u3055\u3093\u304B"), React.createElement("rp", null, ")")), "\u30DC\u30BF\u30F3\u3092\u304A\u3057\u3066\u306D\u3002"), statusInfo.joinOpen ? React.createElement(React.Fragment, null, React.createElement("input", {
+    type: "text",
+    value: joinName,
+    onChange: e => setJoinName(e.target.value),
+    placeholder: "\u306A\u307E\u3048\uFF08\u4F8B: \u3084\u307E\u3060 \u305F\u308D\u3046\uFF09",
+    className: "w-full border-2 border-orange-100 rounded-2xl p-4 text-base outline-none focus:border-orange-400 bg-white font-bold mb-4 transition-colors text-center"
+  }), React.createElement("button", {
+    onClick: handleJoin,
+    disabled: server.isLoading,
+    className: "w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50"
+  }, "\u270B \u30AF\u30E9\u30B9\u306B", React.createElement("ruby", null, "\u53C2\u52A0", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.5em]"
+  }, "\u3055\u3093\u304B"), React.createElement("rp", null, ")")), "\u3059\u308B")) : React.createElement("p", {
+    className: "text-sm font-bold text-red-500 bg-red-50 px-4 py-3 rounded-xl"
+  }, "\u3044\u307E\u306F\u53C2\u52A0\u306E\u53D7\u4ED8\u304C\u6B62\u307E\u3063\u3066\u3044\u307E\u3059\u3002\u5148\u751F\u306B\u78BA\u8A8D\u3057\u3066\u306D\u3002"), server.toast && React.createElement(Toast, {
+    message: server.toast.message,
+    type: server.toast.type,
+    onClose: () => server.setToast(null)
+  }));
+  if (phase === 'pending') return React.createElement(CenterCard, {
+    icon: "\u23F3"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, React.createElement("ruby", null, "\u5148\u751F", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.5em]"
+  }, "\u305B\u3093\u305B\u3044"), React.createElement("rp", null, ")")), "\u306E", React.createElement("ruby", null, "\u627F\u8A8D", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.5em]"
+  }, "\u3057\u3087\u3046\u306B\u3093"), React.createElement("rp", null, ")")), "\u3092\u307E\u3063\u3066\u3044\u307E\u3059"), React.createElement("p", {
+    className: "text-sm text-gray-500 font-medium leading-relaxed mb-6"
+  }, React.createElement("ruby", null, "\u5148\u751F", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u305B\u3093\u305B\u3044"), React.createElement("rp", null, ")")), "\u304COK\u3057\u305F\u3089", React.createElement("ruby", null, "\u4F7F", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u3064\u304B"), React.createElement("rp", null, ")")), "\u3048\u308B\u3088\u3046\u306B\u306A\u308B\u3088\u3002", React.createElement("br", null), "\u3057\u3070\u3089\u304F\u3057\u3066\u304B\u3089\u3001\u3082\u3046", React.createElement("ruby", null, "\u4E00\u5EA6", React.createElement("rp", null, "("), React.createElement("rt", {
+    className: "text-[0.6em]"
+  }, "\u3044\u3061\u3069"), React.createElement("rp", null, ")")), "\u305F\u3081\u3057\u3066\u306D\u3002"), React.createElement("button", {
+    onClick: () => {
+      setPhase('connecting');
+      checkStatus();
+    },
+    className: "w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all"
+  }, "\u3082\u3046\u4E00\u5EA6\u305F\u3057\u304B\u3081\u308B"));
+  return React.createElement("div", {
+    className: "h-screen w-full flex flex-col bg-gray-50 text-gray-800 font-sans selection:bg-orange-200"
+  }, React.createElement("header", {
+    className: "flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-orange-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]"
+  }, React.createElement("div", {
+    className: "flex items-center gap-2 md:gap-3 min-w-0"
+  }, React.createElement("div", {
+    className: "p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-orange-400 to-orange-500"
+  }, React.createElement(Icon, {
+    path: Icons.Book,
+    className: "w-5 h-5 md:w-6 md:h-6"
+  })), React.createElement("h1", {
+    className: "text-lg md:text-2xl font-black tracking-tight truncate text-orange-700"
+  }, "\u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("span", {
+    "aria-hidden": "true",
+    className: "hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"
+  }), " ", React.createElement("span", {
+    className: "text-gray-500 text-sm md:text-lg hidden sm:inline"
+  }, data.tenantName))), React.createElement("div", {
+    className: "flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"
+  }, React.createElement(Icon, {
+    path: Icons.User,
+    className: "w-4 h-4 text-gray-500 shrink-0"
+  }), " ", React.createElement("span", {
+    className: "truncate"
+  }, data.user.name, " \u3055\u3093"))), React.createElement("main", {
+    className: "flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"
+  }, React.createElement("div", {
+    className: "max-w-[1400px] mx-auto h-full"
+  }, React.createElement(StudentApp, {
+    data: data,
+    server: server,
+    refresh: sync
+  }))), React.createElement("footer", {
+    className: "flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm"
+  }, React.createElement("span", null, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
+    href: "https://note.com/cute_borage86",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity"
+  }, "GIGA\u5C71"))));
+};
+const App = () => {
+  useEffect(() => {
+    if (window.notifyShellReady) window.notifyShellReady();
+  }, []);
+  return window.BOOT.mode === 'member' ? React.createElement(MemberRoot, null) : React.createElement(OwnerRoot, null);
+};
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App, null));
+</script>
