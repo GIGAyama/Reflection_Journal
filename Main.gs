@@ -151,7 +151,22 @@ function doGet(e) {
     // GAS は frame-ancestors の限定ができないため ALLOWALL 一択。その代償として
     // ID トークン検証（Auth.gs）とシェル側 origin 検証を必須の防御線とする。
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+    // ⚠️ viewport は index.html の <meta> にもある。addMetaTag はサーバー側の処理なので、
+    //    index.html だけ直しても反映されない。必ず両方を同じ値にすること。
+    //    拡大は禁止しない（誤ズーム防止より、見えづらい子が拡大できない害のほうが大きい）。
+    //    viewport-fit=cover は GAS が画面を iframe で包むため、両方に要る。
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+}
+
+/**
+ * HTML ファイルを本体へ差し込む。GAS には .gs と .html しか置けないため、
+ * CSS も JavaScript もライブラリも .html に包んで持つ。
+ *
+ * vendor / css / app は npm run build が作る生成物。手で編集しないこと
+ * （原本は src/app.jsx・tools/extra.css・tailwind.config.js）。
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
 /**
