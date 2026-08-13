@@ -6,6 +6,23 @@ function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+test('ブラウザ標準fetchを正しいglobalThisレシーバーで呼び出す', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = function (url, options) {
+    assert.equal(this, globalThis);
+    calls.push({ url: String(url), options });
+    return Promise.resolve(jsonResponse({ files: [] }));
+  };
+  try {
+    const client = new DriveClient('token-value');
+    await client.listClasses();
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('クラス一覧はdrive.file向けappProperties検索を使う', async () => {
   const calls = [];
   const client = new DriveClient('token-value', async (url, options) => {
