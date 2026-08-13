@@ -2,7 +2,7 @@
 // ふりかえりジャーナル — PWAシェル Service Worker
 // ------------------------------------------------------------
 // シェル資産（index.html / config.js / manifest / アイコン）のみをキャッシュする
-// 最小構成。GAS 側（script.google.com / googleusercontent.com）は
+// 最小構成。Google Identity / Drive APIなどの外部通信は
 // 認証・データがあるため【絶対にキャッシュしない】。
 // ============================================================
 
@@ -20,7 +20,7 @@
  *
  * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const APP_VERSION = 'v8';   // ← リリースごとに必ず上げる
+const APP_VERSION = 'v9';   // Android Chromeのfetch修正版を確実に配信
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
@@ -73,7 +73,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // 同一オリジン（= GitHub Pages のシェル資産）以外は一切触らない。
-  // GAS へのリクエストは常にネットワーク直行。
+  // Google APIへのリクエストは常にネットワーク直行。
   if (url.origin !== self.location.origin) return;
   if (event.request.method !== 'GET') return;
 
