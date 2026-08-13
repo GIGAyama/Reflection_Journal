@@ -19,10 +19,12 @@ GitHub Pages（画面・Googleログイン）
 - 児童の本文と画像は児童自身が所有し、先生へ直接共有します。
 - テーマと先生のおへんじは先生自身が所有し、対象児童へ直接共有します。
 - 運営者のGoogleアカウントはデータの所有者にも共有先にもなりません。
-- OAuthスコープは `drive.file`。アプリが作成したファイルだけを扱います。
+- 書込みは `drive.file` に限定し、アプリが作成したファイルだけを変更します。
+- 別アカウントから共有された提出・おへんじの読込みには `drive.readonly` を段階的に要求します。コードは `rjType` 付き専用ファイルだけを検索します。
 - アクセストークンはメモリ内だけで使い、ブラウザストレージへ保存しません。
 
 詳しい権限境界は [Driveネイティブ設計](docs/DRIVE_NATIVE_ARCHITECTURE.md) を参照してください。
+複数アカウント同期に必要な運営者作業は [OAuth設定手順](docs/OAUTH_SHARED_RECORDS_SETUP.md) を参照してください。
 
 ## 主な機能
 
@@ -57,12 +59,16 @@ GitHub Pages（画面・Googleログイン）
 
 1. Google Cloudでプロジェクトを作成し、Google Drive APIを有効化します。
 2. OAuth同意画面を設定します。
-3. OAuthクライアントを「ウェブアプリケーション」で作成します。
-4. 承認済みJavaScript生成元へ `https://gigayama.github.io` を登録します。
-5. `docs/config.js` の `googleClientId` と `publicEntryUrl` を設定します。
-6. GitHub Pagesの公開元を `main` ブランチの `/docs` にします。
+3. ［データアクセス］へ次のDriveスコープを追加します。
+   - `https://www.googleapis.com/auth/drive.file`
+   - `https://www.googleapis.com/auth/drive.readonly`
+4. 外部ユーザーが利用する本番アプリとして、ブランド確認と制限付きスコープのOAuth審査を申請します。Googleの判定によりセキュリティ評価が必要になる場合があります。
+5. OAuthクライアントを「ウェブアプリケーション」で作成します。
+6. 承認済みJavaScript生成元へ `https://gigayama.github.io` を登録します。
+7. `docs/config.js` の `googleClientId` と `publicEntryUrl` を設定します。
+8. GitHub Pagesの公開元を `main` ブランチの `/docs` にします。
 
-学校が18歳未満ユーザーの未構成サードパーティアプリを制限している場合、Workspace管理者が共通OAuthクライアントIDを信頼済みアプリとして許可します。学校ごとのGAS配布やデプロイは不要です。
+`drive.readonly` はGoogleの制限付きスコープです。審査完了前は外部の個人アカウントに「未確認のアプリ」が表示されたり、テストユーザー数が制限されたりします。学校が18歳未満ユーザーや制限付きスコープを制限している場合、Workspace管理者が共通OAuthクライアントIDと両スコープを信頼済みとして許可します。学校ごとのGAS配布やデプロイは不要です。
 
 ## 開発
 
@@ -98,4 +104,4 @@ CIではGoogle Workspaceの組織ポリシーを再現できません。個人�
 5. 児童がテーマと返却コメントを受け取る。
 6. ブラウザを閉じた後、再ログインでDrive上のクラスが復元される。
 
-特に、同じOAuthクライアントで別ユーザーが作成・共有したファイルを `drive.file` + `sharedWithMe` で取得できることを確認します。
+特に、別ユーザーが作成して共有したファイルを `drive.readonly` + `sharedWithMe` で取得できること、書込みがアプリ作成ファイルに限られることを確認します。
