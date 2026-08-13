@@ -17,6 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** 壊し方と、そのとき落ちてほしい検査 ID */
 const CASES = [
   ['B6',  'index.html',      (s) => s.replace('</head>', '<script src="https://cdn.tailwindcss.com"></script></head>')],
+  ['B8',  'src/app.jsx',     (s) => s.replace('const makeQrModel', "const externalQr = 'https://api.qrserver.com';\n    const makeQrModel")],
   ['D14', 'index.html',      (s) => s.replace('initial-scale=1.0, viewport-fit=cover', 'initial-scale=1.0, maximum-scale=1.0, user-scalable=no')],
   ['D1',  'Main.gs',         (s) => s.replace(", viewport-fit=cover'", "'")],
   ['F4',  'tools/extra.css', (s) => s.replace(/rt \{ color: #5f6368; font-weight: 500; \}/, 'rt { color: #666; }')

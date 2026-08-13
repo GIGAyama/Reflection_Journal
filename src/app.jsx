@@ -104,6 +104,39 @@ const { useState, useEffect, useRef, useMemo } = React;
       Refresh: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
     };
 
+    // 児童用URLを第三者のQR生成サービスへ送らず、このブラウザ内だけでQR化する。
+    // qr.html は先生ポータルにだけ読み込まれるため、児童端末の初回JSは増えない。
+    const makeQrModel = (value) => {
+      if (!value || typeof window.qrcode !== 'function') throw new Error('QR生成機能を読み込めませんでした');
+      const qr = window.qrcode(0, 'M');
+      qr.addData(String(value), 'Byte');
+      qr.make();
+      const count = qr.getModuleCount();
+      const path = [];
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (qr.isDark(row, col)) path.push(`M${col} ${row}h1v1H${col}z`);
+        }
+      }
+      return { count, path: path.join('') };
+    };
+
+    const QrCode = ({ model, size = 180 }) => {
+      if (!model) {
+        return <div role="status" className="w-[180px] h-[180px] rounded-2xl border border-red-200 bg-red-50 text-red-700 text-xs font-bold p-4 flex items-center justify-center text-center">QRコードを生成できませんでした。URLをコピーして配布してください。</div>;
+      }
+      const quietZone = 4;
+      const viewSize = model.count + quietZone * 2;
+      return (
+        <svg role="img" aria-label="児童用URLのQRコード" width={size} height={size}
+          viewBox={`${-quietZone} ${-quietZone} ${viewSize} ${viewSize}`}
+          className="rounded-2xl border border-gray-200 shadow-sm bg-white" shapeRendering="crispEdges">
+          <rect x={-quietZone} y={-quietZone} width={viewSize} height={viewSize} fill="white" />
+          <path d={model.path} fill="#111827" />
+        </svg>
+      );
+    };
+
     const Toast = ({ message, type, onClose }) => {
       useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, []);
       // 保存できた・できなかったを画面で見ていない人にも伝える。
@@ -600,7 +633,7 @@ const { useState, useEffect, useRef, useMemo } = React;
       // 名簿管理用ステート（状態列 = active/pending を含む）
       const [rosterData, setRosterData] = useState(data.rosterAll || []);
       const [apiKeyInput, setApiKeyInput] = useState("");
-      const [copied, setCopied] = useState(false);
+      const [copiedItem, setCopiedItem] = useState('');
       useDismissable(!!activeJournal, () => setActiveJournal(null));
 
       useEffect(() => {
@@ -612,6 +645,10 @@ const { useState, useEffect, useRef, useMemo } = React;
 
       const vitalData = useMemo(() => analyzeVitals(journals, data.classRoster), [journals, data.classRoster]);
       const pendingMembers = (data.pendingMembers || []);
+      const inviteQr = useMemo(() => {
+        try { return makeQrModel(data.tenant.memberUrl); }
+        catch (e) { return null; }
+      }, [data.tenant.memberUrl]);
 
       const filteredJournals = useMemo(() => {
         return journals.filter(j => {
@@ -758,13 +795,39 @@ const { useState, useEffect, useRef, useMemo } = React;
         else showToast(failMsg(res, '保存できませんでした'), 'error');
       };
 
-      const handleCopyUrl = async () => {
+      const copyInviteValue = async (value, item, label) => {
         try {
-          await navigator.clipboard.writeText(data.tenant.memberUrl);
-          setCopied(true); setTimeout(() => setCopied(false), 2000);
+          if (!navigator.clipboard || !window.isSecureContext) throw new Error('clipboard unavailable');
+          await navigator.clipboard.writeText(value);
+          setCopiedItem(item);
+          showToast(`${label}をコピーしました`);
+          setTimeout(() => setCopiedItem(current => current === item ? '' : current), 2000);
         } catch (e) {
-          window.prompt('この URL をコピーしてください', data.tenant.memberUrl);
+          window.prompt(`この${label}をコピーしてください`, value);
         }
+      };
+
+      const handleCopyUrl = () => copyInviteValue(data.tenant.memberUrl, 'url', 'URL');
+      const handleCopyCode = () => copyInviteValue(data.tenant.tenantCode, 'code', 'クラスコード');
+      const handleCopyInvitation = () => copyInviteValue(
+        `「${data.tenant.tenantName}」のふりかえりジャーナルに参加してください。\nクラスコード: ${data.tenant.tenantCode}\n児童用URL: ${data.tenant.memberUrl}`,
+        'invitation',
+        '招待文'
+      );
+
+      const handleDownloadQr = () => {
+        if (!inviteQr) return showToast('QRコードを生成できませんでした', 'error');
+        const quietZone = 4;
+        const viewSize = inviteQr.count + quietZone * 2;
+        const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
+        const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+        const a = document.createElement('a');
+        const safeName = String(data.tenant.tenantName || 'クラス').replace(/[\\/:*?"<>|]/g, '_');
+        a.href = url;
+        a.download = `ふりかえりジャーナル_${safeName}_${data.tenant.tenantCode}_QR.svg`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        showToast('QR画像を保存しました');
       };
 
       const handleRegenerateCode = async () => {
@@ -983,17 +1046,28 @@ const { useState, useEffect, useRef, useMemo } = React;
           {activeTab === 'admin' && (
              <div className="flex flex-col gap-6 animate-fade-in h-full">
 
-                {/* 🎫 児童用URL（クラスコード） */}
+                {/* 🎫 児童の招待 */}
                 <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100">
                   <div className="flex flex-col md:flex-row gap-6 items-start">
                     <div className="flex-1 w-full">
                       <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg mb-2">
-                        <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg"><Icon path={Icons.Link} className="w-5 h-5"/></div> 児童用URL（クラスコード: <span className="font-mono tracking-widest">{data.tenant.tenantCode}</span>）
+                        <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg"><Icon path={Icons.Link} className="w-5 h-5"/></div> 児童をクラスに招待
                       </h3>
-                      <p className="text-sm text-gray-500 mb-4 leading-relaxed">このURLを児童に配ると、児童はGoogleでサインインするだけで参加できます。児童にスプレッドシートの権限は一切付与されません。</p>
+                      <p className="text-sm text-gray-500 mb-4 leading-relaxed">クラスコード、専用URL、QRコードのどれでも招待できます。児童はGoogleでサインインするだけで参加でき、スプレッドシートの権限は付与されません。</p>
+                      <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="flex-1">
+                          <p className="text-xs font-bold text-orange-700 mb-1">クラスコード</p>
+                          <p className="font-mono text-2xl font-black tracking-[0.2em] text-gray-900">{data.tenant.tenantCode}</p>
+                        </div>
+                        <button onClick={handleCopyCode} className={`min-h-[44px] shrink-0 font-bold px-4 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copiedItem === 'code' ? 'bg-emerald-600 text-white' : 'bg-white hover:bg-orange-100 text-orange-800 border border-orange-200'}`}><Icon path={copiedItem === 'code' ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copiedItem === 'code' ? 'コピーしました' : 'コードをコピー'}</button>
+                      </div>
                       <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                        <input type="text" readOnly value={data.tenant.memberUrl} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none"/>
-                        <button onClick={handleCopyUrl} className={`shrink-0 font-bold px-6 py-3 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-gray-800 hover:bg-black text-white'}`}><Icon path={copied ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copied ? 'コピーしました' : 'URLをコピー'}</button>
+                        <label className="flex-1"><span className="sr-only">児童用URL</span><input type="text" readOnly value={data.tenant.memberUrl} onFocus={e=>e.target.select()} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none focus:ring-2 focus:ring-blue-500"/></label>
+                        <button onClick={handleCopyUrl} className={`shrink-0 font-bold px-6 py-3 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copiedItem === 'url' ? 'bg-emerald-600 text-white' : 'bg-gray-800 hover:bg-black text-white'}`}><Icon path={copiedItem === 'url' ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copiedItem === 'url' ? 'コピーしました' : 'URLをコピー'}</button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        <button onClick={handleCopyInvitation} className={`min-h-[44px] text-sm font-bold rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2 ${copiedItem === 'invitation' ? 'bg-emerald-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200'}`}><Icon path={copiedItem === 'invitation' ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copiedItem === 'invitation' ? 'コピーしました' : '招待文をコピー'}</button>
+                        <a href={data.tenant.memberUrl} target="_blank" rel="noopener noreferrer" className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Link} className="w-4 h-4"/> 児童画面を確認</a>
                       </div>
                       <div className="flex flex-wrap gap-3 items-center">
                         <label className="flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
@@ -1005,9 +1079,10 @@ const { useState, useEffect, useRef, useMemo } = React;
                         <button onClick={()=>setConfirmConfig({isOpen:true, title:"コードの再発行", text:"クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？", confirmText:"再発行する", onConfirm: handleRegenerateCode, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="min-h-[44px] text-sm font-bold text-gray-600 hover:text-red-600 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> コード再発行</button>
                       </div>
                     </div>
-                    <div className="shrink-0 mx-auto md:mx-0 text-center">
-                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(data.tenant.memberUrl)}`} width="160" height="160" className="rounded-2xl border border-gray-200 shadow-sm" alt="児童用URLのQRコード"/>
-                      <p className="text-xs font-bold text-gray-500 mt-2">QRコードで配布</p>
+                    <div className="shrink-0 mx-auto md:mx-0 text-center flex flex-col items-center">
+                      <QrCode model={inviteQr} />
+                      <p className="text-xs font-bold text-gray-500 mt-2 mb-2">読み取ると児童用URLが開きます</p>
+                      <button onClick={handleDownloadQr} disabled={!inviteQr} className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"><Icon path={Icons.Download} className="w-4 h-4"/> QR画像を保存</button>
                     </div>
                   </div>
                 </div>

@@ -171,7 +171,7 @@ https://github.com/GIGAyama/Reflection_Journal
 
 ![書き出しと片づけ](images/12-teacher-export.png)
 
-校内のフィルタリングについてです。通してもらう必要があるのは、Googleのログイン、Googleのアプリを動かしている場所、それにこのアプリを置いてあるGitHubの公開ページです。具体的には accounts.google.com、script.google.com、googleusercontent.com、docs.google.com、それから配布ページのアドレスになります。QRコードの絵だけは api.qrserver.com という外のサービスで作っているので、ここが塞がれているとQRの部分だけ出ません。URLのコピーは使えます。AIを使う場合は generativelanguage.googleapis.com も要ります。
+校内のフィルタリングについてです。通してもらう必要があるのは、Googleのログイン、Googleのアプリを動かしている場所、それにこのアプリを置いてあるGitHubの公開ページです。具体的には accounts.google.com、script.google.com、googleusercontent.com、docs.google.com、それから配布ページのアドレスになります。QRコードは先生のブラウザ内で作るため、外部のQR生成サービスを通す必要はありません。AIを使う場合は generativelanguage.googleapis.com も要ります。
 
 画面を動かす部品は、すべてアプリの中に入れてあります。以前はよくある配信元から読みこむ作りで、初回に三千キロバイトほど読んでいました。学校のネットワークがそこを塞いでいると、子どもの画面が白いまま何も出ません。今は自分側に持たせて、初回に読むぶんは278.1キロバイトです。文字の形を決めるフォントだけは外から読みますが、届かなくても字の形が変わるだけで、読めなくなることはありません。
 

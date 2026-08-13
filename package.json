@@ -8,12 +8,14 @@
   "scripts": {
     "build": "node tools/build.mjs",
     "check": "node scripts/check-project.mjs",
-    "verify": "npm run build && node scripts/check-generated.mjs && npm run check"
+    "test": "node scripts/test-qr.mjs",
+    "verify": "npm run build && node scripts/check-generated.mjs && npm test && npm run check"
   },
   "devDependencies": {
     "@babel/core": "7.28.4",
     "@babel/preset-react": "7.27.1",
     "canvas-confetti": "1.6.0",
+    "qrcode-generator": "1.4.4",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "tailwindcss": "3.4.17"

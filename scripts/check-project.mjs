@@ -43,6 +43,19 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
              : pass('B6', 'CDN から取る実行コード 0 件');
 }
 
+// ── B8: QRコードはローカル生成し、児童用URLを第三者へ送らない ──
+{
+  const source = read('src/app.jsx');
+  const index = read('index.html');
+  if (/api\.qrserver\.com|chart\.googleapis\.com.*cht=qr/i.test(source + index)) {
+    fail('B8', 'QR生成のため児童用URLを外部サービスへ送っている');
+  } else if (!existsSync(join(ROOT, 'qr.html')) || !/bootMode\s*===\s*['"]owner['"]/.test(index)) {
+    fail('B8', 'ローカルQR生成コードが教師ポータル専用で読み込まれていない');
+  } else {
+    pass('B8', 'QRはブラウザ内で生成し、生成コードは教師ポータルだけに配信');
+  }
+}
+
 // ── D14 / D1: 拡大禁止と viewport-fit（GAS は .gs 側の addMetaTag も見る） ──
 {
   const targets = [...htmlFiles, ...gsFiles];
@@ -176,7 +189,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 // ── F6: 1ファイル 5,000行 / 400KB ──
 {
   const bad = [];
-  for (const f of [...htmlFiles, 'src/app.jsx', ...gsFiles]) {
+  for (const f of [...htmlFiles, 'qr.html', 'src/app.jsx', ...gsFiles]) {
     if (!existsSync(join(ROOT, f))) continue;
     const s = read(f);
     if (s.split('\n').length > 5000 || size(f) > 400 * 1024) bad.push(f);

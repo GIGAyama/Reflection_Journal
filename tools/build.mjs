@@ -11,6 +11,7 @@
  *
  * 生成物（手で編集しない）:
  *   vendor.html … react / react-dom / canvas-confetti（npm の実バイト）
+ *   qr.html     … QRコード生成（先生ポータルだけに条件付きで読み込む）
  *   css.html    … Tailwind が生成した CSS + tools/extra.css
  *   app.html    … src/app.jsx をコンパイルした JS
  *
@@ -51,6 +52,20 @@ for (const [name, rel] of VENDOR) {
 }
 writeFileSync(join(ROOT, 'vendor.html'), vendor);
 
+// ── ①-b qr.html：児童用URLを外部QRサービスへ送らず、ブラウザ内で生成する ──
+// QRは先生ポータルだけで使う。index.html 側で owner のときだけ include し、
+// 児童端末の初回JS（F5: 300KB以下）には一切含めない。
+const qrSource = readFileSync(join(ROOT, 'node_modules/qrcode-generator/qrcode.js'), 'utf8');
+const { code: qrCode } = transformSync(qrSource, {
+  comments: false,
+  compact: true,
+  minified: true,
+  babelrc: false,
+  configFile: false
+});
+writeFileSync(join(ROOT, 'qr.html'),
+  '<!-- 生成物。手で編集しない（npm run build で作り直す・先生ポータル専用） -->\n' + wrapScript(qrCode));
+
 // ── ② css.html：使うクラスだけを先に作る（ブラウザ内で CSS を生成しない） ──
 const tmp = mkdtempSync(join(tmpdir(), 'rj-build-'));
 const inCss = join(tmp, 'in.css');
@@ -79,6 +94,7 @@ writeFileSync(join(ROOT, 'app.html'),
 
 console.log('ビルド完了');
 console.log('  vendor.html', kb(vendor));
+console.log('  qr.html    ', kb(qrCode), '（先生ポータルのみ）');
 console.log('  css.html   ', kb(css));
 console.log('  app.html   ', kb(code));
 console.log('  合計       ', kb(vendor + css + code));
