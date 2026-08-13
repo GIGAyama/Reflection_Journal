@@ -58,6 +58,15 @@ test('教師所有チャンネルへテーマと返却を保存し、児童ポ�
   assert.equal(currentTheme(synced.themes, new Date(2026, 0, 6)), '今日できたこと');
 });
 
+test('文章ごとのおへんじを安全な形に整えて保存する', () => {
+  const klass = createClassRecord({ classId: 'class-1', classCode: 'ABC23456', className: '5年1組', teacher: { email: 'teacher@example.ed.jp', name: '先生' } });
+  const channel = setFeedback(createChannel({ classRecord: klass, member: { email: 'student@example.ed.jp', name: '児童' } }), 'journal-1', {
+    comment: 'よく考えました。',
+    highlights: [{ id: 'h1', start: 2, end: 8, text: '考えた', comment: 'ここが具体的です。', stamp: '⭐' }]
+  });
+  assert.deepEqual(channel.feedback['journal-1'].highlights[0], { id: 'h1', start: 2, end: 8, text: '考えた', comment: 'ここが具体的です。', stamp: '⭐' });
+});
+
 test('共有ポートフォリオを名簿へ統合し、分析とCSVを生成する', () => {
   const klass = createClassRecord({ classId: 'class-id', classCode: 'ABC23456', className: '6年1組', teacher: { email: 'teacher@example.ed.jp', name: '先生' } });
   klass.settings.approvalRequired = false;

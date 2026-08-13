@@ -35,3 +35,20 @@ jobs:
 
       - name: 品質ゲート自体が動いているか（わざと壊して落ちることを見る）
         run: node scripts/selftest-check.mjs
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: 基本依存を入れる
+        run: npm ci
+      - name: Chromiumテスト環境を入れる
+        run: |
+          npm install --no-save --package-lock=false @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+      - name: 児童・教師UIのE2Eと配置回帰テスト
+        run: npx playwright test

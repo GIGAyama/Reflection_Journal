@@ -30,8 +30,44 @@ test('完全移行した主要な教師・児童フローを含む', () => {
     'クラスの心の波',
     'CSVをダウンロード',
     '過去の自分と対話',
-    'ふりかえりを提出する'
+    'できた！ 先生にとどける'
   ]) assert.ok(app.includes(marker), `UIに「${marker}」がありません`);
+});
+
+test('PR #10の児童向け学習体験をDrive版で復元している', () => {
+  for (const marker of [
+    'JOURNAL_TEMPLATES',
+    'RANDOM_STARTERS',
+    'HINT_GROUPS',
+    'studentCalendar',
+    'unreadFeedbackJournals',
+    'openStudentJournal',
+    'celebrateSubmission',
+    '<ruby>'
+  ]) assert.ok(app.includes(marker), `児童UIに「${marker}」がありません`);
+  assert.match(css, /\.student-workspace\s*\{/);
+  assert.match(css, /\.lined-paper/);
+  assert.match(css, /\.feedback-alert/);
+  assert.match(css, /@keyframes confetti-fall/);
+});
+
+test('PR #10の教師支援・招待・PWA操作をDrive版で復元している', () => {
+  for (const marker of [
+    'submission-donut',
+    'quickFeedback',
+    'batchReturn',
+    'batchAiDrafts',
+    'addSelectionHighlight',
+    'class-switch',
+    'addBulkMembers',
+    'downloadQrCode',
+    'initPwaControls',
+    'SKIP_WAITING'
+  ]) assert.ok(app.includes(marker) || index.includes(marker), `復元UIに「${marker}」がありません`);
+  assert.match(index, /id="pwa-install"/);
+  assert.match(index, /id="pwa-update"/);
+  assert.match(css, /\.submission-donut/);
+  assert.match(css, /\.teacher-highlight/);
 });
 
 test('トップ画面は中央配置され、内部用語やクリックイベントを表示しない', () => {

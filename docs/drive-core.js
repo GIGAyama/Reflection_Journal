@@ -159,6 +159,14 @@ export function syncChannel(channel, classRecord, member, now = new Date().toISO
 export function setFeedback(channel, journalId, feedback, now = new Date().toISOString()) {
   const id = String(journalId || '');
   if (!id) throw new Error('ふりかえりIDがありません。');
+  const highlights = (Array.isArray(feedback.highlights) ? feedback.highlights : []).slice(0, 20).map((item, index) => ({
+    id: String(item?.id || `highlight-${index}`).slice(0, 100),
+    start: Math.max(0, Number.parseInt(item?.start, 10) || 0),
+    end: Math.max(0, Number.parseInt(item?.end, 10) || 0),
+    text: String(item?.text || '').slice(0, 1000),
+    comment: String(item?.comment || '').trim().slice(0, 1000),
+    stamp: String(item?.stamp || '').slice(0, 8)
+  })).filter((item) => item.end > item.start && item.text);
   return {
     ...channel,
     feedback: {
@@ -166,7 +174,7 @@ export function setFeedback(channel, journalId, feedback, now = new Date().toISO
       [id]: {
         comment: String(feedback.comment || '').trim().slice(0, 4000),
         stamp: String(feedback.stamp || '').slice(0, 8),
-        highlights: Array.isArray(feedback.highlights) ? feedback.highlights.slice(0, 20) : [],
+        highlights,
         returned: feedback.returned !== false,
         updatedAt: now
       }

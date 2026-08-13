@@ -20,7 +20,7 @@
  *
  * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const APP_VERSION = 'v11';  // 新しいアプリアイコンを画面とPWAへ配信
+const APP_VERSION = 'v12';  // PR #10の学習体験とPWA更新UIを配信
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
