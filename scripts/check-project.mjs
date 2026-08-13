@@ -26,8 +26,9 @@ const pass = (id, msg) => ok.push(`${id}: ${msg}`);
 const stripComments = (s) =>
   s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
-const htmlFiles = ['index.html', 'docs/index.html', 'docs/diag.html', 'docs/offline.html'];
-const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
+const htmlFiles = ['docs/index.html', 'docs/diag.html', 'docs/offline.html'];
+// GitHub Pages + Drive API が本番実装。ルート直下の旧GAS資産は品質判定に含めない。
+const gsFiles = [];
 
 // ── B6: CDN から取る実行コードが 0 バイト ──
 {
@@ -45,12 +46,12 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── B8: QRコードはローカル生成し、児童用URLを第三者へ送らない ──
 {
-  const source = read('src/app.jsx');
-  const index = read('index.html');
+  const source = read('docs/drive-app.js');
+  const index = read('docs/index.html');
   if (/api\.qrserver\.com|chart\.googleapis\.com.*cht=qr/i.test(source + index)) {
     fail('B8', 'QR生成のため児童用URLを外部サービスへ送っている');
-  } else if (!existsSync(join(ROOT, 'qr.html')) || !/bootMode\s*===\s*['"]owner['"]/.test(index)) {
-    fail('B8', 'ローカルQR生成コードが教師ポータル専用で読み込まれていない');
+  } else if (!existsSync(join(ROOT, 'docs/qrcode.js')) || /<script[^>]+qrcode\.js/.test(index) || !/ensureQr\s*\(\)/.test(source)) {
+    fail('B8', 'ローカルQR生成コードがクラス設定画面からの遅延読込になっていない');
   } else {
     pass('B8', 'QRはブラウザ内で生成し、生成コードは教師ポータルだけに配信');
   }
@@ -58,7 +59,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── D14 / D1: 拡大禁止と viewport-fit（GAS は .gs 側の addMetaTag も見る） ──
 {
-  const targets = [...htmlFiles, ...gsFiles];
+  const targets = htmlFiles;
   const zoomBlocked = targets.filter((f) => /user-scalable\s*=\s*no|maximum-scale\s*=\s*1/.test(read(f)));
   zoomBlocked.length ? fail('D14', `拡大を禁止している: ${zoomBlocked.join(', ')}`)
                      : pass('D14', '拡大を禁止していない');
@@ -73,15 +74,12 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
   const missing = viewportDecls.filter((v) => !/viewport-fit\s*=\s*cover/.test(v.value));
   missing.length ? fail('D1', `viewport-fit=cover が無い: ${missing.map((m) => m.file).join(', ')}`)
                  : pass('D1', `viewport 宣言 ${viewportDecls.length} 件すべてに viewport-fit=cover`);
-  if (!viewportDecls.some((v) => /\.gs$/.test(v.file))) {
-    notes.push('D1: .gs 側に viewport の宣言が見つからない（doGet で addMetaTag していない構成なら問題なし）');
-  }
 }
 
 // ── D2: 100vh の単独使用（@supports のフォールバックは正しい書き方なので見逃す） ──
 {
   const bad = [];
-  for (const f of [...htmlFiles, 'tools/extra.css']) {
+  for (const f of [...htmlFiles, 'docs/drive.css']) {
     if (!existsSync(join(ROOT, f))) continue;
     const s = stripComments(read(f));
     for (const m of s.matchAll(/100vh/g)) {
@@ -98,8 +96,8 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── F4: rt（ふりがな）の色の決め打ち ──
 {
-  const css = existsSync(join(ROOT, 'tools/extra.css')) ? read('tools/extra.css') : '';
-  const jsx = existsSync(join(ROOT, 'src/app.jsx')) ? read('src/app.jsx') : '';
+  const css = read('docs/drive.css');
+  const jsx = read('docs/drive-app.js');
   const flat = css.replace(/\s+/g, ' ');
   const hardCodedInJsx = /<rt[^>]*className="[^"]*text-(gray|slate|zinc|neutral)-\d/.test(jsx);
 
@@ -118,7 +116,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── D10 / D11: 動きの配慮とハイコントラスト ──
 {
-  const css = [existsSync(join(ROOT, 'tools/extra.css')) ? read('tools/extra.css') : '', read('docs/index.html')].join('\n');
+  const css = [read('docs/drive.css'), read('docs/index.html')].join('\n');
   /prefers-reduced-motion/.test(css) ? pass('D10', 'prefers-reduced-motion あり')
                                      : fail('D10', 'prefers-reduced-motion が無い');
   if (/animation-duration:\s*0\s*(!important)?\s*;/.test(css)) {
@@ -172,7 +170,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── C5: localStorage.clear() ──
 {
-  const files = [...htmlFiles, 'src/app.jsx'].filter((f) => existsSync(join(ROOT, f)));
+  const files = [...htmlFiles, 'docs/drive-app.js'].filter((f) => existsSync(join(ROOT, f)));
   const bad = files.filter((f) => /localStorage\.clear\s*\(/.test(stripComments(read(f))));
   bad.length ? fail('C5', `localStorage.clear() を使っている: ${bad.join(', ')}`)
              : pass('C5', 'localStorage.clear() を使っていない');
@@ -180,7 +178,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── F5: 初回 JS 300KB 以下 ──
 {
-  const js = ['vendor.html', 'app.html'].filter((f) => existsSync(join(ROOT, f))).reduce((s, f) => s + size(f), 0);
+  const js = ['docs/drive-app.js', 'docs/drive-api.js', 'docs/drive-core.js'].reduce((s, f) => s + size(f), 0);
   const kb = js / 1024;
   kb <= 300 ? pass('F5', `初回 JS ${kb.toFixed(1)} KB（300KB 以下）`)
             : fail('F5', `初回 JS が ${kb.toFixed(1)} KB（300KB を超えている）`);
@@ -189,7 +187,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 // ── F6: 1ファイル 5,000行 / 400KB ──
 {
   const bad = [];
-  for (const f of [...htmlFiles, 'qr.html', 'src/app.jsx', ...gsFiles]) {
+  for (const f of [...htmlFiles, 'docs/qrcode.js', 'docs/drive-app.js', 'docs/drive-core.js', 'docs/drive-api.js']) {
     if (!existsSync(join(ROOT, f))) continue;
     const s = read(f);
     if (s.split('\n').length > 5000 || size(f) > 400 * 1024) bad.push(f);

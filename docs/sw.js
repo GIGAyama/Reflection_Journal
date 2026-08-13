@@ -20,12 +20,17 @@
  *
  * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const APP_VERSION = 'v6';   // ← リリースごとに必ず上げる
+const APP_VERSION = 'v8';   // ← リリースごとに必ず上げる
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',
   './diag.html',
+  './drive.css',
+  './drive-core.js',
+  './drive-api.js',
+  './drive-app.js',
+  './qrcode.js',
   './config.js',
   './manifest.webmanifest',
   './offline.html',

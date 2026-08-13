@@ -16,17 +16,17 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** 壊し方と、そのとき落ちてほしい検査 ID */
 const CASES = [
-  ['B6',  'index.html',      (s) => s.replace('</head>', '<script src="https://cdn.tailwindcss.com"></script></head>')],
-  ['B8',  'src/app.jsx',     (s) => s.replace('const makeQrModel', "const externalQr = 'https://api.qrserver.com';\n    const makeQrModel")],
-  ['D14', 'index.html',      (s) => s.replace('initial-scale=1.0, viewport-fit=cover', 'initial-scale=1.0, maximum-scale=1.0, user-scalable=no')],
-  ['D1',  'Main.gs',         (s) => s.replace(", viewport-fit=cover'", "'")],
-  ['F4',  'tools/extra.css', (s) => s.replace(/rt \{ color: #5f6368; font-weight: 500; \}/, 'rt { color: #666; }')
-                                     .replace(/\[class\*="text-white"\] rt,/, '')],
+  ['B6',  'docs/index.html',      (s) => s.replace('</head>', '<script src="https://cdn.tailwindcss.com"></script></head>')],
+  ['B8',  'docs/drive-app.js',    (s) => s.replace('function ensureQr()', "const externalQr = 'https://api.qrserver.com';\nfunction ensureQr()")],
+  ['D14', 'docs/index.html',      (s) => s.replace('initial-scale=1, viewport-fit=cover', 'initial-scale=1, maximum-scale=1, user-scalable=no')],
+  ['D1',  'docs/index.html',      (s) => s.replace(', viewport-fit=cover', '')],
+  ['F4',  'docs/drive.css',       (s) => s.replace(/rt \{ color: #5f6368; font-weight: 500; \}/, 'rt { color: #666; }')
+                                     .replace(/, \[class\*="text-white"\] rt/, '')],
   ['E6',  'docs/sw.js',      (s) => s.replace("self.clients.claim();", "localStorage.removeItem('x'); self.clients.claim();")],
   ['E5',  'docs/sw.js',      (s) => s.replace(".filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)", ".filter((k) => k !== CACHE_NAME)")],
-  ['D10', 'tools/extra.css', (s) => s.replace('animation-duration: .01ms !important;', 'animation-duration: 0 !important;')],
+  ['D10', 'docs/drive.css', (s) => s.replace('animation-duration: .01ms !important;', 'animation-duration: 0 !important;')],
   ['E1',  'docs/manifest.webmanifest', (s) => s.replace('"id": "/Reflection_Journal/"', '"id": "/"')],
-  ['C5',  'src/app.jsx',     (s) => s.replace('localStorage.removeItem(storeKey(\'draft\'));', 'localStorage.clear();')]
+  ['C5',  'docs/drive-app.js', (s) => s.replace('localStorage.removeItem(draftKey());', 'localStorage.clear();')]
 ];
 
 let bad = 0;

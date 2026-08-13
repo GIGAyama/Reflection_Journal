@@ -1,5 +1,5 @@
 /**
- * 生成物（vendor.html / qr.html / css.html / app.html）が原本と食い違っていないかを見る。
+ * 生成物（docs/qrcode.js）がnpmに固定した原本と食い違っていないかを見る。
  *
  * 原本を直したのにビルドを走らせずに push すると、GAS には古い画面が出たままになる。
  * その食い違いは、動かしてみるまで誰にも見えない。CI で必ず止める。
@@ -8,7 +8,7 @@
  */
 import { execSync } from 'node:child_process';
 
-const GENERATED = ['vendor.html', 'qr.html', 'css.html', 'app.html'];
+const GENERATED = ['docs/qrcode.js'];
 
 let diff = '';
 try {
@@ -20,7 +20,7 @@ try {
 
 if (diff) {
   console.error('❌ 生成物が原本と食い違っています:\n  ' + diff.split('\n').join('\n  '));
-  console.error('\n原本（src/app.jsx・tools/extra.css・tailwind.config.js）を直したら、');
+console.error('\n依存関係または tools/build.mjs を直したら、');
   console.error('必ず `npm run build` を走らせてから push してください。');
   process.exit(1);
 }

@@ -1,12 +1,4 @@
-<!DOCTYPE html>
-<!--
-  接続診断ページ — デプロイ A / B の ?diag=1 エンドポイントを Cookie なし
-  （credentials: 'omit'）で fetch し、設定ミスを切り分ける。
-
-  デプロイ B の JSON が Cookie なしで読めた時点で「アクセスできるユーザー: 全員
-  （匿名アクセス可）」が確定する。ログイン必須設定だと Google がログイン画面へ
-  リダイレクトするため fetch 自体が失敗する。
--->
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
@@ -14,80 +6,44 @@
   <title>接続診断 — ふりかえりジャーナル</title>
   <script src="./config.js"></script>
   <style>
-    body { font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif; background: #f8fafc; color: #1f2937; margin: 0; padding: 24px; }
-    .wrap { max-width: 720px; margin: 0 auto; }
-    h1 { font-size: 20px; }
-    .item { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px 20px; margin-bottom: 12px; }
-    .item h2 { font-size: 15px; margin: 0 0 8px; }
-    .ok { color: #059669; font-weight: 700; }
-    .ng { color: #dc2626; font-weight: 700; }
-    .detail { font-size: 12px; color: #6b7280; white-space: pre-wrap; word-break: break-all; line-height: 1.8; }
-    a { color: #2563eb; }
+    body { margin: 0; padding: 24px; background: #f8fafc; color: #1f2937; font-family: "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif; }
+    main { max-width: 720px; margin: auto; }
+    .item { margin: 12px 0; padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; }
+    .ok { color: #047857; font-weight: 900; } .ng { color: #b91c1c; font-weight: 900; }
+    p { line-height: 1.8; } a { color: #1d4ed8; font-weight: 800; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+    @media (forced-colors: active) { .item { border: 2px solid CanvasText; } }
   </style>
 </head>
-<body>
-<div class="wrap">
-  <h1>🔧 接続診断</h1>
-  <p style="font-size:13px;color:#6b7280;">それぞれの項目が「OK」になっていれば、アプリは正しく設定されています。NG の項目は README のトラブルシューティングを確認してください。</p>
-  <div id="results"></div>
-  <p><a href="./index.html">← アプリにもどる</a></p>
-</div>
+<body><main><h1>🔧 接続診断</h1><p>GitHub PagesとGoogleログインを利用できるブラウザか確認します。Google Drive APIの有効化と学校の管理ポリシーは、アプリ本体でログインして確認してください。</p><div id="results"></div><p><a href="./">← アプリに戻る</a></p></main>
 <script>
 (function () {
-  'use strict';
-  var CFG = window.APP_CONFIG || {};
   var results = document.getElementById('results');
-
+  var cfg = window.APP_CONFIG || {};
   function add(title, ok, detail) {
-    var div = document.createElement('div');
-    div.className = 'item';
-    div.innerHTML = '<h2>' + title + ': <span class="' + (ok ? 'ok">OK' : 'ng">NG') + '</span></h2>' +
-      (detail ? '<div class="detail"></div>' : '');
-    if (detail) div.querySelector('.detail').textContent = detail;
-    results.appendChild(div);
+    var item = document.createElement('div');
+    item.className = 'item';
+    var heading = document.createElement('strong');
+    heading.textContent = title + ': ';
+    var status = document.createElement('span');
+    status.className = ok ? 'ok' : 'ng';
+    status.textContent = ok ? 'OK' : 'NG';
+    heading.appendChild(status);
+    item.appendChild(heading);
+    var text = document.createElement('p');
+    text.textContent = detail;
+    item.appendChild(text);
+    results.appendChild(item);
   }
-
-  add('config.js の設定', !!(CFG.execUrlA && CFG.execUrlB && CFG.googleClientId),
-    'execUrlA: ' + (CFG.execUrlA ? '設定済み' : '未設定') +
-    ' / execUrlB: ' + (CFG.execUrlB ? '設定済み' : '未設定') +
-    ' / googleClientId: ' + (CFG.googleClientId ? '設定済み' : '未設定'));
-
-  function check(label, url, expectKind, expectAnonymous) {
-    if (!url) { add(label, false, 'exec URL が未設定です'); return Promise.resolve(); }
-    var diagUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'diag=1';
-    return fetch(diagUrl, { credentials: 'omit', redirect: 'follow' })
-      .then(function (res) { return res.json(); })
-      .then(function (j) {
-        var msgs = ['アプリ: ' + j.app, 'デプロイ種別: ' + j.deployKind + '（期待: ' + expectKind + '）'];
-        var ok = true;
-        if (j.deployKind !== expectKind && j.deployKind !== 'unknown') {
-          ok = false;
-          msgs.push('→ デプロイの「次のユーザーとして実行」の設定が入れ替わっている可能性があります');
-        }
-        if (expectAnonymous && !j.anonymousAccess) {
-          ok = false;
-          msgs.push('→ デプロイBの「アクセスできるユーザー」は「全員」（匿名アクセス可）にする必要があります');
-        }
-        if (!j.config.appAccount) { ok = false; msgs.push('→ ScriptProperties の sp_appAccountEmail が未設定です'); }
-        if (!j.config.clientId) { ok = false; msgs.push('→ ScriptProperties の sp_googleClientId が未設定です'); }
-        if (!j.config.shellUrl) { msgs.push('（注意）sp_shellUrl が未設定です'); }
-        add(label, ok, msgs.join('\n'));
-      })
-      .catch(function (e) {
-        if (!expectAnonymous) {
-          // デプロイ A はログイン必須設定が正常のため、匿名 fetch は失敗してよい
-          add(label, true, '匿名では読めませんでした（「全員（Googleアカウント）」= ログイン必須設定なら、これが正常です）');
-          return;
-        }
-        add(label, false,
-          '接続に失敗しました: ' + e.message +
-          '\n→ デプロイBが「全員」（匿名アクセス可）になっていないと、ログイン画面へリダイレクトされてここで失敗します。');
-      });
-  }
-
-  check('デプロイ A（先生ポータル）', CFG.execUrlA, 'A', false)
-    .then(function () { return check('デプロイ B（児童アプリ）', CFG.execUrlB, 'B', true); });
+  add('HTTPS', location.protocol === 'https:', location.protocol === 'https:' ? '安全な接続です。' : 'GitHub PagesのHTTPS URLを開いてください。');
+  add('共通URL', /^https:\/\//.test(cfg.publicEntryUrl || ''), cfg.publicEntryUrl || 'docs/config.js に設定がありません。');
+  add('OAuthクライアントID', /\.apps\.googleusercontent\.com$/.test(cfg.googleClientId || ''), cfg.googleClientId ? '形式を確認できました。' : 'docs/config.js に設定がありません。');
+  add('Web Crypto', !!(window.crypto && window.crypto.subtle), '招待情報とクラスIDの生成に使います。');
+  add('画像処理', typeof createImageBitmap === 'function', '添付画像を端末内で縮小する機能です。');
+  var script = document.createElement('script');
+  script.src = 'https://accounts.google.com/gsi/client';
+  script.onload = function () { add('Googleログイン', true, 'Google Identity Servicesを読み込めました。'); };
+  script.onerror = function () { add('Googleログイン', false, '学校のネットワークで accounts.google.com が許可されているか確認してください。'); };
+  document.head.appendChild(script);
 })();
-</script>
-</body>
-</html>
+</script></body></html>

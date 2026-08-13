@@ -1,5 +1,7 @@
 # 🔍 GIGA Standard v5 監査：ふりかえりジャーナル
 
+> **履歴資料:** この文書のGAS計測値は旧構成の記録です。現在の本番構成はGitHub Pages + Google Drive APIへ完全移行しています。現行の検査結果は `npm run verify`、設計は `docs/DRIVE_NATIVE_ARCHITECTURE.md` を参照してください。
+
 - **監査日**: 2026-08-08
 - **監査時のコミット**: `b781dbd`（`main`）
 - **改修後の再測定**: 同日（P0.5 / P1 適用後）
