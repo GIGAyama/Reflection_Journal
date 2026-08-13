@@ -42,3 +42,9 @@ test('トップ画面は中央配置され、内部用語やクリックイベ�
   assert.doesNotMatch(app, /addEventListener\('click',\s*render(?:Home|TeacherHome|StudentHome)\)/);
   assert.match(app, /typeof message === 'string'/);
 });
+
+test('ログイン画面とヘッダーはPWAと同じアプリアイコンを使う', () => {
+  assert.match(app, /class="app-logo" src="\.\/icon-192\.png"/);
+  assert.match(app, /class="brand-icon" src="\.\/icon-192\.png"/);
+  assert.doesNotMatch(app, /📔/);
+});
