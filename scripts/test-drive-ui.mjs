@@ -17,6 +17,9 @@ test('GitHub Pages共通URLがDrive版を直接起動する', () => {
 test('認証情報をブラウザストレージへ保存しない', () => {
   assert.match(app, /initTokenClient/);
   assert.match(app, /drive\.file/);
+  assert.match(app, /drive\.readonly/);
+  assert.match(app, /requireSharedRead/);
+  assert.match(app, /共有された記録の同期を許可する/);
   assert.doesNotMatch(app, /localStorage\.setItem\([^\n]*(token|credential|auth)/i);
   assert.doesNotMatch(app, /sessionStorage/);
 });
@@ -68,6 +71,14 @@ test('PR #10の教師支援・招待・PWA操作をDrive版で復元している
   assert.match(index, /id="pwa-update"/);
   assert.match(css, /\.submission-donut/);
   assert.match(css, /\.teacher-highlight/);
+});
+
+test('別アカウント共有と教師画面の更新を明示的に扱う', () => {
+  for (const marker of ['SHARED_READ_SCOPE', 'handleSharedToken', 'refreshTeacherClass', 'scheduleTeacherRefresh', '最新に更新', '最終同期']) {
+    assert.ok(app.includes(marker), `複数アカウント同期に「${marker}」がありません`);
+  }
+  assert.match(css, /\.permission-card/);
+  assert.match(css, /\.sync-status/);
 });
 
 test('トップ画面は中央配置され、内部用語やクリックイベントを表示しない', () => {

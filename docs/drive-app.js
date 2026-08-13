@@ -24,11 +24,17 @@ import { DriveApiError, DriveClient } from './drive-api.js';
 const app = document.getElementById('app');
 const toastElement = document.getElementById('toast');
 const config = window.APP_CONFIG || {};
+const BASE_SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
+const SHARED_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const state = {
   user: null,
   drive: null,
   invite: null,
   tokenClient: null,
+  sharedTokenClient: null,
+  grantedScopes: new Set(),
+  pendingSharedAction: null,
+  pendingSharedRole: '',
   teacher: null,
   portfolio: null,
   portfolioFile: null,
@@ -40,7 +46,9 @@ const state = {
   teacherClasses: [],
   restoreLastTeacherClass: false,
   feedbackDraftKey: '',
-  feedbackDraftHighlights: []
+  feedbackDraftHighlights: [],
+  teacherTab: 'journals',
+  teacherRefreshTimer: null
 };
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -78,6 +86,18 @@ function friendlyError(error) {
   console.error(error);
   if (error instanceof DriveApiError) return error.message;
   return error?.message || '操作を完了できませんでした。もう一度お試しください。';
+}
+
+function responseScopes(response) {
+  return new Set(String(response?.scope || '').split(/\s+/).filter(Boolean));
+}
+
+function rememberGrantedScopes(response, required = []) {
+  const scopes = responseScopes(response);
+  for (const scope of scopes) state.grantedScopes.add(scope);
+  for (const scope of required) {
+    if (scopes.has(scope) || window.google?.accounts?.oauth2?.hasGrantedAllScopes?.(response, scope)) state.grantedScopes.add(scope);
+  }
 }
 
 function errorNotice(message) {
@@ -132,7 +152,7 @@ async function requestAccess() {
     await loadGoogleIdentity();
     state.tokenClient ||= google.accounts.oauth2.initTokenClient({
       client_id: config.googleClientId,
-      scope: 'openid email profile https://www.googleapis.com/auth/drive.file',
+      scope: BASE_SCOPES,
       include_granted_scopes: true,
       callback: handleToken
     });
@@ -142,6 +162,7 @@ async function requestAccess() {
 
 async function handleToken(response) {
   if (!response?.access_token) return renderLogin(response?.error_description || 'Googleログインがキャンセルされました。');
+  rememberGrantedScopes(response, BASE_SCOPES.split(' '));
   setBusy('アカウントを確認しています…');
   try {
     const userResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { Authorization: `Bearer ${response.access_token}` } });
@@ -156,10 +177,62 @@ async function handleToken(response) {
 async function resolveEntryRoute() {
   const encoded = location.hash.match(/^#join=([^&]+)/)?.[1];
   if (encoded) {
-    try { state.invite = await decodeInvite(encoded); return renderJoin(); }
+    try {
+      state.invite = await decodeInvite(encoded);
+      return requireSharedRead('student', () => renderJoin());
+    }
     catch (error) { return renderHome(error.message); }
   }
   return renderHome();
+}
+
+function requireSharedRead(role, action) {
+  if (state.grantedScopes.has(SHARED_READ_SCOPE)) return action();
+  state.pendingSharedRole = role;
+  state.pendingSharedAction = action;
+  renderSharedReadPermission(role);
+}
+
+function renderSharedReadPermission(role, error = '') {
+  const isTeacher = role === 'teacher';
+  app.innerHTML = shell(`<section class="permission-page"><div class="permission-card panel">
+    <div class="permission-icon" aria-hidden="true">🔄</div><span class="eyebrow">SHARED RECORDS</span>
+    <h1>${isTeacher ? '児童の提出を受け取る準備' : '先生のおへんじを受け取る準備'}</h1>
+    <p>${isTeacher ? '別のアカウントから共有されたふりかえり' : '先生のアカウントから共有されたテーマやおへんじ'}を見つけるため、Google Driveの閲覧許可が必要です。</p>
+    ${errorNotice(error)}
+    <div class="permission-points"><p><strong>書き換えは専用ファイルだけ</strong><br><span>書込みには引き続き、アプリが作成したファイルだけを扱う権限を使います。</span></p><p><strong>他のファイルは表示しません</strong><br><span>アプリ専用の印が付いた共有JSONだけを検索し、データを外部サーバーへ送りません。</span></p></div>
+    <button id="grant-shared-read" class="primary wide" type="button">共有された記録の同期を許可する</button>
+    <button id="permission-back" class="quiet wide" type="button">使い方の選択へ戻る</button>
+  </div></section>`);
+  document.getElementById('grant-shared-read').addEventListener('click', requestSharedRead);
+  document.getElementById('permission-back').addEventListener('click', () => { state.pendingSharedAction = null; state.pendingSharedRole = ''; renderHome(); });
+}
+
+async function requestSharedRead() {
+  setBusy('Google Driveの共有記録を同期する準備をしています…');
+  try {
+    await loadGoogleIdentity();
+    state.sharedTokenClient ||= google.accounts.oauth2.initTokenClient({
+      client_id: config.googleClientId,
+      scope: SHARED_READ_SCOPE,
+      include_granted_scopes: true,
+      enable_granular_consent: true,
+      callback: handleSharedToken
+    });
+    state.sharedTokenClient.requestAccessToken({ prompt: '' });
+  } catch (error) { renderSharedReadPermission(state.pendingSharedRole, friendlyError(error)); }
+}
+
+async function handleSharedToken(response) {
+  if (!response?.access_token) return renderSharedReadPermission(state.pendingSharedRole, response?.error_description || '共有記録の同期が許可されませんでした。');
+  rememberGrantedScopes(response, [SHARED_READ_SCOPE]);
+  if (!state.grantedScopes.has(SHARED_READ_SCOPE)) return renderSharedReadPermission(state.pendingSharedRole, 'Google Driveの閲覧許可が選択されていません。共有記録を受け取るには、この許可が必要です。');
+  state.drive = new DriveClient(response.access_token);
+  const action = state.pendingSharedAction;
+  state.pendingSharedAction = null;
+  state.pendingSharedRole = '';
+  if (action) await action();
+  else renderHome();
 }
 
 function renderHome(error = '') {
@@ -169,8 +242,8 @@ function renderHome(error = '') {
       <button class="item-card" id="teacher-home" type="button"><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
       <button class="item-card" id="student-home" type="button"><h2>児童として使う</h2><p class="muted">参加したクラスで書き、おへんじを受け取ります。</p></button>
     </div></section>`);
-  document.getElementById('teacher-home').addEventListener('click', () => { state.restoreLastTeacherClass = true; renderTeacherHome(); });
-  document.getElementById('student-home').addEventListener('click', () => renderStudentHome());
+  document.getElementById('teacher-home').addEventListener('click', () => { state.restoreLastTeacherClass = true; requireSharedRead('teacher', () => renderTeacherHome()); });
+  document.getElementById('student-home').addEventListener('click', () => requireSharedRead('student', () => renderStudentHome()));
 }
 
 async function renderTeacherHome(error = '') {
@@ -222,8 +295,9 @@ async function loadJsonItems(files) {
   }))).filter(Boolean);
 }
 
-async function openTeacherClass(item, tab = 'journals', error = '') {
-  setBusy('クラスのデータを読み込んでいます…');
+async function openTeacherClass(item, tab = 'journals', error = '', options = {}) {
+  if (!options.silent) setBusy('クラスのデータを読み込んでいます…');
+  const previousCount = state.teacher?.record?.classId === item.record.classId ? analyzeClass(activePortfolioItems(), state.teacher.channels).all.length : 0;
   await withError(async () => {
     const portfolioFiles = await state.drive.listSharedPortfolios(item.record.classId);
     const portfolios = (await loadJsonItems(portfolioFiles)).filter((entry) => entry.record?.class?.id === item.record.classId);
@@ -245,9 +319,11 @@ async function openTeacherClass(item, tab = 'journals', error = '') {
       if (channel) channels.set(normalizeEmail(member.email), channel);
     }
     if (JSON.stringify(record) !== original) await state.drive.updateJson(item.file.id, record);
-    state.teacher = { file: item.file, record, portfolios, channels };
+    state.teacher = { file: item.file, record, portfolios, channels, syncedAt: new Date() };
     try { localStorage.setItem('rj_last_teacher_class', item.file.id); } catch (storageError) {}
     renderTeacherClass(tab, error);
+    const nextCount = analyzeClass(activePortfolioItems(), channels).all.length;
+    if (options.silent && nextCount > previousCount) toast(`新しい提出を${nextCount - previousCount}件受け取りました。`);
   }, (message) => renderTeacherHome(message));
 }
 
@@ -261,6 +337,7 @@ function teacherTabs(active) {
 function bindTeacherTabs() {
   document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => renderTeacherClass(button.dataset.tab)));
   document.getElementById('classes')?.addEventListener('click', () => renderTeacherHome());
+  document.getElementById('refresh-class')?.addEventListener('click', () => refreshTeacherClass(false));
   document.getElementById('class-switch')?.addEventListener('change', (event) => {
     if (event.target.value === 'new') return renderTeacherHome();
     const next = state.teacherClasses.find(({ file }) => file.id === event.target.value);
@@ -270,12 +347,35 @@ function bindTeacherTabs() {
 
 function renderTeacherClass(tab = 'journals', error = '') {
   const ctx = state.teacher;
-  app.innerHTML = shell(`<div class="page-heading teacher-class-heading"><div><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1></div><div class="class-switcher"><label for="class-switch">表示するクラス</label><select id="class-switch">${state.teacherClasses.map(({ file, record }) => `<option value="${escapeHtml(file.id)}" ${file.id === ctx.file.id ? 'selected' : ''}>${escapeHtml(record.className)}</option>`).join('')}<option value="new">＋ クラス一覧・新規作成</option></select><button id="classes" class="quiet" type="button">一覧</button></div></div>
+  state.teacherTab = tab;
+  app.innerHTML = shell(`<div class="page-heading teacher-class-heading"><div><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1><span class="sync-status">最終同期 ${escapeHtml(formatTime(ctx.syncedAt))}</span></div><div class="class-switcher"><label for="class-switch">表示するクラス</label><select id="class-switch">${state.teacherClasses.map(({ file, record }) => `<option value="${escapeHtml(file.id)}" ${file.id === ctx.file.id ? 'selected' : ''}>${escapeHtml(record.className)}</option>`).join('')}<option value="new">＋ クラス一覧・新規作成</option></select><button id="refresh-class" class="secondary" type="button">↻ 最新に更新</button><button id="classes" class="quiet" type="button">一覧</button></div></div>
     ${errorNotice(error)}${teacherTabs(tab)}<div id="teacher-content"></div>`);
   bindTeacherTabs();
   if (tab === 'journals') renderJournalManagement();
   else if (tab === 'vitals') renderVitals();
   else renderClassSettings();
+  scheduleTeacherRefresh();
+}
+
+async function refreshTeacherClass(silent = true) {
+  const ctx = state.teacher;
+  if (!ctx?.file?.id) return;
+  if (!silent) setBusy('最新の提出を確認しています…');
+  await withError(async () => {
+    const record = await state.drive.getJson(ctx.file.id);
+    await openTeacherClass({ file: ctx.file, record }, state.teacherTab, '', { silent });
+  }, (message) => renderTeacherClass(state.teacherTab, message));
+}
+
+function scheduleTeacherRefresh() {
+  clearTimeout(state.teacherRefreshTimer);
+  if (state.teacherTab !== 'journals') return;
+  state.teacherRefreshTimer = setTimeout(async () => {
+    if (!document.getElementById('teacher-content')) return;
+    const activeTag = document.activeElement?.tagName;
+    if (document.visibilityState !== 'visible' || ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)) return scheduleTeacherRefresh();
+    await refreshTeacherClass(true);
+  }, 30_000);
 }
 
 function activePortfolioItems() {
@@ -1068,6 +1168,11 @@ function downloadBlob(blob, filename) {
 function formatDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+function formatTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date);
 }
 
 function initPwaControls() {
