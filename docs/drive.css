@@ -27,7 +27,7 @@ button rt, a rt, [class*="bg-"] rt, [class*="text-white"] rt { color: inherit; }
 
 .center-screen { width: 100%; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
 .login-card { width: min(100%, 500px); margin-inline: auto; padding: clamp(24px, 6vw, 48px); border-radius: 30px; background: rgba(255,255,255,.96); box-shadow: 0 24px 70px rgba(15,23,42,.12); }
-.app-logo { width: 76px; height: 76px; display: grid; place-items: center; margin: 0 auto 20px; border-radius: 24px; background: linear-gradient(135deg, #fb923c, #ea580c); font-size: 38px; box-shadow: 0 12px 30px rgba(234,88,12,.28); }
+.app-logo { width: 88px; height: 88px; display: block; margin: 0 auto 20px; border-radius: 24px; object-fit: cover; box-shadow: 0 12px 30px rgba(234,88,12,.28); }
 h1, h2, h3 { line-height: 1.35; }
 h1 { margin: 0 0 12px; font-size: clamp(23px, 5vw, 34px); }
 h2 { font-size: clamp(21px, 4vw, 28px); }
@@ -49,7 +49,7 @@ p { line-height: 1.75; }
 
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px max(16px, env(safe-area-inset-left)); background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); }
 .brand { display: flex; gap: 10px; align-items: center; font-weight: 900; }
-.brand span:first-child { font-size: 26px; }
+.brand-icon { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 10px; object-fit: cover; }
 .account { text-align: right; font-size: 12px; color: var(--muted); }
 .account strong { display: block; color: var(--ink); font-size: 14px; }
 .page { width: min(1100px, calc(100% - 28px)); margin: 0 auto; padding: 24px 0 calc(60px + env(safe-area-inset-bottom)); }

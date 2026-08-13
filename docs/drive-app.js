@@ -74,14 +74,14 @@ async function withError(action, fallback) {
 
 function shell(content) {
   return `<header class="topbar">
-    <div class="brand"><span aria-hidden="true">📔</span><span>ふりかえりジャーナル</span></div>
+    <div class="brand"><img class="brand-icon" src="./icon-192.png" alt="" aria-hidden="true"><span>ふりかえりジャーナル</span></div>
     <div class="account"><strong>${escapeHtml(state.user?.name || '')}</strong><span>${escapeHtml(state.user?.email || '')}</span></div>
   </header><div class="page">${content}</div>`;
 }
 
 function renderLogin(error = '') {
   app.innerHTML = `<section class="center-screen"><div class="login-card">
-    <div class="app-logo" aria-hidden="true">📔</div>
+    <img class="app-logo" src="./icon-192.png" alt="" aria-hidden="true">
     <h1>毎日のふりかえりを<br>学びの成長へ</h1>
     <p>自分の言葉で学びを残し、先生からのおへんじを受け取れます。</p>
     ${errorNotice(error)}
