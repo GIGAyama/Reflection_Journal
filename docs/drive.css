@@ -15,6 +15,7 @@
 * { box-sizing: border-box; }
 html { min-height: 100%; background: var(--cream); }
 body { margin: 0; min-height: 100%; color: var(--ink); background: linear-gradient(145deg, #fff7ed, #fffbeb 45%, #eff6ff); }
+#app { width: 100%; min-height: 100dvh; }
 button, input, textarea { font: inherit; }
 button, .button { min-height: 44px; touch-action: manipulation; }
 button { cursor: pointer; }
@@ -24,8 +25,8 @@ button rt, a rt, [class*="bg-"] rt, [class*="text-white"] rt { color: inherit; }
 .skip-link { position: fixed; top: -80px; left: 16px; z-index: 100; padding: 12px; background: #fff; color: #000; }
 .skip-link:focus { top: 12px; }
 
-.center-screen { min-height: 100dvh; display: grid; place-content: center; gap: 16px; padding: 24px; text-align: center; }
-.login-card { width: min(100%, 500px); padding: clamp(24px, 6vw, 48px); border-radius: 30px; background: rgba(255,255,255,.96); box-shadow: 0 24px 70px rgba(15,23,42,.12); }
+.center-screen { width: 100%; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
+.login-card { width: min(100%, 500px); margin-inline: auto; padding: clamp(24px, 6vw, 48px); border-radius: 30px; background: rgba(255,255,255,.96); box-shadow: 0 24px 70px rgba(15,23,42,.12); }
 .app-logo { width: 76px; height: 76px; display: grid; place-items: center; margin: 0 auto 20px; border-radius: 24px; background: linear-gradient(135deg, #fb923c, #ea580c); font-size: 38px; box-shadow: 0 12px 30px rgba(234,88,12,.28); }
 h1, h2, h3 { line-height: 1.35; }
 h1 { margin: 0 0 12px; font-size: clamp(23px, 5vw, 34px); }
@@ -54,6 +55,13 @@ p { line-height: 1.75; }
 .page { width: min(1100px, calc(100% - 28px)); margin: 0 auto; padding: 24px 0 calc(60px + env(safe-area-inset-bottom)); }
 .page-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .page-heading h1 { margin: 0; }
+.role-home { width: min(100%, 900px); min-height: calc(100dvh - 130px); display: grid; align-content: center; gap: 22px; margin-inline: auto; padding-block: clamp(24px, 7vh, 72px); }
+.role-home-intro { max-width: 680px; margin-inline: auto; text-align: center; }
+.role-home-intro p { margin: 0; color: var(--muted); }
+.role-choice-grid { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.role-choice-grid .item-card { min-height: 210px; display: grid; place-content: center; text-align: center; }
+.role-choice-grid .item-card h2 { margin: 0 0 8px; }
+.role-choice-grid .item-card p { margin: 0; }
 
 .panel, .item-card, .journal-card { background: rgba(255,255,255,.96); border: 1px solid rgba(226,232,240,.9); border-radius: 22px; box-shadow: 0 10px 32px rgba(15,23,42,.07); }
 .panel { padding: clamp(20px, 4vw, 32px); margin-bottom: 20px; }
@@ -90,7 +98,7 @@ input:focus, textarea:focus { border-color: #f97316; outline: 3px solid #ffedd5;
 .journal-image { display: block; max-width: 100%; max-height: 520px; margin-top: 14px; border-radius: 14px; object-fit: contain; background: #f1f5f9; }
 .notice, .error { padding: 14px 16px; margin-bottom: 16px; border-radius: 13px; line-height: 1.7; }
 .notice { background: #ecfdf5; color: #065f46; }
-.error { background: #fef2f2; color: #991b1b; }
+.error { background: #fef2f2; color: #991b1b; white-space: pre-wrap; }
 
 .tabs { display: flex; gap: 8px; margin: 0 0 22px; overflow-x: auto; padding-bottom: 3px; }
 .tab { flex: 1 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 11px 16px; background: #fff; color: #475569; font-weight: 900; }
@@ -132,6 +140,9 @@ blockquote { margin: 0 0 16px; padding: 14px 18px; border-left: 5px solid #f59e0
 #toast.visible { opacity: 1; transform: translate(-50%, 0); }
 
 @media (max-width: 680px) {
+  .role-home { min-height: auto; padding-block: 28px; }
+  .role-choice-grid { grid-template-columns: 1fr; }
+  .role-choice-grid .item-card { min-height: 150px; }
   .invite-layout { grid-template-columns: 1fr; }
   .qr-box { width: min(260px, 100%); margin: auto; }
   .account span { display: none; }

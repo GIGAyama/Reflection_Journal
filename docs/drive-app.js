@@ -48,14 +48,19 @@ function toast(message) {
   toast.timer = setTimeout(() => toastElement.classList.remove('visible'), 3200);
 }
 
-function setBusy(message = 'Google Driveと通信しています…') {
+function setBusy(message = 'データを読み込んでいます…') {
   app.innerHTML = `<section class="center-screen"><div class="loader" aria-hidden="true"></div><p>${escapeHtml(message)}</p></section>`;
 }
 
 function friendlyError(error) {
   console.error(error);
-  if (error instanceof DriveApiError) return `${error.message}${error.detail ? `<br><span class="small">詳細: ${escapeHtml(error.detail)}</span>` : ''}`;
-  return escapeHtml(error?.message || '予期しないエラーが発生しました。');
+  if (error instanceof DriveApiError) return error.message;
+  return error?.message || '操作を完了できませんでした。もう一度お試しください。';
+}
+
+function errorNotice(message) {
+  const text = typeof message === 'string' ? message.trim() : '';
+  return text ? `<div class="error" role="alert">${escapeHtml(text)}</div>` : '';
 }
 
 async function withError(action, fallback) {
@@ -77,11 +82,11 @@ function shell(content) {
 function renderLogin(error = '') {
   app.innerHTML = `<section class="center-screen"><div class="login-card">
     <div class="app-logo" aria-hidden="true">📔</div>
-    <h1>Google Driveで<br>ふりかえりをつなぐ</h1>
-    <p>児童の成果物は児童自身のDriveへ、先生のおへんじは先生自身のDriveへ保存されます。学校ごとのデプロイは不要です。</p>
-    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
+    <h1>毎日のふりかえりを<br>学びの成長へ</h1>
+    <p>自分の言葉で学びを残し、先生からのおへんじを受け取れます。</p>
+    ${errorNotice(error)}
     <button id="login" class="primary wide" type="button">Googleアカウントで続ける</button>
-    <p class="muted small">このアプリが作成したファイルだけにアクセスします。ログイン情報は端末へ保存しません。</p>
+    <p class="muted small">必要な記録だけを安全に保存します。ログイン情報は端末へ保存しません。</p>
   </div></section>`;
   document.getElementById('login').addEventListener('click', requestAccess);
 }
@@ -99,7 +104,7 @@ function loadGoogleIdentity() {
 }
 
 async function requestAccess() {
-  if (!config.googleClientId) return renderLogin('OAuthクライアントIDが設定されていません。');
+  if (!config.googleClientId) return renderLogin('ログインの準備が完了していません。アプリ管理者に連絡してください。');
   setBusy('Googleログインをひらいています…');
   try {
     await loadGoogleIdentity();
@@ -136,14 +141,14 @@ async function resolveEntryRoute() {
 }
 
 function renderHome(error = '') {
-  app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">Driveネイティブ</span><h1>どの使い方をしますか？</h1></div></div>
-    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
-    <div class="grid">
+  app.innerHTML = shell(`<section class="role-home"><div class="role-home-intro"><h1>どの使い方をしますか？</h1><p>あなたに合った入口を選んでください。</p></div>
+    ${errorNotice(error)}
+    <div class="grid role-choice-grid">
       <button class="item-card" id="teacher-home" type="button"><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
       <button class="item-card" id="student-home" type="button"><h2>児童として使う</h2><p class="muted">参加したクラスで書き、おへんじを受け取ります。</p></button>
-    </div>`);
-  document.getElementById('teacher-home').addEventListener('click', renderTeacherHome);
-  document.getElementById('student-home').addEventListener('click', renderStudentHome);
+    </div></section>`);
+  document.getElementById('teacher-home').addEventListener('click', () => renderTeacherHome());
+  document.getElementById('student-home').addEventListener('click', () => renderStudentHome());
 }
 
 async function renderTeacherHome(error = '') {
@@ -154,14 +159,14 @@ async function renderTeacherHome(error = '') {
     try { return { file, record: await state.drive.getJson(file.id) }; } catch (loadError) { return null; }
   }))).filter(Boolean);
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">先生</span><h1>クラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
-    ${error ? `<div class="error">${error}</div>` : ''}
+    ${errorNotice(error)}
     <section class="panel"><h2>新しいクラスを作る</h2><form id="create-class">
       <label><span>クラス名</span><input id="class-name" maxlength="80" required placeholder="例：5年1組"></label>
       <button class="primary" type="submit">クラスを作成</button>
     </form></section>
     <section><h2>作成済みのクラス</h2>${classes.length ? `<div class="grid">${classes.map(({ file, record }) => `
       <button class="item-card class-item" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.classCode)}</span><h3>${escapeHtml(record.className)}</h3><p>${(record.members || []).filter((member) => member.status === 'active').length}人</p><p class="muted small">更新: ${escapeHtml(formatDate(file.modifiedTime))}</p></button>`).join('')}</div>` : '<div class="empty">まだクラスはありません。</div>'}</section>`);
-  document.getElementById('back').addEventListener('click', renderHome);
+  document.getElementById('back').addEventListener('click', () => renderHome());
   document.getElementById('create-class').addEventListener('submit', createClass);
   document.querySelectorAll('.class-item').forEach((button) => button.addEventListener('click', () => openTeacherClass(classes.find(({ file }) => file.id === button.dataset.file))));
 }
@@ -222,13 +227,13 @@ function teacherTabs(active) {
 
 function bindTeacherTabs() {
   document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => renderTeacherClass(button.dataset.tab)));
-  document.getElementById('classes')?.addEventListener('click', renderTeacherHome);
+  document.getElementById('classes')?.addEventListener('click', () => renderTeacherHome());
 }
 
 function renderTeacherClass(tab = 'journals', error = '') {
   const ctx = state.teacher;
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1></div><button id="classes" class="quiet" type="button">クラス一覧へ</button></div>
-    ${error ? `<div class="error">${error}</div>` : ''}${teacherTabs(tab)}<div id="teacher-content"></div>`);
+    ${errorNotice(error)}${teacherTabs(tab)}<div id="teacher-content"></div>`);
   bindTeacherTabs();
   if (tab === 'journals') renderJournalManagement();
   else if (tab === 'vitals') renderVitals();
@@ -311,7 +316,7 @@ function renderFeedbackEditor(portfolioItem, journal, error = '') {
   const channel = ctx.channels.get(email);
   const existing = channel?.feedback?.[journal.id] || {};
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">おへんじ</span><h1>${escapeHtml(portfolioItem.record.student.name)}</h1></div><button id="journal-back" class="quiet" type="button">提出一覧へ</button></div>
-    ${error ? `<div class="error">${error}</div>` : ''}
+    ${errorNotice(error)}
     <div class="detail-grid"><article class="panel"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h2>${escapeHtml(journal.theme || 'テーマなし')}</h2><div class="journal-body">${escapeHtml(journal.content)}</div>${journal.imageFileId ? `<div class="image-slot" data-file="${escapeHtml(journal.imageFileId)}"><p>画像を読み込んでいます…</p></div>` : ''}</article>
     <section class="panel"><h2>先生のおへんじ</h2><form id="feedback-form">
       <label><span>コメント</span><textarea id="feedback-comment" maxlength="4000" placeholder="よかったところや、次につながるひとこと">${escapeHtml(existing.comment || '')}</textarea></label>
@@ -329,7 +334,7 @@ async function saveFeedback(event, portfolioItem, journal) {
   const email = normalizeEmail(portfolioItem.record.student.email);
   const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === email);
   let channel = state.teacher.channels.get(email);
-  if (!channel || !member?.channelFileId) return renderFeedbackEditor(portfolioItem, journal, '返却チャンネルがありません。クラス設定で児童を承認してください。');
+  if (!channel || !member?.channelFileId) return renderFeedbackEditor(portfolioItem, journal, 'おへんじを届ける準備が完了していません。クラス設定で児童を承認してください。');
   channel = setFeedback(channel, journal.id, { comment: document.getElementById('feedback-comment').value, stamp: document.getElementById('feedback-stamp').value, returned: true });
   setBusy('おへんじを保存しています…');
   await withError(async () => {
@@ -488,8 +493,8 @@ async function renderStudentHome(error = '') {
   if (!files) return;
   const portfolios = await loadJsonItems(files);
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">児童</span><h1>参加しているクラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
-    ${error ? `<div class="error">${error}</div>` : ''}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3>${escapeHtml(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}件のふりかえり</p></button>`).join('')}</div>` : '<div class="empty">参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。</div>'}`);
-  document.getElementById('back').addEventListener('click', renderHome);
+    ${errorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3>${escapeHtml(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}件のふりかえり</p></button>`).join('')}</div>` : '<div class="empty">参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。</div>'}`);
+  document.getElementById('back').addEventListener('click', () => renderHome());
   document.querySelectorAll('.student-portfolio').forEach((button) => button.addEventListener('click', () => openPortfolio(portfolios.find(({ file }) => file.id === button.dataset.file))));
 }
 
@@ -504,7 +509,7 @@ async function renderJoin(error = '') {
     if (record) return openPortfolio({ file: files[0], record });
   }
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">招待</span><h1>${escapeHtml(invite.className)}</h1></div><button id="cancel" class="quiet" type="button">戻る</button></div>
-    ${error ? `<div class="error">${error}</div>` : ''}<section class="panel"><p>先生: <strong>${escapeHtml(invite.teacherName || invite.teacherEmail)}</strong></p><p>クラスコード: <strong>${escapeHtml(invite.classCode)}</strong></p><form id="join-class"><label><span>先生に表示する名前</span><input id="student-name" maxlength="80" required value="${escapeHtml(state.user.name || '')}"></label><button class="primary wide" type="submit">このクラスに参加する</button></form><p class="muted small">あなたのDriveにポートフォリオを作り、先生へ閲覧共有します。</p></section>`);
+    ${errorNotice(error)}<section class="panel"><p>先生: <strong>${escapeHtml(invite.teacherName || invite.teacherEmail)}</strong></p><p>クラスコード: <strong>${escapeHtml(invite.classCode)}</strong></p><form id="join-class"><label><span>先生に表示する名前</span><input id="student-name" maxlength="80" required value="${escapeHtml(state.user.name || '')}"></label><button class="primary wide" type="submit">このクラスに参加する</button></form><p class="muted small">参加すると、あなたのふりかえりを先生が確認できるようになります。</p></section>`);
   document.getElementById('cancel').addEventListener('click', () => { history.replaceState(null, '', location.pathname); state.invite = null; renderStudentHome(); });
   document.getElementById('join-class').addEventListener('submit', joinClass);
 }
@@ -518,7 +523,7 @@ async function joinClass(event) {
     const record = createPortfolio({ invite: state.invite, student: { ...state.user, name } });
     const file = await state.drive.createPortfolio(record);
     try { await state.drive.shareWithUser(file.id, state.invite.teacherEmail, 'reader'); }
-    catch (error) { return openPortfolio({ file, record }, 'ポートフォリオは作成されましたが、先生への共有が学校の設定で拒否されました。「先生へ再共有」を押してください。'); }
+    catch (error) { return openPortfolio({ file, record }, 'クラスへの参加は完了しましたが、先生へ記録を届ける設定が学校側で拒否されました。「先生へもう一度届ける」を押してください。'); }
     history.replaceState(null, '', location.pathname);
     await openPortfolio({ file, record });
   }, (message) => renderJoin(message));
@@ -558,11 +563,11 @@ function renderPortfolio(error = '') {
   let draft = {};
   try { draft = JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch (loadError) {}
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1>${escapeHtml(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">クラス一覧へ</button></div>
-    ${error ? `<div class="error">${error}</div><button id="reshare" class="secondary" type="button">先生へ再共有</button>` : ''}
+    ${errorNotice(error)}${typeof error === 'string' && error ? '<button id="reshare" class="secondary" type="button">先生へもう一度届ける</button>' : ''}
     ${rejected ? '<div class="error">このクラスへの参加は承認されませんでした。先生へ確認してください。</div>' : pending ? '<div class="notice">参加申請を先生へ送りました。先生が承認すると、ふりかえりを書けるようになります。</div>' : studentWorkspace(theme, draft)}
     <section><h2>これまでのふりかえり</h2><div class="journal-list">${studentJournalCards()}</div></section>
     ${pastSelfPanel()}`);
-  document.getElementById('student-classes').addEventListener('click', renderStudentHome);
+  document.getElementById('student-classes').addEventListener('click', () => renderStudentHome());
   document.getElementById('reshare')?.addEventListener('click', async () => {
     await withError(async () => { await state.drive.shareWithUser(state.portfolioFile.id, portfolio.class.teacherEmail, 'reader'); toast('先生へ共有しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
   });
@@ -581,8 +586,8 @@ function studentWorkspace(theme, draft) {
     <div class="support-row">${['まず、','わかったことは、','友だちの考えから、','次は、'].map((text) => `<button class="quiet" data-insert="${escapeHtml(text)}" type="button">${escapeHtml(text)}</button>`).join('')}</div>
     <label><span>ふりかえり</span><textarea id="content" maxlength="20000" required placeholder="できたこと、考えたこと、次にやってみたいことを書こう">${escapeHtml(draft.content || '')}</textarea></label>
     <span><strong>いまの気持ち（任意）</strong></span><div class="emotion-row" role="radiogroup" aria-label="いまの気持ち">${['😊','💡','😐','🤔','😠'].map((emotion) => `<label><input type="radio" name="emotion" value="${emotion}"><span>${emotion}</span></label>`).join('')}</div>
-    <label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">端末内で縮小してから自分のDriveへ保存し、先生へ直接共有します。</p>
-    <button class="primary wide" type="submit">Driveに保存して先生へ共有</button>
+    <label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">画像は見やすい大きさにして、ふりかえりと一緒に先生へ届けます。</p>
+    <button class="primary wide" type="submit">ふりかえりを提出する</button>
   </form></section>`;
 }
 
@@ -638,7 +643,7 @@ async function saveJournal(event) {
     await state.drive.updateJson(state.portfolioFile.id, updated);
     state.portfolio = updated;
     try { localStorage.removeItem(draftKey()); } catch (error) {}
-    toast('Driveに保存しました。');
+    toast('ふりかえりを提出しました。');
     renderPortfolio();
   }, (message) => renderPortfolio(message));
 }
