@@ -104,7 +104,7 @@ test('教師は提出率・絞り込み・クイック返却・範囲コメン�
   await loginAs(page, 'teacher');
   await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.submission-donut')).toContainText('100%');
-  await page.getByRole('button', { name: '返却済み' }).click();
+  await page.locator('[data-filter="returned"]').click();
   await expect(page.locator('.teacher-journal-card')).toHaveCount(1);
   await page.locator('.journal-open').click();
   await page.locator('#journal-source').evaluate((node) => {
