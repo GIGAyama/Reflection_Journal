@@ -27,6 +27,9 @@ jobs:
       - name: 生成物が原本と一致しているか
         run: node scripts/check-generated.mjs
 
+      - name: QRコード生成テスト
+        run: npm test
+
       - name: 品質ゲート（GIGA Standard v5 Part I）
         run: npm run check
 

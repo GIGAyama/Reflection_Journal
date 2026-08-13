@@ -38,6 +38,8 @@
        学校のネットワークが unpkg / jsDelivr / cdn.tailwindcss.com を塞いでいても画面が出るようにするため。
        生成物なので手で編集しない（npm run build で作り直す）。 -->
   <?!= include('vendor'); ?>
+  <!-- QR生成は先生ポータル専用。児童端末の初回JSには含めない。 -->
+  <? if (bootMode === 'owner') { ?><?!= include('qr'); ?><? } ?>
   <?!= include('css'); ?>
 
   <!-- フォントは「届かなくても字の形が変わるだけ」なので CDN のままでよい。

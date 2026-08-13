@@ -1,5 +1,5 @@
 /**
- * 生成物（vendor.html / css.html / app.html）が原本と食い違っていないかを見る。
+ * 生成物（vendor.html / qr.html / css.html / app.html）が原本と食い違っていないかを見る。
  *
  * 原本を直したのにビルドを走らせずに push すると、GAS には古い画面が出たままになる。
  * その食い違いは、動かしてみるまで誰にも見えない。CI で必ず止める。
@@ -8,7 +8,7 @@
  */
 import { execSync } from 'node:child_process';
 
-const GENERATED = ['vendor.html', 'css.html', 'app.html'];
+const GENERATED = ['vendor.html', 'qr.html', 'css.html', 'app.html'];
 
 let diff = '';
 try {

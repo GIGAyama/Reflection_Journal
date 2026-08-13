@@ -61,7 +61,7 @@ docs/note/
 - **初回に読むJSが 278.1 KB** … `npm run build` のあとに `npm run check` が出す F5 の実測値です（`vendor.html` + `app.html`。内訳は react 10.5 KB + react-dom 128.7 KB + canvas-confetti 17.1 KB + アプリ本体 121.6 KB）。`AUDIT.md` には 271.0 KB とありますが、監査のあとにアプリ本体が増えているので、記事では測り直した値を使っています。読み手が `npm run check` を走らせれば同じ数字が出ます
 - **以前は約3,000キロバイト** … `AUDIT.md` の「初回 JS 3,153.9 KB（うち @babel/standalone 2,997.6 KB）」から、記事では丸めて書いています
 - **OAuthスコープ3つ** … `appsscript.json` の `oauthScopes`
-- **通す必要があるアドレス** … `docs/` と `*.gs` と `index.html` に出てくる外部ホストを全部拾いました。accounts.google.com、script.google.com、googleusercontent.com、docs.google.com、fonts.googleapis.com、fonts.gstatic.com、api.qrserver.com、generativelanguage.googleapis.com、oauth2.googleapis.com（サーバー側のトークン検証で使うもので、端末からは出ません）
+- **通す必要があるアドレス** … `docs/` と `*.gs` と `index.html` に出てくる外部ホストを全部拾いました。accounts.google.com、script.google.com、googleusercontent.com、docs.google.com、fonts.googleapis.com、fonts.gstatic.com、generativelanguage.googleapis.com、oauth2.googleapis.com（サーバー側のトークン検証で使うもので、端末からは出ません）。QRコードはブラウザ内で作るため、外部のQR生成サービスを許可する必要はありません
 - **今の作りでできないこと** … `README.md` の「現在の実装で『できないこと』」をそのまま言いかえました
 
 ## スクリーンショットの撮りかた
@@ -74,7 +74,7 @@ docs/note/
 
 撮影環境の都合で、次の2つだけ手当てしています。どちらも見た目を本番に近づけるためのもので、本番の挙動を偽ってはいません。
 
-- **QRコード**。本番は `api.qrserver.com` に児童用URLを渡して画像を作ります。撮影環境からはそのホストへ出られないため、同じURLを入れたQRを手もとで作って返しています。写っているQRを読むと、画面に出ている児童用URLがそのまま出ます
+- **QRコード**。児童用URLを外部サービスへ渡さず、先生のブラウザ内で画像を作ります。画面のQRを読むと、表示されている児童用URLがそのまま開きます
 - **フォント**。本番は Google Fonts から Zen Maru Gothic を読みます。同じ woff2 を手もとに置いて読ませました
 
 撮影に使った作業ディレクトリ `.tmp-shots/` は、納品時に消してあります。撮り直すときは、そこに3つのファイルを置きなおしてください。`build-harness.mjs`（本物の生成物と差しかえ用の応答を並べたページを組み立てる）、`mock.js`（架空のクラスのデータ）、`shots.mjs`（どこを押してどこで撮るか）の3つです。用意できたら次を走らせます。
