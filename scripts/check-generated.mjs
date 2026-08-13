@@ -8,7 +8,7 @@
  */
 import { execSync } from 'node:child_process';
 
-const GENERATED = ['vendor.html', 'qr.html', 'css.html', 'app.html'];
+const GENERATED = ['vendor.html', 'qr.html', 'docs/qrcode.js', 'css.html', 'app.html'];
 
 let diff = '';
 try {

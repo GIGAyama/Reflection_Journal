@@ -66,6 +66,11 @@ const { code: qrCode } = transformSync(qrSource, {
 writeFileSync(join(ROOT, 'qr.html'),
   '<!-- 生成物。手で編集しない（npm run build で作り直す・先生ポータル専用） -->\n' + wrapScript(qrCode));
 
+// GitHub Pages の Drive 版も同じローカルQR実装を使う。
+// 外部QRサービスへ児童用URLを送らず、共通URLの配信物だけで完結させる。
+writeFileSync(join(ROOT, 'docs', 'qrcode.js'),
+  '/* 生成物。手で編集しない（npm run build で作り直す） */\n' + qrCode + '\n');
+
 // ── ② css.html：使うクラスだけを先に作る（ブラウザ内で CSS を生成しない） ──
 const tmp = mkdtempSync(join(tmpdir(), 'rj-build-'));
 const inCss = join(tmp, 'in.css');
@@ -95,6 +100,7 @@ writeFileSync(join(ROOT, 'app.html'),
 console.log('ビルド完了');
 console.log('  vendor.html', kb(vendor));
 console.log('  qr.html    ', kb(qrCode), '（先生ポータルのみ）');
+console.log('  qrcode.js  ', kb(qrCode), '（GitHub Pages Drive版）');
 console.log('  css.html   ', kb(css));
 console.log('  app.html   ', kb(code));
 console.log('  合計       ', kb(vendor + css + code));

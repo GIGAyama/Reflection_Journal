@@ -33,6 +33,21 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="ジャーナル">
   <script src="./config.js"></script>
+  <script>
+    // Drive版は同じ共通URLから入る。移行期間中は ?backend=drive で教師画面を試し、
+    // 招待URL（#join=...）は常にDrive版へつなぐ。検証後は config.js の backendMode
+    // を drive に変えるだけで、配布済みURLを変えずに既定を切り替えられる。
+    (function () {
+      var cfg = window.APP_CONFIG || {};
+      var preview = new URLSearchParams(location.search).get('backend') === 'drive';
+      var invite = /^#join=/.test(location.hash);
+      var enabled = cfg.backendMode === 'drive' || (cfg.drivePreviewEnabled && (preview || invite));
+      if (!enabled) return;
+      var target = new URL('./drive.html', location.href);
+      target.searchParams.delete('backend');
+      location.replace(target.href);
+    })();
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; }

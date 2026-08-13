@@ -26,7 +26,7 @@ const pass = (id, msg) => ok.push(`${id}: ${msg}`);
 const stripComments = (s) =>
   s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
-const htmlFiles = ['index.html', 'docs/index.html', 'docs/diag.html', 'docs/offline.html'];
+const htmlFiles = ['index.html', 'docs/index.html', 'docs/drive.html', 'docs/diag.html', 'docs/offline.html'];
 const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
 
 // ── B6: CDN から取る実行コードが 0 バイト ──
@@ -49,7 +49,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs'));
   const index = read('index.html');
   if (/api\.qrserver\.com|chart\.googleapis\.com.*cht=qr/i.test(source + index)) {
     fail('B8', 'QR生成のため児童用URLを外部サービスへ送っている');
-  } else if (!existsSync(join(ROOT, 'qr.html')) || !/bootMode\s*===\s*['"]owner['"]/.test(index)) {
+  } else if (!existsSync(join(ROOT, 'qr.html')) || !existsSync(join(ROOT, 'docs/qrcode.js')) || !/bootMode\s*===\s*['"]owner['"]/.test(index)) {
     fail('B8', 'ローカルQR生成コードが教師ポータル専用で読み込まれていない');
   } else {
     pass('B8', 'QRはブラウザ内で生成し、生成コードは教師ポータルだけに配信');

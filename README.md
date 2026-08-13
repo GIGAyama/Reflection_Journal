@@ -7,6 +7,8 @@
 > 📖 **画面ごとの操作手順は [MANUAL.md](MANUAL.md)（操作マニュアル）にまとめています。**
 > このREADMEは「何ができるアプリか」「どう作られているか」「どう設置するか」を説明します。
 
+> 🧪 **GASを使わないDriveネイティブ版を段階導入中です。** 児童のDriveから担任へ直接共有し、運営者アカウントや学校ごとのデプロイを不要にする設計・検証方法は [docs/DRIVE_NATIVE_ARCHITECTURE.md](docs/DRIVE_NATIVE_ARCHITECTURE.md) を参照してください。現時点では現行GAS版を既定のまま残し、共通URLの `?backend=drive` で検証できます。
+
 ## 🧭 3行でわかるアプリの中身
 
 1. 児童は毎日、今日のテーマについて数行のふりかえりを書いて提出します（下書きは自動保存、書き出しヒント・テンプレートつき）。
@@ -135,6 +137,10 @@
 | `scripts/selftest-check.mjs` | 品質ゲート自体が働いているかを、わざと壊して確かめる |
 | `.github/workflows/ci.yml` | CI（`pull_request` と `push` の両方で動く） |
 | `docs/index.html` | GitHub Pagesシェル（GIS・iframe・postMessage・PWA・インストール案内） |
+| `docs/drive.html` / `drive-app.js` | Driveネイティブ版の画面と、先生・児童の主要フロー |
+| `docs/drive-core.js` | 招待情報、クラスID、ポートフォリオ形式の副作用なしロジック |
+| `docs/drive-api.js` | `drive.file` スコープで行うGoogle Drive REST API通信 |
+| `docs/DRIVE_NATIVE_ARCHITECTURE.md` | Drive版の権限境界、移行スイッチ、実アカウント受け入れテスト |
 | `docs/config.js` | exec URL 2本とクライアントID（**設置時に書き換える唯一のファイル**） |
 | `docs/diag.html` | 接続診断ページ（`?diag=1` をCookieなしで叩いて設定ミスを切り分ける） |
 | `docs/sw.js` | Service Worker。シェル資産のみキャッシュし、GASへの通信は素通し |

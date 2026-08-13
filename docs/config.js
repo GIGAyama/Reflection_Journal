@@ -8,6 +8,12 @@
 // 発行）する際、ここを差し替えるだけで済むようにするため。
 // ============================================================
 window.APP_CONFIG = {
+  // 移行期間は gas のまま。実アカウント検証後に "drive" へ変えると、共通URLがDrive版になる。
+  backendMode: "gas",
+  // 移行中の検証URL（?backend=drive）とDrive版招待URL（#join=...）を有効にする。
+  drivePreviewEnabled: true,
+  // 招待URLに使う、GitHub Pages の共通入口。
+  publicEntryUrl: "https://gigayama.github.io/Reflection_Journal/",
   // デプロイ A（先生ポータル / 実行: ウェブアプリケーションにアクセスしているユーザー）の exec URL
   execUrlA: "https://script.google.com/macros/s/AKfycbz5_km-JRG0kNz8sSUkKnqRhV07lbV_OG3-S-FujUnHsdEiAoqUr77ihhuH3abZrS0z/exec",
   // デプロイ B（児童アプリ / 実行: 自分＝アプリアカウント / アクセス: 全員）の exec URL
