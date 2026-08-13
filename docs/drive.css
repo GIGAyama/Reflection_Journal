@@ -91,10 +91,19 @@ input:focus, textarea:focus { border-color: #f97316; outline: 3px solid #ffedd5;
 .qr-box { width: 220px; max-width: 100%; padding: 14px; background: #fff; border: 1px solid var(--line); border-radius: 18px; }
 .qr-box svg { display: block; width: 100%; height: auto; }
 .qr-actions { display: grid; justify-items: center; gap: 10px; }
-.class-switcher { display: grid; grid-template-columns: minmax(180px, 260px) auto; align-items: end; gap: 8px; }
+.class-switcher { display: grid; grid-template-columns: minmax(180px, 260px) auto auto; align-items: end; gap: 8px; }
 .class-switcher label { grid-column: 1; margin: 0; color: var(--muted); font-size: 11px; }
 .class-switcher select { grid-column: 1; }
-.class-switcher button { grid-column: 2; grid-row: 2; }
+.class-switcher #refresh-class { grid-column: 2; grid-row: 2; }
+.class-switcher #classes { grid-column: 3; grid-row: 2; }
+.sync-status { display: block; color: var(--muted); font-size: 11px; }
+.permission-page { min-height: calc(100dvh - 130px); display: grid; place-items: center; }
+.permission-card { width: min(100%, 620px); margin: 0 auto; text-align: center; }
+.permission-icon { width: 74px; height: 74px; display: grid; place-items: center; margin: 0 auto 14px; border-radius: 24px; background: #eff6ff; font-size: 34px; }
+.permission-points { display: grid; gap: 10px; margin: 22px 0; text-align: left; }
+.permission-points p { margin: 0; padding: 12px 14px; border-radius: 13px; background: #f8fafc; }
+.permission-points span { color: var(--muted); font-size: 13px; }
+.permission-card .quiet { margin-top: 9px; }
 
 .journal-list { display: grid; gap: 14px; }
 .journal-card { padding: 20px; }
@@ -255,6 +264,8 @@ blockquote { margin: 0 0 16px; padding: 14px 18px; border-left: 5px solid #f59e0
   .batch-bar { align-items: stretch; flex-direction: column; }
   .teacher-class-heading { align-items: stretch; }
   .class-switcher { width: 100%; grid-template-columns: 1fr auto; }
+  .class-switcher #refresh-class { grid-column: 1 / -1; grid-row: 3; }
+  .class-switcher #classes { grid-column: 2; grid-row: 2; }
   .pwa-controls { right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); }
   .pwa-update > span { display: none; }
 }

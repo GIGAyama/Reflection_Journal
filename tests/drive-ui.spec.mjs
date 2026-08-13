@@ -35,18 +35,30 @@ const channel = {
   updatedAt: now
 };
 
-async function mockGoogle(page, role) {
+async function mockGoogle(page, role, { denyShared = false } = {}) {
   const email = role === 'teacher' ? 'teacher@example.ed.jp' : 'student@example.ed.jp';
-  await page.addInitScript(({ email }) => {
-    window.google = { accounts: { oauth2: { initTokenClient: ({ callback }) => ({ requestAccessToken: () => callback({ access_token: 'e2e-token' }) }) } } };
+  await page.addInitScript(({ email, denyShared }) => {
+    const baseScopes = 'openid email profile https://www.googleapis.com/auth/drive.file';
+    const sharedScope = 'https://www.googleapis.com/auth/drive.readonly';
+    window.__requestedScopes = [];
+    window.google = { accounts: { oauth2: {
+      initTokenClient: ({ callback, scope }) => ({ requestAccessToken: () => {
+        window.__requestedScopes.push(scope);
+        const shared = scope.includes('drive.readonly');
+        if (shared && denyShared) return callback({ error: 'access_denied', error_description: '閲覧許可がキャンセルされました。' });
+        callback({ access_token: shared ? 'shared-token' : 'base-token', scope: shared ? `${baseScopes} ${sharedScope}` : baseScopes });
+      } }),
+      hasGrantedAllScopes: (response, ...scopes) => scopes.every((scope) => String(response.scope || '').split(' ').includes(scope))
+    } } };
     window.APP_CONFIG = { googleClientId: 'e2e-client', publicEntryUrl: 'http://127.0.0.1:4173/' };
     window.__e2eEmail = email;
-  }, { email });
+  }, { email, denyShared });
   await page.route('https://openidconnect.googleapis.com/v1/userinfo', (route) => route.fulfill({ json: { email, name: role === 'teacher' ? '山田先生' : '鈴木花子' } }));
   await page.route('https://www.googleapis.com/drive/v3/**', async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const query = decodeURIComponent(url.searchParams.get('q') || '');
+    if (query.includes('sharedWithMe') && route.request().headers().authorization !== 'Bearer shared-token') return route.fulfill({ json: { files: [] } });
     if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' ? [{ id: 'class-file', modifiedTime: now }] : [] } });
     if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: [{ id: 'portfolio-file', modifiedTime: now }] } });
     if (path.endsWith('/files') && query.includes("value='channel'")) return route.fulfill({ json: { files: [{ id: 'channel-file', modifiedTime: now }] } });
@@ -63,6 +75,7 @@ async function loginAs(page, role) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: role === 'teacher' ? /先生として使う/ : /児童として使う/ }).click();
+  await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
 }
 
 test('児童のモバイル画面はノートを先頭にし、横にはみ出さない', async ({ page }) => {
@@ -107,6 +120,8 @@ test('教師は提出率・絞り込み・クイック返却・範囲コメン�
   await expect(page.locator('.submission-donut')).toContainText('100%');
   await page.locator('[data-filter="returned"]').click();
   await expect(page.locator('.teacher-journal-card')).toHaveCount(1);
+  await page.getByRole('button', { name: /最新に更新/ }).click();
+  await expect(page.locator('.submission-donut')).toContainText('100%');
   await page.locator('.journal-open').click();
   await page.locator('#journal-source').evaluate((node) => {
     const range = document.createRange();
@@ -118,4 +133,24 @@ test('教師は提出率・絞り込み・クイック返却・範囲コメン�
   });
   await page.getByRole('button', { name: /選んだ部分にコメント/ }).click();
   await expect(page.locator('.highlight-row')).toHaveCount(1);
+});
+
+test('別アカウントの共有記録は説明後の追加許可で同期する', async ({ page }) => {
+  await loginAs(page, 'teacher');
+  await expect(page.getByRole('button', { name: /5年1組/ })).toBeVisible();
+  const scopes = await page.evaluate(() => window.__requestedScopes);
+  expect(scopes).toEqual([
+    'openid email profile https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive.readonly'
+  ]);
+});
+
+test('共有記録の閲覧を許可しなかった場合は理由と再試行を表示する', async ({ page }) => {
+  await mockGoogle(page, 'student', { denyShared: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
+  await page.getByRole('button', { name: /児童として使う/ }).click();
+  await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
+  await expect(page.getByRole('alert')).toContainText('閲覧許可がキャンセルされました');
+  await expect(page.getByRole('button', { name: '共有された記録の同期を許可する' })).toBeVisible();
 });
