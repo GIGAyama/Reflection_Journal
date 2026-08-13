@@ -13,9 +13,12 @@ export class DriveApiError extends Error {
 }
 
 export class DriveClient {
-  constructor(accessToken, fetchImpl = globalThis.fetch) {
+  constructor(accessToken, fetchImpl) {
     this.accessToken = accessToken;
-    this.fetch = fetchImpl;
+    const fetcher = fetchImpl ?? globalThis.fetch;
+    // Browser-native fetch requires the Window/global receiver in some engines.
+    // Wrapping it also keeps dependency injection available for automated tests.
+    this.fetch = (...args) => Reflect.apply(fetcher, globalThis, args);
   }
 
   async request(url, options = {}) {
