@@ -23,10 +23,19 @@
     <section class="center-screen"><div class="loader" aria-hidden="true"></div><p>アプリを準備しています…</p></section>
   </main>
   <div id="toast" role="status" aria-live="polite"></div>
+  <div id="pwa-controls" class="pwa-controls" aria-live="polite">
+    <button id="pwa-install" class="pwa-action" type="button" hidden>📲 アプリを入れる</button>
+    <div id="pwa-update" class="pwa-update" hidden><span>新しいバージョンがあります</span><button id="pwa-refresh" class="pwa-action" type="button">さいしんにする</button><button id="pwa-later" class="pwa-later" type="button">あとで</button></div>
+  </div>
   <script type="module" src="./drive-app.js"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
-      window.addEventListener('load', function () { navigator.serviceWorker.register('./sw.js').catch(function () {}); });
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./sw.js').then(function (registration) {
+          window.__pwaRegistration = registration;
+          window.dispatchEvent(new Event('pwa-registration-ready'));
+        }).catch(function () {});
+      });
     }
   </script>
 </body>

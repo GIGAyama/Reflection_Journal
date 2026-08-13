@@ -33,13 +33,35 @@ const state = {
   portfolio: null,
   portfolioFile: null,
   channel: null,
-  channelFile: null
+  channelFile: null,
+  studentMonth: new Date(),
+  teacherFilter: 'all',
+  teacherSearch: '',
+  teacherClasses: [],
+  restoreLastTeacherClass: false,
+  feedbackDraftKey: '',
+  feedbackDraftHighlights: []
 };
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
 })[char]);
 const todayKey = (date = new Date()) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+const ruby = (word, reading) => `<ruby>${escapeHtml(word)}<rt>${escapeHtml(reading)}</rt></ruby>`;
+
+const JOURNAL_TEMPLATES = [
+  ['YWT', '【Y: やったこと】\n\n【W: わかったこと】\n\n【T: つぎにやること】\n'],
+  ['KPT', '【K: Keep よかったこと・つづけること】\n\n【P: Problem こまったこと・やめること】\n\n【T: Try つぎにためすこと】\n'],
+  ['5W1H', '【いつ】\n\n【どこで】\n\n【だれが】\n\n【なにを】\n\n【なぜ】\n\n【どのように】\n'],
+  ['3つの気づき', '【わかったこと】\n\n【おどろいたこと】\n\n【もっとしりたいこと】\n']
+];
+const RANDOM_STARTERS = ['今日いちばん心にのこったのは、', '今日、はじめてできたことは、', '今日うれしかったのは、', '明日がんばりたいことは、'];
+const HINT_GROUPS = [
+  ['気持ち', ['今日、いちばんうれしかったことは、', 'くやしかったこと・かなしかったことは、', 'ドキドキ・ワクワクした瞬間は、']],
+  ['学び', ['新しくわかったこと・できたことは、', '「なぜだろう？」と思ったことは、', 'もっと調べたい・知りたいことは、']],
+  ['つながり', ['友だちに「ありがとう」と言いたいことは、', 'だれかの「すごいな」と思ったところは、', 'みんなで協力してできたことは、']],
+  ['次へ', ['明日がんばりたいことは、', 'もう一度やるなら、どうする？', '今日の自分にひとこと言うなら、']]
+];
 
 function toast(message) {
   toastElement.textContent = message;
@@ -147,7 +169,7 @@ function renderHome(error = '') {
       <button class="item-card" id="teacher-home" type="button"><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
       <button class="item-card" id="student-home" type="button"><h2>児童として使う</h2><p class="muted">参加したクラスで書き、おへんじを受け取ります。</p></button>
     </div></section>`);
-  document.getElementById('teacher-home').addEventListener('click', () => renderTeacherHome());
+  document.getElementById('teacher-home').addEventListener('click', () => { state.restoreLastTeacherClass = true; renderTeacherHome(); });
   document.getElementById('student-home').addEventListener('click', () => renderStudentHome());
 }
 
@@ -158,6 +180,15 @@ async function renderTeacherHome(error = '') {
   const classes = (await Promise.all(files.map(async (file) => {
     try { return { file, record: await state.drive.getJson(file.id) }; } catch (loadError) { return null; }
   }))).filter(Boolean);
+  state.teacherClasses = classes;
+  if (state.restoreLastTeacherClass && classes.length) {
+    state.restoreLastTeacherClass = false;
+    let last = '';
+    try { last = localStorage.getItem('rj_last_teacher_class') || ''; } catch (storageError) {}
+    const match = classes.find(({ file }) => file.id === last);
+    if (match) return openTeacherClass(match);
+  }
+  state.restoreLastTeacherClass = false;
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">先生</span><h1>クラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
     ${errorNotice(error)}
     <section class="panel"><h2>新しいクラスを作る</h2><form id="create-class">
@@ -215,24 +246,31 @@ async function openTeacherClass(item, tab = 'journals', error = '') {
     }
     if (JSON.stringify(record) !== original) await state.drive.updateJson(item.file.id, record);
     state.teacher = { file: item.file, record, portfolios, channels };
+    try { localStorage.setItem('rj_last_teacher_class', item.file.id); } catch (storageError) {}
     renderTeacherClass(tab, error);
   }, (message) => renderTeacherHome(message));
 }
 
 function teacherTabs(active) {
+  const pending = (state.teacher.record.members || []).filter((member) => member.status === 'pending').length;
   return `<nav class="tabs" aria-label="クラスメニュー">${[
-    ['journals', 'ジャーナル管理'], ['vitals', '心のバイタル'], ['settings', 'クラス設定']
+    ['journals', 'ジャーナル管理'], ['vitals', '心のバイタル'], ['settings', `クラス設定${pending ? ` (${pending})` : ''}`]
   ].map(([id, label]) => `<button class="tab ${active === id ? 'active' : ''}" data-tab="${id}" type="button">${label}</button>`).join('')}</nav>`;
 }
 
 function bindTeacherTabs() {
   document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => renderTeacherClass(button.dataset.tab)));
   document.getElementById('classes')?.addEventListener('click', () => renderTeacherHome());
+  document.getElementById('class-switch')?.addEventListener('change', (event) => {
+    if (event.target.value === 'new') return renderTeacherHome();
+    const next = state.teacherClasses.find(({ file }) => file.id === event.target.value);
+    if (next) openTeacherClass(next);
+  });
 }
 
 function renderTeacherClass(tab = 'journals', error = '') {
   const ctx = state.teacher;
-  app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1></div><button id="classes" class="quiet" type="button">クラス一覧へ</button></div>
+  app.innerHTML = shell(`<div class="page-heading teacher-class-heading"><div><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1></div><div class="class-switcher"><label for="class-switch">表示するクラス</label><select id="class-switch">${state.teacherClasses.map(({ file, record }) => `<option value="${escapeHtml(file.id)}" ${file.id === ctx.file.id ? 'selected' : ''}>${escapeHtml(record.className)}</option>`).join('')}<option value="new">＋ クラス一覧・新規作成</option></select><button id="classes" class="quiet" type="button">一覧</button></div></div>
     ${errorNotice(error)}${teacherTabs(tab)}<div id="teacher-content"></div>`);
   bindTeacherTabs();
   if (tab === 'journals') renderJournalManagement();
@@ -249,8 +287,9 @@ function renderJournalManagement() {
   const ctx = state.teacher;
   const stats = analyzeClass(activePortfolioItems(), ctx.channels);
   const content = document.getElementById('teacher-content');
-  content.innerHTML = `<section class="metrics">
-    <div class="metric"><strong>${stats.submittedToday}/${stats.totalStudents}</strong><span>今日の提出</span></div>
+  const rate = stats.totalStudents ? Math.round(stats.submittedToday / stats.totalStudents * 100) : 0;
+  content.innerHTML = `<section class="metrics teacher-overview">
+    <div class="metric submission-donut-card"><div class="submission-donut" style="--rate:${rate * 3.6}deg"><span><strong>${rate}%</strong><small>${stats.submittedToday}/${stats.totalStudents}人</small></span></div><span>今日の提出率</span></div>
     <div class="metric"><strong>${stats.all.length}</strong><span>すべての記録</span></div>
     <div class="metric"><strong>${stats.returned}</strong><span>返却済み</span></div>
   </section>
@@ -259,26 +298,46 @@ function renderJournalManagement() {
     <details><summary>曜日ごとのテーマ</summary><div class="form-grid">${['月','火','水','木','金'].map((day, index) => `<label><span>${day}曜日</span><input class="weekly-theme" data-day="${index + 1}" maxlength="200" value="${escapeHtml(ctx.record.settings.weeklyThemes?.[index + 1] || '')}"></label>`).join('')}</div></details>
     <button class="primary" type="submit">テーマを保存して児童へ配信</button>
   </form></section>
-  <section><div class="page-heading"><h2>提出一覧</h2><input id="journal-search" class="compact-input" placeholder="氏名・本文・テーマを検索"></div>
-    <div id="journal-list" class="journal-list">${teacherJournalCards(stats.all)}</div>
+  <section><div class="page-heading"><h2>提出一覧</h2><input id="journal-search" class="compact-input" value="${escapeHtml(state.teacherSearch)}" placeholder="氏名・本文・テーマを検索"></div>
+    <div class="filter-row" role="group" aria-label="返却状況で絞り込む">${[['all','すべて'],['unreturned','未返却'],['returned','返却済み']].map(([value, label]) => `<button class="filter-chip ${state.teacherFilter === value ? 'active' : ''}" data-filter="${value}" type="button">${label}</button>`).join('')}</div>
+    <div class="batch-bar"><div><strong>まとめて支援</strong><span class="muted small">未返却の記録が対象です。AIの内容は返却前に確認してください。</span></div><div class="button-row compact"><button id="batch-ai-simple" class="secondary" type="button">AI下書き</button><button id="batch-ai-detail" class="secondary" type="button">AIで詳しく</button><button id="batch-return" class="primary" type="button">一括返却</button></div></div>
+    <div id="journal-list" class="journal-list">${teacherJournalCards(filterTeacherJournals(stats.all))}</div>
   </section>`;
   document.getElementById('theme-form').addEventListener('submit', saveThemes);
   document.getElementById('journal-search').addEventListener('input', (event) => {
-    const query = event.target.value.toLowerCase();
-    document.getElementById('journal-list').innerHTML = teacherJournalCards(stats.all.filter((journal) => `${journal.student.name} ${journal.theme} ${journal.content}`.toLowerCase().includes(query)));
+    state.teacherSearch = event.target.value;
+    document.getElementById('journal-list').innerHTML = teacherJournalCards(filterTeacherJournals(stats.all));
     bindJournalCards(stats.all);
   });
+  document.querySelectorAll('[data-filter]').forEach((button) => button.addEventListener('click', () => {
+    state.teacherFilter = button.dataset.filter;
+    renderJournalManagement();
+  }));
+  document.getElementById('batch-return').addEventListener('click', () => batchReturn(stats.all));
+  document.getElementById('batch-ai-simple').addEventListener('click', () => batchAiDrafts(stats.all, false));
+  document.getElementById('batch-ai-detail').addEventListener('click', () => batchAiDrafts(stats.all, true));
   bindJournalCards(stats.all);
+}
+
+function filterTeacherJournals(journals) {
+  const query = state.teacherSearch.trim().toLowerCase();
+  return journals.filter((journal) => {
+    const returned = Boolean(state.teacher.channels.get(normalizeEmail(journal.student.email))?.feedback?.[journal.id]?.returned);
+    const matchesStatus = state.teacherFilter === 'all' || (state.teacherFilter === 'returned' ? returned : !returned);
+    const matchesQuery = !query || `${journal.student.name} ${journal.theme} ${journal.content}`.toLowerCase().includes(query);
+    return matchesStatus && matchesQuery;
+  });
 }
 
 function teacherJournalCards(journals) {
   return journals.length ? journals.map((journal) => {
     const feedback = state.teacher.channels.get(normalizeEmail(journal.student.email))?.feedback?.[journal.id];
-    return `<button class="journal-card journal-open" data-email="${escapeHtml(journal.student.email)}" data-journal="${escapeHtml(journal.id)}" type="button">
+    return `<article class="journal-card teacher-journal-card"><button class="journal-main journal-open" data-email="${escapeHtml(journal.student.email)}" data-journal="${escapeHtml(journal.id)}" type="button">
       <div class="journal-meta"><span><strong>${escapeHtml(journal.student.name)}</strong> · ${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div>
       <h3>${escapeHtml(journal.theme || 'テーマなし')}</h3><div class="journal-body clamp">${escapeHtml(journal.content)}</div>
-      <span class="badge ${feedback?.returned ? 'success-badge' : ''}">${feedback?.returned ? '返却済み' : '未返却'}</span>
-    </button>`;
+      <span class="badge ${feedback?.returned ? 'success-badge' : ''}">${feedback?.returned ? '返却済み' : '未返却'}</span></button>
+      <div class="quick-feedback" aria-label="クイック返却">${feedback?.returned ? `<button class="quiet" data-quick-undo data-email="${escapeHtml(journal.student.email)}" data-journal="${escapeHtml(journal.id)}" type="button">↩ 返却を取り消す</button>` : `<span class="muted small">すぐ返す:</span>${['😊','👏','💪','⭐'].map((stamp) => `<button class="quick-stamp" data-quick-stamp="${stamp}" data-email="${escapeHtml(journal.student.email)}" data-journal="${escapeHtml(journal.id)}" type="button" aria-label="${stamp}で返却">${stamp}</button>`).join('')}</div>`}
+    </article>`;
   }).join('') : '<div class="empty">提出はまだありません。</div>';
 }
 
@@ -288,6 +347,109 @@ function bindJournalCards(all) {
     const portfolio = state.teacher.portfolios.find(({ record }) => normalizeEmail(record.student.email) === normalizeEmail(button.dataset.email));
     renderFeedbackEditor(portfolio, journal);
   }));
+  document.querySelectorAll('[data-quick-stamp]').forEach((button) => button.addEventListener('click', () => quickFeedback(button.dataset.email, button.dataset.journal, button.dataset.quickStamp, true)));
+  document.querySelectorAll('[data-quick-undo]').forEach((button) => button.addEventListener('click', () => quickFeedback(button.dataset.email, button.dataset.journal, '', false)));
+}
+
+async function quickFeedback(email, journalId, stamp, returned) {
+  const normalized = normalizeEmail(email);
+  const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === normalized);
+  let channel = state.teacher.channels.get(normalized);
+  if (!channel || !member?.channelFileId) return toast('先に児童の参加を承認してください。');
+  const existing = channel.feedback?.[journalId] || {};
+  channel = setFeedback(channel, journalId, { ...existing, stamp: stamp || existing.stamp, returned });
+  await withError(async () => {
+    await state.drive.updateJson(member.channelFileId, channel);
+    state.teacher.channels.set(normalized, channel);
+    toast(returned ? `${stamp} を返しました。` : '返却を取り消しました。');
+    renderJournalManagement();
+  }, (message) => renderTeacherClass('journals', message));
+}
+
+function unreturnedJournals(journals) {
+  return journals.filter((journal) => !state.teacher.channels.get(normalizeEmail(journal.student.email))?.feedback?.[journal.id]?.returned);
+}
+
+async function batchReturn(journals) {
+  const targets = unreturnedJournals(journals);
+  if (!targets.length) return toast('未返却の記録はありません。');
+  if (!window.confirm(`${targets.length}件をまとめて返却します。よろしいですか？`)) return;
+  setBusy(`${targets.length}件のおへんじを返しています…`);
+  await withError(async () => {
+    const changed = new Map();
+    for (const journal of targets) {
+      const email = normalizeEmail(journal.student.email);
+      let channel = changed.get(email) || state.teacher.channels.get(email);
+      if (!channel) continue;
+      const existing = channel.feedback?.[journal.id] || {};
+      channel = setFeedback(channel, journal.id, { ...existing, stamp: existing.stamp || '👏', returned: true });
+      changed.set(email, channel);
+    }
+    for (const [email, channel] of changed) {
+      const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === email);
+      if (member?.channelFileId) await state.drive.updateJson(member.channelFileId, channel);
+      state.teacher.channels.set(email, channel);
+    }
+    toast(`${targets.length}件を返却しました。`);
+    renderTeacherClass('journals');
+  }, (message) => renderTeacherClass('journals', message));
+}
+
+async function geminiText(prompt) {
+  const apiKey = state.teacher.record.settings.geminiApiKey;
+  if (!apiKey) throw new Error('クラス設定でGemini APIキーを保存してください。');
+  const model = state.teacher.record.settings.geminiModel || 'gemini-3.1-flash-lite';
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error?.message || 'AI支援を利用できませんでした。');
+  return result.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('')?.trim() || '';
+}
+
+function detailedAiResult(text, journal) {
+  const jsonText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const parsed = JSON.parse(jsonText);
+  const highlights = (Array.isArray(parsed.highlights) ? parsed.highlights : []).map((item, index) => {
+    const quote = String(item.quote || '').trim();
+    const start = journal.content.indexOf(quote);
+    return start < 0 || !quote ? null : { id: crypto.randomUUID?.() || `ai-${Date.now()}-${index}`, start, end: start + quote.length, text: quote, comment: String(item.comment || '').trim(), stamp: String(item.stamp || '').slice(0, 8) };
+  }).filter(Boolean);
+  return { comment: String(parsed.comment || '').trim(), stamp: String(parsed.stamp || '🌱').slice(0, 8), highlights };
+}
+
+async function batchAiDrafts(journals, detailed) {
+  const targets = unreturnedJournals(journals);
+  if (!targets.length) return toast('未返却の記録はありません。');
+  if (!state.teacher.record.settings.geminiApiKey) return renderTeacherClass('settings', 'AI支援を使うにはGemini APIキーを設定してください。');
+  if (!window.confirm(`${targets.length}件のAI下書きを作ります。API利用料が発生する場合があります。続けますか？`)) return;
+  setBusy(`AIが${targets.length}件の下書きを作っています…`);
+  await withError(async () => {
+    const changed = new Map();
+    let completed = 0;
+    for (const journal of targets) {
+      const prompt = detailed
+        ? `あなたは小学校の担任です。児童のふりかえりを読み、温かい総合コメントと、本文中の具体的なよさ2箇所以内を選んでください。必ず次のJSONだけを返してください。{"comment":"100字以内","stamp":"絵文字1個","highlights":[{"quote":"本文から完全一致する短い引用","comment":"具体的な称賛","stamp":"絵文字1個"}]}\nテーマ: ${journal.theme}\n本文: ${journal.content}`
+        : `あなたは小学校の担任です。次の児童のふりかえりへ、具体的なよさを認め、次の学びにつながる温かいコメントを100字以内で日本語で書いてください。コメント本文だけを返してください。\nテーマ: ${journal.theme}\n本文: ${journal.content}`;
+      const generated = await geminiText(prompt);
+      const draft = detailed ? detailedAiResult(generated, journal) : { comment: generated, stamp: '🌱', highlights: [] };
+      const email = normalizeEmail(journal.student.email);
+      let channel = changed.get(email) || state.teacher.channels.get(email);
+      if (!channel) continue;
+      channel = setFeedback(channel, journal.id, { ...draft, returned: false });
+      changed.set(email, channel);
+      completed += 1;
+    }
+    for (const [email, channel] of changed) {
+      const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === email);
+      if (member?.channelFileId) await state.drive.updateJson(member.channelFileId, channel);
+      state.teacher.channels.set(email, channel);
+    }
+    toast(`${completed}件の下書きを保存しました。確認後に返却してください。`);
+    renderTeacherClass('journals');
+  }, (message) => renderTeacherClass('journals', message));
 }
 
 async function saveThemes(event) {
@@ -315,18 +477,58 @@ function renderFeedbackEditor(portfolioItem, journal, error = '') {
   const email = normalizeEmail(portfolioItem.record.student.email);
   const channel = ctx.channels.get(email);
   const existing = channel?.feedback?.[journal.id] || {};
+  const draftKey = `${email}:${journal.id}`;
+  if (state.feedbackDraftKey !== draftKey) {
+    state.feedbackDraftKey = draftKey;
+    state.feedbackDraftHighlights = (existing.highlights || []).map((item) => ({ ...item }));
+  }
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">おへんじ</span><h1>${escapeHtml(portfolioItem.record.student.name)}</h1></div><button id="journal-back" class="quiet" type="button">提出一覧へ</button></div>
     ${errorNotice(error)}
-    <div class="detail-grid"><article class="panel"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h2>${escapeHtml(journal.theme || 'テーマなし')}</h2><div class="journal-body">${escapeHtml(journal.content)}</div>${journal.imageFileId ? `<div class="image-slot" data-file="${escapeHtml(journal.imageFileId)}"><p>画像を読み込んでいます…</p></div>` : ''}</article>
+    <div class="detail-grid"><article class="panel"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h2>${escapeHtml(journal.theme || 'テーマなし')}</h2><p class="field-note">ほめたい文章を選び、「選んだ部分にコメント」を押すと、範囲ごとのおへんじを付けられます。</p><div id="journal-source" class="journal-body selectable-journal">${escapeHtml(journal.content)}</div><button id="add-highlight" class="secondary wide highlight-add" type="button">🖍️ 選んだ部分にコメント</button>${journal.imageFileId ? `<div class="image-slot" data-file="${escapeHtml(journal.imageFileId)}"><p>画像を読み込んでいます…</p></div>` : ''}</article>
     <section class="panel"><h2>先生のおへんじ</h2><form id="feedback-form">
       <label><span>コメント</span><textarea id="feedback-comment" maxlength="4000" placeholder="よかったところや、次につながるひとこと">${escapeHtml(existing.comment || '')}</textarea></label>
       <label><span>スタンプ</span><select id="feedback-stamp"><option value="">なし</option>${['😊','👏','💪','⭐','🌱','✨'].map((stamp) => `<option ${existing.stamp === stamp ? 'selected' : ''}>${stamp}</option>`).join('')}</select></label>
+      <div class="highlight-editor"><h3>文章ごとのおへんじ</h3><div id="highlight-list">${feedbackHighlightRows()}</div></div>
       <div class="button-row"><button class="primary" type="submit">保存して返却</button><button id="ai-draft" class="secondary" type="button">AIで下書き</button></div>
     </form></section></div>`);
   document.getElementById('journal-back').addEventListener('click', () => renderTeacherClass('journals'));
   document.getElementById('feedback-form').addEventListener('submit', (event) => saveFeedback(event, portfolioItem, journal));
   document.getElementById('ai-draft').addEventListener('click', () => generateAiDraft(journal, portfolioItem));
+  document.getElementById('add-highlight').addEventListener('click', () => addSelectionHighlight(portfolioItem, journal));
+  bindHighlightRows(portfolioItem, journal);
   loadImages();
+}
+
+function feedbackHighlightRows() {
+  return state.feedbackDraftHighlights.length ? state.feedbackDraftHighlights.map((item, index) => `<div class="highlight-row"><div class="highlight-quote">「${escapeHtml(item.text)}」</div><label><span>この部分へのひとこと</span><textarea data-highlight-comment="${index}" maxlength="1000">${escapeHtml(item.comment || '')}</textarea></label><div class="highlight-actions"><select data-highlight-stamp="${index}" aria-label="範囲コメントのスタンプ"><option value="">なし</option>${['😊','👏','💪','⭐','🌱','✨'].map((stamp) => `<option ${item.stamp === stamp ? 'selected' : ''}>${stamp}</option>`).join('')}</select><button class="danger" data-remove-highlight="${index}" type="button">削除</button></div></div>`).join('') : '<p class="muted small">まだ文章ごとのおへんじはありません。</p>';
+}
+
+function bindHighlightRows(portfolioItem, journal) {
+  document.querySelectorAll('[data-highlight-comment]').forEach((input) => input.addEventListener('input', () => { state.feedbackDraftHighlights[Number(input.dataset.highlightComment)].comment = input.value; }));
+  document.querySelectorAll('[data-highlight-stamp]').forEach((input) => input.addEventListener('change', () => { state.feedbackDraftHighlights[Number(input.dataset.highlightStamp)].stamp = input.value; }));
+  document.querySelectorAll('[data-remove-highlight]').forEach((button) => button.addEventListener('click', () => {
+    state.feedbackDraftHighlights.splice(Number(button.dataset.removeHighlight), 1);
+    renderFeedbackEditor(portfolioItem, journal);
+  }));
+}
+
+function addSelectionHighlight(portfolioItem, journal) {
+  const source = document.getElementById('journal-source');
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || selection.isCollapsed) return toast('本文から、ほめたい文章を選んでください。');
+  const range = selection.getRangeAt(0);
+  if (!source.contains(range.commonAncestorContainer)) return toast('左側の本文から文章を選んでください。');
+  const before = range.cloneRange();
+  before.selectNodeContents(source);
+  before.setEnd(range.startContainer, range.startOffset);
+  const start = before.toString().length;
+  const text = range.toString().trim();
+  if (!text) return toast('本文から文章を選んでください。');
+  const adjustedStart = journal.content.indexOf(text, start);
+  const safeStart = adjustedStart >= 0 ? adjustedStart : start;
+  state.feedbackDraftHighlights.push({ id: crypto.randomUUID(), start: safeStart, end: safeStart + text.length, text, comment: '', stamp: '⭐' });
+  selection.removeAllRanges();
+  renderFeedbackEditor(portfolioItem, journal);
 }
 
 async function saveFeedback(event, portfolioItem, journal) {
@@ -335,11 +537,13 @@ async function saveFeedback(event, portfolioItem, journal) {
   const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === email);
   let channel = state.teacher.channels.get(email);
   if (!channel || !member?.channelFileId) return renderFeedbackEditor(portfolioItem, journal, 'おへんじを届ける準備が完了していません。クラス設定で児童を承認してください。');
-  channel = setFeedback(channel, journal.id, { comment: document.getElementById('feedback-comment').value, stamp: document.getElementById('feedback-stamp').value, returned: true });
+  channel = setFeedback(channel, journal.id, { comment: document.getElementById('feedback-comment').value, stamp: document.getElementById('feedback-stamp').value, highlights: state.feedbackDraftHighlights, returned: true });
   setBusy('おへんじを保存しています…');
   await withError(async () => {
     await state.drive.updateJson(member.channelFileId, channel);
     state.teacher.channels.set(email, channel);
+    state.feedbackDraftKey = '';
+    state.feedbackDraftHighlights = [];
     toast('児童へ返却しました。');
     renderTeacherClass('journals');
   }, (message) => renderFeedbackEditor(portfolioItem, journal, message));
@@ -390,15 +594,19 @@ function renderClassSettings() {
     acceptingMembers: true
   });
   const content = document.getElementById('teacher-content');
-  content.innerHTML = `<section class="panel invite-layout"><div><h2>児童を招待する</h2><p class="muted">専用URLまたはQRコードを配ってください。</p><div class="class-code">${escapeHtml(ctx.record.classCode)}</div><div class="url-box">${escapeHtml(link)}</div><div class="button-row" style="margin-top:12px"><button id="copy-url" class="primary" type="button">専用URLをコピー</button><button id="copy-text" class="secondary" type="button">招待文をコピー</button></div></div><div id="qr" class="qr-box" aria-label="児童招待用QRコード"></div></section>
+  content.innerHTML = `<section class="panel invite-layout"><div><span class="eyebrow">INVITE STUDENTS</span><h2>児童を招待する</h2><p class="muted">教室ではQRコード、遠隔では専用URLを配ると簡単です。</p><div class="class-code">${escapeHtml(ctx.record.classCode)}</div><div class="button-row"><button id="copy-code" class="secondary" type="button">クラスコードをコピー</button><button id="student-preview" class="quiet" type="button">児童画面を確認</button></div><div class="url-box">${escapeHtml(link)}</div><div class="button-row" style="margin-top:12px"><button id="copy-url" class="primary" type="button">専用URLをコピー</button><button id="copy-text" class="secondary" type="button">招待文をコピー</button></div></div><div class="qr-actions"><div id="qr" class="qr-box" aria-label="児童招待用QRコード"></div><button id="download-qr" class="secondary wide" type="button">QRを画像で保存</button></div></section>
   <section class="panel"><h2>参加設定</h2><form id="admission-form"><label class="check-label"><input id="approval" type="checkbox" ${settings.approvalRequired ? 'checked' : ''}><span>参加には先生の承認が必要</span></label><p class="muted small">承認なしにすると、児童の参加後に先生がクラス画面を開いた時点で自動承認されます。</p><button class="primary" type="submit">設定を保存</button></form></section>
-  <section class="panel"><h2>参加申請・名簿</h2><div id="member-list">${memberRows()}</div><form id="invite-member" class="inline-form"><input id="member-name" required placeholder="児童名"><input id="member-email" type="email" required placeholder="児童のGoogleメール"><button class="secondary" type="submit">名簿へ追加</button></form></section>
+  <section class="panel"><div class="section-heading"><div><span class="eyebrow">ROSTER</span><h2>参加申請・名簿</h2></div><span class="badge">${(ctx.record.members || []).filter((member) => member.status === 'active').length}人 参加中</span></div><div id="member-list">${memberRows()}</div><form id="invite-member" class="inline-form"><input id="member-name" required placeholder="児童名"><input id="member-email" type="email" required placeholder="児童のGoogleメール"><button class="secondary" type="submit">1人追加</button></form><details><summary>名簿をまとめて追加</summary><form id="bulk-members"><label><span>1行に「名前, メールアドレス」</span><textarea id="bulk-member-text" placeholder="山田 花子, hanako@example.ed.jp\n鈴木 太郎, taro@example.ed.jp"></textarea></label><button class="secondary" type="submit">まとめて名簿へ追加</button></form></details></section>
   <section class="panel"><h2>Gemini AI支援（任意）</h2><form id="gemini-form"><label><span>APIキー</span><input id="gemini-key" type="password" value="${escapeHtml(settings.geminiApiKey || '')}" autocomplete="off"></label><label><span>モデル</span><input id="gemini-model" value="${escapeHtml(settings.geminiModel || 'gemini-3.1-flash-lite')}"></label><p class="muted small">キーは先生所有の非共有クラス設定ファイルに保存され、児童へは共有されません。AIコメントは必ず先生が確認してから返却します。</p><button class="primary" type="submit">AI設定を保存</button></form></section>
   <section class="panel"><h2>データ出力</h2><div class="button-row"><button id="csv" class="secondary" type="button">CSVをダウンロード</button><button id="print" class="secondary" type="button">印刷・PDF</button></div></section>`;
   document.getElementById('copy-url').addEventListener('click', () => copy(link, '専用URLをコピーしました。'));
+  document.getElementById('copy-code').addEventListener('click', () => copy(ctx.record.classCode, 'クラスコードをコピーしました。'));
   document.getElementById('copy-text').addEventListener('click', () => copy(`「${ctx.record.className}」のふりかえりジャーナルに参加してください。\nクラスコード: ${ctx.record.classCode}\n${link}`, '招待文をコピーしました。'));
+  document.getElementById('student-preview').addEventListener('click', () => window.open(link, '_blank', 'noopener'));
+  document.getElementById('download-qr').addEventListener('click', () => downloadQrCode(ctx.record.className));
   document.getElementById('admission-form').addEventListener('submit', saveAdmissionSettings);
   document.getElementById('invite-member').addEventListener('submit', addInvitedMember);
+  document.getElementById('bulk-members').addEventListener('submit', addBulkMembers);
   document.getElementById('gemini-form').addEventListener('submit', saveGeminiSettings);
   document.getElementById('csv').addEventListener('click', downloadCsv);
   document.getElementById('print').addEventListener('click', printClass);
@@ -433,6 +641,26 @@ async function addInvitedMember(event) {
   if (existing) { existing.name = name; if (existing.status === 'rejected') existing.status = 'invited'; }
   else state.teacher.record.members.push({ email, name, role: 'student', status: 'invited', portfolioFileId: '', channelFileId: '', joinedAt: '' });
   await saveTeacherRecord('名簿へ追加しました。');
+}
+
+async function addBulkMembers(event) {
+  event.preventDefault();
+  const rows = document.getElementById('bulk-member-text').value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const invalid = [];
+  let added = 0;
+  for (const line of rows) {
+    const separator = line.includes('\t') ? '\t' : ',';
+    const parts = line.split(separator).map((part) => part.trim());
+    const email = normalizeEmail(parts.pop());
+    const name = parts.join(' ').trim();
+    if (!name || !isEmail(email)) { invalid.push(line); continue; }
+    const existing = state.teacher.record.members.find((member) => normalizeEmail(member.email) === email);
+    if (existing) { existing.name = name; if (existing.status === 'rejected') existing.status = 'invited'; }
+    else state.teacher.record.members.push({ email, name, role: 'student', status: 'invited', portfolioFileId: '', channelFileId: '', joinedAt: '' });
+    added += 1;
+  }
+  if (!added) return toast('「名前, メールアドレス」の形で入力してください。');
+  await saveTeacherRecord(invalid.length ? `${added}人を追加しました。${invalid.length}行は形式を確認してください。` : `${added}人を名簿へ追加しました。`);
 }
 
 async function updateMemberStatus(email, status) {
@@ -553,6 +781,23 @@ async function openPortfolio(item, error = '') {
 }
 
 function draftKey() { return `rj_draft_v2_${state.portfolio.class.id}_${state.user.email}`; }
+function readKey() { return `rj_read_v2_${state.portfolio.class.id}_${state.user.email}`; }
+
+function readJournalIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(readKey()) || '[]')); }
+  catch (error) { return new Set(); }
+}
+
+function unreadFeedbackJournals() {
+  const read = readJournalIds();
+  return (state.portfolio.journals || []).filter((journal) => state.channel?.feedback?.[journal.id]?.returned && !read.has(journal.id));
+}
+
+function markJournalRead(journalId) {
+  const read = readJournalIds();
+  read.add(journalId);
+  try { localStorage.setItem(readKey(), JSON.stringify([...read].slice(-500))); } catch (error) {}
+}
 
 function renderPortfolio(error = '') {
   const portfolio = state.portfolio;
@@ -562,10 +807,12 @@ function renderPortfolio(error = '') {
   const theme = currentTheme(channel?.themes || {}, new Date());
   let draft = {};
   try { draft = JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch (loadError) {}
+  const unread = unreadFeedbackJournals();
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1>${escapeHtml(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">クラス一覧へ</button></div>
     ${errorNotice(error)}${typeof error === 'string' && error ? '<button id="reshare" class="secondary" type="button">先生へもう一度届ける</button>' : ''}
+    ${unread.length ? `<button id="unread-feedback" class="feedback-alert" type="button"><span>💌</span><strong>先生から新しいおへんじが ${unread.length}件 届いています</strong><span>見る →</span></button>` : ''}
     ${rejected ? '<div class="error">このクラスへの参加は承認されませんでした。先生へ確認してください。</div>' : pending ? '<div class="notice">参加申請を先生へ送りました。先生が承認すると、ふりかえりを書けるようになります。</div>' : studentWorkspace(theme, draft)}
-    <section><h2>これまでのふりかえり</h2><div class="journal-list">${studentJournalCards()}</div></section>
+    <section class="student-history"><div class="section-heading"><div><span class="eyebrow">MY JOURNAL</span><h2>これまでのふりかえり</h2></div><span class="muted">${(portfolio.journals || []).length}件</span></div><div class="journal-list">${studentJournalCards()}</div></section>
     ${pastSelfPanel()}`);
   document.getElementById('student-classes').addEventListener('click', () => renderStudentHome());
   document.getElementById('reshare')?.addEventListener('click', async () => {
@@ -576,27 +823,100 @@ function renderPortfolio(error = '') {
     form.addEventListener('submit', saveJournal);
     ['theme','content'].forEach((id) => document.getElementById(id).addEventListener('input', saveDraft));
     document.querySelectorAll('[data-insert]').forEach((button) => button.addEventListener('click', () => insertText(button.dataset.insert)));
+    document.querySelectorAll('[data-template]').forEach((button) => button.addEventListener('click', () => applyTemplate(button.dataset.template)));
+    document.getElementById('random-starter')?.addEventListener('click', insertRandomStarter);
+    document.querySelectorAll('[name="emotion"]').forEach((input) => input.addEventListener('change', saveDraft));
   }
+  document.querySelectorAll('[data-student-journal]').forEach((button) => button.addEventListener('click', () => openStudentJournal(button.dataset.studentJournal)));
+  document.getElementById('calendar-prev')?.addEventListener('click', () => changeStudentMonth(-1));
+  document.getElementById('calendar-next')?.addEventListener('click', () => changeStudentMonth(1));
+  document.getElementById('unread-feedback')?.addEventListener('click', () => openStudentJournal(unread[0]?.id));
   document.getElementById('past-comment-form')?.addEventListener('submit', savePastComment);
 }
 
 function studentWorkspace(theme, draft) {
-  return `<section class="panel"><h2>今日のテーマ</h2><div class="theme-banner">${escapeHtml(theme)}</div><form id="journal-form">
-    <label><span>テーマ</span><input id="theme" maxlength="200" value="${escapeHtml(draft.theme || theme)}"></label>
-    <div class="support-row">${['まず、','わかったことは、','友だちの考えから、','次は、'].map((text) => `<button class="quiet" data-insert="${escapeHtml(text)}" type="button">${escapeHtml(text)}</button>`).join('')}</div>
-    <label><span>ふりかえり</span><textarea id="content" maxlength="20000" required placeholder="できたこと、考えたこと、次にやってみたいことを書こう">${escapeHtml(draft.content || '')}</textarea></label>
-    <span><strong>いまの気持ち（任意）</strong></span><div class="emotion-row" role="radiogroup" aria-label="いまの気持ち">${['😊','💡','😐','🤔','😠'].map((emotion) => `<label><input type="radio" name="emotion" value="${emotion}"><span>${emotion}</span></label>`).join('')}</div>
-    <label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">画像は見やすい大きさにして、ふりかえりと一緒に先生へ届けます。</p>
-    <button class="primary wide" type="submit">ふりかえりを提出する</button>
-  </form></section>`;
+  return `<section class="student-workspace">
+    <aside class="student-calendar panel"><div class="calendar-heading"><button id="calendar-prev" class="icon-button" type="button" aria-label="前の月">‹</button><strong>${state.studentMonth.getFullYear()}年 ${state.studentMonth.getMonth() + 1}月</strong><button id="calendar-next" class="icon-button" type="button" aria-label="次の月">›</button></div>${studentCalendar()}</aside>
+    <section class="notebook panel"><div class="notebook-top"><div><span class="eyebrow">TODAY'S JOURNAL</span><h2>${ruby('今日', 'きょう')}のふりかえり</h2></div><span class="notebook-date">${new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())}</span></div>
+      <div class="theme-banner"><span>${ruby('今日', 'きょう')}のテーマ</span><strong>${escapeHtml(theme)}</strong></div><form id="journal-form">
+      <label class="visually-hidden"><span>テーマ</span><input id="theme" maxlength="200" value="${escapeHtml(draft.theme || theme)}"></label>
+      <label><span>${ruby('自分', 'じぶん')}のことばで${ruby('書', 'か')}こう</span><textarea id="content" class="lined-paper" maxlength="20000" required placeholder="できたこと、考えたこと、次にやってみたいことを書こう">${escapeHtml(draft.content || '')}</textarea></label>
+      <span><strong>${ruby('今', 'いま')}の${ruby('気持', 'きも')}ち</strong> <span class="muted small">（えらばなくてもOK）</span></span><div class="emotion-row labeled-emotions" role="radiogroup" aria-label="いまの気持ち">${[['😊','うれしい'],['😠','くやしい'],['💡','なるほど'],['🤔','もやもや']].map(([emotion, label]) => `<label><input type="radio" name="emotion" value="${emotion}" ${draft.emotion === emotion ? 'checked' : ''}><span><b>${emotion}</b><small>${label}</small></span></label>`).join('')}</div>
+      <details class="attachment"><summary>📎 ${ruby('作品', 'さくひん')}や${ruby('写真', 'しゃしん')}をつける</summary><label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">見やすい大きさにして先生へ届けます。</p></details>
+      <button class="primary wide submit-journal" type="submit">できた！ 先生にとどける</button>
+    </form></section>
+    <aside class="writing-tools panel"><h3>✏️ ${ruby('書', 'か')}き${ruby('方', 'かた')}サポート</h3><p class="muted small">ボタンをおすと、文の書き出しが入ります。</p>
+      <button id="random-starter" class="secondary wide" type="button">🎲 おまかせ書き出し</button>
+      <details open><summary>かたをえらぶ</summary><div class="template-grid">${JOURNAL_TEMPLATES.map(([label, value]) => `<button class="template-button" data-template="${escapeHtml(value)}" type="button">${escapeHtml(label)}</button>`).join('')}</div></details>
+      ${HINT_GROUPS.map(([label, hints], index) => `<details ${index === 0 ? 'open' : ''}><summary>${escapeHtml(label)}のヒント</summary><div class="hint-list">${hints.map((hint) => `<button class="hint-button" data-insert="${escapeHtml(hint)}" type="button">${escapeHtml(hint)}</button>`).join('')}</div></details>`).join('')}
+    </aside>
+  </section>`;
+}
+
+function studentCalendar() {
+  const year = state.studentMonth.getFullYear();
+  const month = state.studentMonth.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const lastDate = new Date(year, month + 1, 0).getDate();
+  const journals = state.portfolio.journals || [];
+  const cells = Array.from({ length: firstDay }, () => '<span class="calendar-cell empty-day"></span>');
+  for (let day = 1; day <= lastDate; day += 1) {
+    const key = todayKey(new Date(year, month, day));
+    const journal = [...journals].reverse().find((item) => todayKey(new Date(item.createdAt)) === key);
+    const returned = journal && state.channel?.feedback?.[journal.id]?.returned;
+    cells.push(journal ? `<button class="calendar-cell has-journal ${returned ? 'has-feedback' : ''}" data-student-journal="${escapeHtml(journal.id)}" type="button"><span>${day}</span><small>${returned ? '💬' : '●'}</small></button>` : `<span class="calendar-cell"><span>${day}</span></span>`);
+  }
+  return `<div class="calendar-week">${['日','月','火','水','木','金','土'].map((day) => `<strong>${day}</strong>`).join('')}</div><div class="calendar-grid">${cells.join('')}</div><p class="calendar-key"><span>● 書いた日</span><span>💬 おへんじ</span></p>`;
+}
+
+function changeStudentMonth(offset) {
+  state.studentMonth = new Date(state.studentMonth.getFullYear(), state.studentMonth.getMonth() + offset, 1);
+  renderPortfolio();
 }
 
 function studentJournalCards() {
   const journals = state.portfolio.journals || [];
   return journals.length ? [...journals].reverse().map((journal) => {
     const feedback = state.channel?.feedback?.[journal.id];
-    return `<article class="journal-card"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h3>${escapeHtml(journal.theme || '')}</h3><div class="journal-body">${escapeHtml(journal.content)}</div>${journal.imageFileId ? '<p class="muted small">📎 画像を添付済み</p>' : ''}${feedback?.returned ? `<div class="feedback-box"><strong>${escapeHtml(feedback.stamp || '💬')} 先生から</strong><p>${escapeHtml(feedback.comment)}</p></div>` : ''}${journal.pastComment ? `<div class="notice"><strong>今の自分から:</strong> ${escapeHtml(journal.pastComment)}</div>` : ''}</article>`;
+    const unread = feedback?.returned && !readJournalIds().has(journal.id);
+    return `<button class="journal-card student-journal-card ${unread ? 'unread' : ''}" data-student-journal="${escapeHtml(journal.id)}" type="button"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h3>${escapeHtml(journal.theme || '')}</h3><div class="journal-body clamp">${escapeHtml(journal.content)}</div><div class="journal-footer">${journal.imageFileId ? '<span>📎 作品つき</span>' : '<span></span>'}${feedback?.returned ? `<span class="badge success-badge">${unread ? 'NEW ' : ''}${escapeHtml(feedback.stamp || '💬')} おへんじ</span>` : ''}</div></button>`;
   }).join('') : '<div class="empty">まだふりかえりはありません。</div>';
+}
+
+function highlightedJournalHtml(journal, feedback) {
+  const highlights = (feedback?.highlights || []).filter((item) => Number.isInteger(item.start) && Number.isInteger(item.end) && item.start >= 0 && item.end > item.start && item.end <= journal.content.length)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  let cursor = 0;
+  const parts = [];
+  for (const item of highlights) {
+    if (item.start < cursor) continue;
+    parts.push(escapeHtml(journal.content.slice(cursor, item.start)));
+    parts.push(`<mark class="teacher-highlight" title="${escapeHtml(item.comment || '先生が注目したところ')}">${escapeHtml(journal.content.slice(item.start, item.end))}<span>${escapeHtml(item.stamp || '⭐')}</span></mark>`);
+    cursor = item.end;
+  }
+  parts.push(escapeHtml(journal.content.slice(cursor)));
+  return parts.join('');
+}
+
+function studentHighlightNotes(feedback) {
+  const items = (feedback?.highlights || []).filter((item) => item.comment || item.stamp);
+  return items.length ? `<div class="highlight-notes"><h3>文章についたおへんじ</h3>${items.map((item) => `<div><strong>${escapeHtml(item.stamp || '⭐')} 「${escapeHtml(item.text || '')}」</strong><p>${escapeHtml(item.comment || '')}</p></div>`).join('')}</div>` : '';
+}
+
+function openStudentJournal(journalId) {
+  if (!journalId) return;
+  const journal = (state.portfolio.journals || []).find((item) => item.id === journalId);
+  if (!journal) return;
+  const feedback = state.channel?.feedback?.[journal.id];
+  if (feedback?.returned) markJournalRead(journal.id);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'journal-dialog';
+  dialog.innerHTML = `<article><form method="dialog"><button class="dialog-close" aria-label="閉じる">×</button></form><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h2>${escapeHtml(journal.theme || 'ふりかえり')}</h2><div class="journal-body lined-reading">${highlightedJournalHtml(journal, feedback)}</div>${journal.imageFileId ? `<div class="image-slot" data-file="${escapeHtml(journal.imageFileId)}"><p>作品を読み込んでいます…</p></div>` : ''}${feedback?.returned ? `${studentHighlightNotes(feedback)}<div class="feedback-box large"><strong>${escapeHtml(feedback.stamp || '💬')} 先生からのおへんじ</strong><p>${escapeHtml(feedback.comment)}</p></div>` : '<div class="muted dialog-note">先生からのおへんじを待っています。</div>'}${journal.pastComment ? `<div class="notice"><strong>今の自分から:</strong> ${escapeHtml(journal.pastComment)}</div>` : ''}</article>`;
+  document.body.appendChild(dialog);
+  dialog.addEventListener('close', () => { dialog.remove(); renderPortfolio(); });
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+  dialog.showModal();
+  loadImages();
 }
 
 function pastSelfPanel() {
@@ -608,7 +928,7 @@ function pastSelfPanel() {
 }
 
 function saveDraft() {
-  try { localStorage.setItem(draftKey(), JSON.stringify({ theme: document.getElementById('theme').value, content: document.getElementById('content').value })); } catch (error) {}
+  try { localStorage.setItem(draftKey(), JSON.stringify({ theme: document.getElementById('theme').value, content: document.getElementById('content').value, emotion: document.querySelector('[name="emotion"]:checked')?.value || '' })); } catch (error) {}
 }
 
 function insertText(text) {
@@ -618,6 +938,29 @@ function insertText(text) {
   area.focus();
   area.selectionStart = area.selectionEnd = start + text.length;
   saveDraft();
+}
+
+function applyTemplate(template) {
+  const area = document.getElementById('content');
+  if (area.value.trim() && !window.confirm('今書いている内容を、選んだ「かた」に入れ替えますか？')) return;
+  area.value = template;
+  area.focus();
+  area.selectionStart = area.selectionEnd = template.length;
+  saveDraft();
+}
+
+function insertRandomStarter() {
+  insertText(RANDOM_STARTERS[Math.floor(Math.random() * RANDOM_STARTERS.length)]);
+}
+
+function celebrateSubmission() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const layer = document.createElement('div');
+  layer.className = 'confetti-layer';
+  layer.setAttribute('aria-hidden', 'true');
+  layer.innerHTML = Array.from({ length: 42 }, (_, index) => `<i style="--x:${(index * 47) % 100}%;--delay:${(index % 9) * .035}s;--spin:${(index % 2 ? 1 : -1) * (240 + index * 11)}deg;--color:${['#f97316','#fbbf24','#38bdf8','#34d399'][index % 4]}"></i>`).join('');
+  document.body.appendChild(layer);
+  setTimeout(() => layer.remove(), 1800);
 }
 
 async function saveJournal(event) {
@@ -645,6 +988,7 @@ async function saveJournal(event) {
     try { localStorage.removeItem(draftKey()); } catch (error) {}
     toast('ふりかえりを提出しました。');
     renderPortfolio();
+    celebrateSubmission();
   }, (message) => renderPortfolio(message));
 }
 
@@ -685,6 +1029,13 @@ function renderQr(value) {
   target.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
 }
 
+function downloadQrCode(className) {
+  const svg = document.querySelector('#qr svg');
+  if (!svg) return toast('QRコードの準備ができていません。');
+  const source = new XMLSerializer().serializeToString(svg);
+  downloadBlob(new Blob([source], { type: 'image/svg+xml;charset=utf-8' }), `${className}_招待QR.svg`);
+}
+
 function ensureQr() {
   if (typeof window.qrcode === 'function') return Promise.resolve();
   if (ensureQr.promise) return ensureQr.promise;
@@ -719,4 +1070,52 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
+function initPwaControls() {
+  const installButton = document.getElementById('pwa-install');
+  const updateBox = document.getElementById('pwa-update');
+  const refreshButton = document.getElementById('pwa-refresh');
+  const laterButton = document.getElementById('pwa-later');
+  if (!installButton || !updateBox) return;
+
+  const showInstall = () => { installButton.hidden = !window.__deferredInstallPrompt; };
+  showInstall();
+  window.addEventListener('pwa-installable', showInstall);
+  window.addEventListener('pwa-installed', () => { installButton.hidden = true; toast('アプリをインストールしました。'); });
+  installButton.addEventListener('click', async () => {
+    const promptEvent = window.__deferredInstallPrompt;
+    if (!promptEvent) return;
+    promptEvent.prompt();
+    await promptEvent.userChoice;
+    window.__deferredInstallPrompt = null;
+    installButton.hidden = true;
+  });
+
+  let waitingWorker = null;
+  let refreshing = false;
+  const showUpdate = (worker) => {
+    waitingWorker = worker;
+    updateBox.hidden = false;
+  };
+  const watchRegistration = (registration) => {
+    if (registration.waiting && navigator.serviceWorker.controller) showUpdate(registration.waiting);
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
+      worker?.addEventListener('statechange', () => {
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate(worker);
+      });
+    });
+  };
+  const registrationReady = () => { if (window.__pwaRegistration) watchRegistration(window.__pwaRegistration); };
+  window.addEventListener('pwa-registration-ready', registrationReady);
+  registrationReady();
+  refreshButton?.addEventListener('click', () => waitingWorker?.postMessage({ type: 'SKIP_WAITING' }));
+  laterButton?.addEventListener('click', () => { updateBox.hidden = true; });
+  navigator.serviceWorker?.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    location.reload();
+  });
+}
+
+initPwaControls();
 renderLogin();
