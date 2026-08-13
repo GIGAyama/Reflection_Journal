@@ -90,6 +90,7 @@ test('児童のデスクトップ画面はカレンダー・ノート・支援�
   await page.setViewportSize({ width: 1440, height: 1000 });
   await loginAs(page, 'student');
   await page.getByRole('button', { name: /5年1組/ }).click();
+  await expect(page.locator('.notebook')).toBeVisible();
   const columns = await page.evaluate(() => ({
     calendar: document.querySelector('.student-calendar').getBoundingClientRect().left,
     notebook: document.querySelector('.notebook').getBoundingClientRect().left,
