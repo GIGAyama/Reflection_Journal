@@ -131,6 +131,7 @@ for (const device of [
     await page.setViewportSize(device.viewport);
     await loginAs(page, 'student');
     await page.getByRole('button', { name: /5年1組/ }).click();
+    await expect(page.locator('.notebook')).toBeVisible();
     const layout = await page.evaluate(() => {
       const notebook = document.querySelector('.notebook').getBoundingClientRect();
       const writing = document.querySelector('.lined-paper').getBoundingClientRect();
