@@ -201,7 +201,6 @@ summary { cursor: pointer; font-weight: 900; }
 .student-calendar { grid-area: calendar; }
 .notebook { grid-area: notebook; position: relative; overflow: hidden; border-top: 7px solid #f97316; }
 .writing-tools { grid-area: tools; }
-.notebook::before { content: ''; position: absolute; top: 0; bottom: 0; left: 28px; width: 2px; background: rgba(248,113,113,.18); pointer-events: none; }
 .notebook form { position: relative; }
 .notebook-controls { display: grid; justify-items: end; gap: 7px; }
 .notebook-date { color: var(--muted); font-size: 12px; font-weight: 800; }
