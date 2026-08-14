@@ -56,28 +56,33 @@ async function mockGoogle(page, role, { denyShared = false } = {}) {
     window.__e2eEmail = email;
   }, { email, denyShared });
   await page.route('https://openidconnect.googleapis.com/v1/userinfo', (route) => route.fulfill({ json: { email, name: role === 'teacher' ? '山田先生' : '鈴木花子' } }));
+  const versions = new Map([['class-file', 1], ['portfolio-file', 1], ['channel-file', 1]]);
+  const metadataFor = (id) => ({
+    id,
+    createdTime: now,
+    modifiedTime: now,
+    version: String(versions.get(id) || 1),
+    owners: [{ emailAddress: id === 'portfolio-file' ? 'student@example.ed.jp' : 'teacher@example.ed.jp' }]
+  });
   await page.route('https://www.googleapis.com/drive/v3/**', async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const query = decodeURIComponent(url.searchParams.get('q') || '');
     if (query.includes('sharedWithMe') && route.request().headers().authorization !== 'Bearer shared-token') return route.fulfill({ json: { files: [] } });
-    const metadata = {
-      'class-file': { id: 'class-file', createdTime: now, modifiedTime: now, version: '1', owners: [{ emailAddress: 'teacher@example.ed.jp' }] },
-      'portfolio-file': { id: 'portfolio-file', createdTime: now, modifiedTime: now, version: '1', owners: [{ emailAddress: 'student@example.ed.jp' }] },
-      'channel-file': { id: 'channel-file', createdTime: now, modifiedTime: now, version: '1', owners: [{ emailAddress: 'teacher@example.ed.jp' }] }
-    };
-    if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' ? [metadata['class-file']] : [] } });
-    if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: [metadata['portfolio-file']] } });
-    if (path.endsWith('/files') && query.includes("value='channel'")) return route.fulfill({ json: { files: [metadata['channel-file']] } });
+    if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' ? [metadataFor('class-file')] : [] } });
+    if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: [metadataFor('portfolio-file')] } });
+    if (path.endsWith('/files') && query.includes("value='channel'")) return route.fulfill({ json: { files: [metadataFor('channel-file')] } });
     for (const [id, record] of Object.entries({ 'class-file': classRecord, 'portfolio-file': portfolio, 'channel-file': channel })) {
       if (!path.endsWith(`/files/${id}`)) continue;
-      return route.fulfill({ json: url.searchParams.get('alt') === 'media' ? record : metadata[id] });
+      return route.fulfill({ json: url.searchParams.get('alt') === 'media' ? record : metadataFor(id) });
     }
     return route.fulfill({ json: {} });
   });
   await page.route('https://www.googleapis.com/upload/drive/v3/**', (route) => {
     const match = new URL(route.request().url()).pathname.match(/\/files\/([^/]+)$/);
-    route.fulfill({ json: { id: match?.[1] || 'created-file', modifiedTime: now, version: '2' } });
+    const id = match?.[1] || 'created-file';
+    versions.set(id, (versions.get(id) || 1) + 1);
+    route.fulfill({ json: { id, modifiedTime: now, version: String(versions.get(id)) } });
   });
 }
 

@@ -318,16 +318,23 @@ export function currentTheme(themes, date = new Date()) {
 
 export function mergePortfoliosIntoMembers(classRecord, portfolioItems, now = new Date().toISOString()) {
   const members = (classRecord.members || []).map((member) => ({ ...member }));
+  let changed = false;
   for (const item of portfolioItems) {
     const email = normalizeEmail(item.record?.student?.email);
     if (!email) continue;
     const existing = members.find((member) => normalizeEmail(member.email) === email);
     if (existing) {
-      existing.portfolioFileId = item.file.id;
-      existing.name = existing.name || item.record.student.name;
-      existing.joinedAt = existing.joinedAt || item.record.createdAt || now;
-      if (existing.status === 'invited') existing.status = 'active';
+      const nextFileId = item.file.id;
+      const nextName = existing.name || item.record.student.name;
+      const nextJoinedAt = existing.joinedAt || item.record.createdAt || now;
+      const nextStatus = existing.status === 'invited' ? 'active' : existing.status;
+      if (existing.portfolioFileId !== nextFileId || existing.name !== nextName || existing.joinedAt !== nextJoinedAt || existing.status !== nextStatus) changed = true;
+      existing.portfolioFileId = nextFileId;
+      existing.name = nextName;
+      existing.joinedAt = nextJoinedAt;
+      existing.status = nextStatus;
     } else {
+      changed = true;
       members.push({
         email,
         name: item.record.student.name || email,
@@ -339,7 +346,7 @@ export function mergePortfoliosIntoMembers(classRecord, portfolioItems, now = ne
       });
     }
   }
-  return { ...classRecord, members, updatedAt: now };
+  return changed ? { ...classRecord, members, updatedAt: now } : classRecord;
 }
 
 function fileOwnerEmail(file) {
