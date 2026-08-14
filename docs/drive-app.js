@@ -26,9 +26,15 @@ const toastElement = document.getElementById('toast');
 const config = window.APP_CONFIG || {};
 const BASE_SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
 const SHARED_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+const INITIAL_SCOPES = `${BASE_SCOPES} ${SHARED_READ_SCOPE}`;
+const SESSION_KEY = 'rj_oauth_session_v1';
+const LAST_ROLE_KEY = 'rj_last_role';
 const state = {
   user: null,
   drive: null,
+  accessToken: '',
+  tokenExpiresAt: 0,
+  forceAccountSelection: false,
   invite: null,
   tokenClient: null,
   sharedTokenClient: null,
@@ -108,7 +114,10 @@ function errorNotice(message) {
 async function withError(action, fallback) {
   try { return await action(); }
   catch (error) {
-    if (error instanceof DriveApiError && error.status === 401) return renderLogin(error.message);
+    if (error instanceof DriveApiError && error.status === 401) {
+      clearSession();
+      return renderLogin(error.message);
+    }
     fallback(friendlyError(error));
     return null;
   }
@@ -117,7 +126,7 @@ async function withError(action, fallback) {
 function shell(content) {
   return `<header class="topbar">
     <div class="brand"><img class="brand-icon" src="./icon-192.png" alt="" aria-hidden="true"><span>ふりかえりジャーナル</span></div>
-    <div class="account"><strong>${escapeHtml(state.user?.name || '')}</strong><span>${escapeHtml(state.user?.email || '')}</span></div>
+    <button class="account" data-change-account type="button" title="Googleアカウントを変更"><strong>${escapeHtml(state.user?.name || '')}</strong><span>${escapeHtml(state.user?.email || '')}</span><small>アカウントを変更</small></button>
   </header><div class="page">${content}</div>`;
 }
 
@@ -128,7 +137,7 @@ function renderLogin(error = '') {
     <p>自分の言葉で学びを残し、先生からのおへんじを受け取れます。</p>
     ${errorNotice(error)}
     <button id="login" class="primary wide" type="button">Googleアカウントで続ける</button>
-    <p class="muted small">必要な記録だけを安全に保存します。ログイン情報は端末へ保存しません。</p>
+    <p class="muted small">同じタブでは有効期限までログイン状態を保ちます。タブを閉じると認証情報は消去されます。</p>
   </div></section>`;
   document.getElementById('login').addEventListener('click', requestAccess);
 }
@@ -152,17 +161,20 @@ async function requestAccess() {
     await loadGoogleIdentity();
     state.tokenClient ||= google.accounts.oauth2.initTokenClient({
       client_id: config.googleClientId,
-      scope: BASE_SCOPES,
+      scope: INITIAL_SCOPES,
       include_granted_scopes: true,
       callback: handleToken
     });
-    state.tokenClient.requestAccessToken({ prompt: '' });
+    state.tokenClient.requestAccessToken({ prompt: state.forceAccountSelection ? 'select_account' : '' });
   } catch (error) { renderLogin(error.message); }
 }
 
 async function handleToken(response) {
   if (!response?.access_token) return renderLogin(response?.error_description || 'Googleログインがキャンセルされました。');
-  rememberGrantedScopes(response, BASE_SCOPES.split(' '));
+  rememberGrantedScopes(response, INITIAL_SCOPES.split(' '));
+  state.accessToken = response.access_token;
+  state.tokenExpiresAt = Date.now() + Math.max(60, Number(response.expires_in) || 3600) * 1000;
+  state.forceAccountSelection = false;
   setBusy('アカウントを確認しています…');
   try {
     const userResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { Authorization: `Bearer ${response.access_token}` } });
@@ -170,6 +182,7 @@ async function handleToken(response) {
     const profile = await userResponse.json();
     state.user = { email: normalizeEmail(profile.email), name: profile.name || profile.email };
     state.drive = new DriveClient(response.access_token);
+    saveSession();
     await resolveEntryRoute();
   } catch (error) { renderLogin(error.message); }
 }
@@ -183,7 +196,66 @@ async function resolveEntryRoute() {
     }
     catch (error) { return renderHome(error.message); }
   }
+  const role = preferredRole();
+  if (role === 'teacher') {
+    state.restoreLastTeacherClass = true;
+    return requireSharedRead('teacher', () => renderTeacherHome());
+  }
+  if (role === 'student') return requireSharedRead('student', () => renderStudentHome());
   return renderHome();
+}
+
+function saveSession() {
+  if (!state.accessToken || !state.user || !state.tokenExpiresAt) return;
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      clientId: config.googleClientId,
+      accessToken: state.accessToken,
+      expiresAt: state.tokenExpiresAt,
+      scopes: [...state.grantedScopes],
+      user: state.user
+    }));
+  } catch (error) {}
+}
+
+function restoreSession() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    if (!saved || saved.clientId !== config.googleClientId || saved.expiresAt < Date.now() + 60_000 || !saved.accessToken || !saved.user?.email) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return false;
+    }
+    state.accessToken = saved.accessToken;
+    state.tokenExpiresAt = saved.expiresAt;
+    state.user = { email: normalizeEmail(saved.user.email), name: saved.user.name || saved.user.email };
+    state.grantedScopes = new Set(Array.isArray(saved.scopes) ? saved.scopes : []);
+    state.drive = new DriveClient(saved.accessToken);
+    return true;
+  } catch (error) {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (storageError) {}
+    return false;
+  }
+}
+
+function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (error) {}
+  state.accessToken = '';
+  state.tokenExpiresAt = 0;
+  state.user = null;
+  state.drive = null;
+  state.grantedScopes = new Set();
+}
+
+function preferredRole() {
+  try { return localStorage.getItem(LAST_ROLE_KEY) || ''; } catch (error) { return ''; }
+}
+
+function rememberRole(role) {
+  try { localStorage.setItem(LAST_ROLE_KEY, role); } catch (error) {}
+}
+
+function forgetRole() {
+  try { localStorage.removeItem(LAST_ROLE_KEY); } catch (error) {}
 }
 
 function requireSharedRead(role, action) {
@@ -205,7 +277,7 @@ function renderSharedReadPermission(role, error = '') {
     <button id="permission-back" class="quiet wide" type="button">使い方の選択へ戻る</button>
   </div></section>`);
   document.getElementById('grant-shared-read').addEventListener('click', requestSharedRead);
-  document.getElementById('permission-back').addEventListener('click', () => { state.pendingSharedAction = null; state.pendingSharedRole = ''; renderHome(); });
+  document.getElementById('permission-back').addEventListener('click', () => { state.pendingSharedAction = null; state.pendingSharedRole = ''; forgetRole(); renderHome(); });
 }
 
 async function requestSharedRead() {
@@ -227,7 +299,10 @@ async function handleSharedToken(response) {
   if (!response?.access_token) return renderSharedReadPermission(state.pendingSharedRole, response?.error_description || '共有記録の同期が許可されませんでした。');
   rememberGrantedScopes(response, [SHARED_READ_SCOPE]);
   if (!state.grantedScopes.has(SHARED_READ_SCOPE)) return renderSharedReadPermission(state.pendingSharedRole, 'Google Driveの閲覧許可が選択されていません。共有記録を受け取るには、この許可が必要です。');
+  state.accessToken = response.access_token;
+  state.tokenExpiresAt = Date.now() + Math.max(60, Number(response.expires_in) || 3600) * 1000;
   state.drive = new DriveClient(response.access_token);
+  saveSession();
   const action = state.pendingSharedAction;
   state.pendingSharedAction = null;
   state.pendingSharedRole = '';
@@ -242,8 +317,8 @@ function renderHome(error = '') {
       <button class="item-card" id="teacher-home" type="button"><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
       <button class="item-card" id="student-home" type="button"><h2>児童として使う</h2><p class="muted">参加したクラスで書き、おへんじを受け取ります。</p></button>
     </div></section>`);
-  document.getElementById('teacher-home').addEventListener('click', () => { state.restoreLastTeacherClass = true; requireSharedRead('teacher', () => renderTeacherHome()); });
-  document.getElementById('student-home').addEventListener('click', () => requireSharedRead('student', () => renderStudentHome()));
+  document.getElementById('teacher-home').addEventListener('click', () => { rememberRole('teacher'); state.restoreLastTeacherClass = true; requireSharedRead('teacher', () => renderTeacherHome()); });
+  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); requireSharedRead('student', () => renderStudentHome()); });
 }
 
 async function renderTeacherHome(error = '') {
@@ -270,7 +345,7 @@ async function renderTeacherHome(error = '') {
     </form></section>
     <section><h2>作成済みのクラス</h2>${classes.length ? `<div class="grid">${classes.map(({ file, record }) => `
       <button class="item-card class-item" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.classCode)}</span><h3>${escapeHtml(record.className)}</h3><p>${(record.members || []).filter((member) => member.status === 'active').length}人</p><p class="muted small">更新: ${escapeHtml(formatDate(file.modifiedTime))}</p></button>`).join('')}</div>` : '<div class="empty">まだクラスはありません。</div>'}</section>`);
-  document.getElementById('back').addEventListener('click', () => renderHome());
+  document.getElementById('back').addEventListener('click', () => { forgetRole(); renderHome(); });
   document.getElementById('create-class').addEventListener('submit', createClass);
   document.querySelectorAll('.class-item').forEach((button) => button.addEventListener('click', () => openTeacherClass(classes.find(({ file }) => file.id === button.dataset.file))));
 }
@@ -329,7 +404,7 @@ async function openTeacherClass(item, tab = 'journals', error = '', options = {}
 
 function teacherTabs(active) {
   const pending = (state.teacher.record.members || []).filter((member) => member.status === 'pending').length;
-  return `<nav class="tabs" aria-label="クラスメニュー">${[
+  return `<nav class="tabs teacher-tabs" aria-label="クラスメニュー">${[
     ['journals', 'ジャーナル管理'], ['vitals', '心のバイタル'], ['settings', `クラス設定${pending ? ` (${pending})` : ''}`]
   ].map(([id, label]) => `<button class="tab ${active === id ? 'active' : ''}" data-tab="${id}" type="button">${label}</button>`).join('')}</nav>`;
 }
@@ -348,7 +423,7 @@ function bindTeacherTabs() {
 function renderTeacherClass(tab = 'journals', error = '') {
   const ctx = state.teacher;
   state.teacherTab = tab;
-  app.innerHTML = shell(`<div class="page-heading teacher-class-heading"><div><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1><span class="sync-status">最終同期 ${escapeHtml(formatTime(ctx.syncedAt))}</span></div><div class="class-switcher"><label for="class-switch">表示するクラス</label><select id="class-switch">${state.teacherClasses.map(({ file, record }) => `<option value="${escapeHtml(file.id)}" ${file.id === ctx.file.id ? 'selected' : ''}>${escapeHtml(record.className)}</option>`).join('')}<option value="new">＋ クラス一覧・新規作成</option></select><button id="refresh-class" class="secondary" type="button">↻ 最新に更新</button><button id="classes" class="quiet" type="button">一覧</button></div></div>
+  app.innerHTML = shell(`<div class="page-heading teacher-class-heading"><div class="teacher-class-title"><span class="badge">${escapeHtml(ctx.record.classCode)}</span><h1>${escapeHtml(ctx.record.className)}</h1><span class="sync-status">最終同期 ${escapeHtml(formatTime(ctx.syncedAt))}</span></div><div class="class-switcher"><label for="class-switch">表示するクラス</label><select id="class-switch">${state.teacherClasses.map(({ file, record }) => `<option value="${escapeHtml(file.id)}" ${file.id === ctx.file.id ? 'selected' : ''}>${escapeHtml(record.className)}</option>`).join('')}<option value="new">＋ クラス一覧・新規作成</option></select><button id="refresh-class" class="secondary" type="button">↻ 最新に更新</button><button id="classes" class="quiet" type="button">一覧</button></div></div>
     ${errorNotice(error)}${teacherTabs(tab)}<div id="teacher-content"></div>`);
   bindTeacherTabs();
   if (tab === 'journals') renderJournalManagement();
@@ -387,26 +462,44 @@ function renderJournalManagement() {
   const ctx = state.teacher;
   const stats = analyzeClass(activePortfolioItems(), ctx.channels);
   const content = document.getElementById('teacher-content');
-  const rate = stats.totalStudents ? Math.round(stats.submittedToday / stats.totalStudents * 100) : 0;
-  content.innerHTML = `<section class="metrics teacher-overview">
-    <div class="metric submission-donut-card"><div class="submission-donut" style="--rate:${rate * 3.6}deg"><span><strong>${rate}%</strong><small>${stats.submittedToday}/${stats.totalStudents}人</small></span></div><span>今日の提出率</span></div>
+  const activeMembers = (ctx.record.members || []).filter((member) => member.status === 'active');
+  const today = todayKey();
+  const submittedEmails = new Set(stats.all.filter((journal) => todayKey(new Date(journal.createdAt)) === today).map((journal) => normalizeEmail(journal.student.email)));
+  const submittedMembers = activeMembers.filter((member) => submittedEmails.has(normalizeEmail(member.email)));
+  const missingMembers = activeMembers.filter((member) => !submittedEmails.has(normalizeEmail(member.email)));
+  const rate = activeMembers.length ? Math.round(submittedMembers.length / activeMembers.length * 100) : 0;
+  const unreturned = stats.all.length - stats.returned;
+  const filtered = filterTeacherJournals(stats.all);
+  content.innerHTML = `<section class="teacher-overview" aria-label="クラス概要">
+    <div class="metric submission-donut-card"><div class="submission-donut" style="--rate:${rate * 3.6}deg"><span><strong>${rate}%</strong><small>${submittedMembers.length}/${activeMembers.length}人</small></span></div><span>今日の提出率</span></div>
+    <div class="metric attention-metric"><strong>${missingMembers.length}</strong><span>今日の未提出</span></div>
+    <div class="metric attention-metric"><strong>${unreturned}</strong><span>未返却の記録</span></div>
     <div class="metric"><strong>${stats.all.length}</strong><span>すべての記録</span></div>
-    <div class="metric"><strong>${stats.returned}</strong><span>返却済み</span></div>
   </section>
-  <section class="panel"><h2>テーマ設定</h2><form id="theme-form">
-    <div class="form-grid"><label><span>適用日</span><input id="theme-date" type="date" value="${escapeHtml(ctx.record.settings.todayTheme?.date || todayKey())}"></label><label><span>今日のテーマ</span><input id="today-theme" maxlength="200" value="${escapeHtml(ctx.record.settings.todayTheme?.text || '')}" placeholder="今日の学びをふり返ろう"></label></div>
-    <details><summary>曜日ごとのテーマ</summary><div class="form-grid">${['月','火','水','木','金'].map((day, index) => `<label><span>${day}曜日</span><input class="weekly-theme" data-day="${index + 1}" maxlength="200" value="${escapeHtml(ctx.record.settings.weeklyThemes?.[index + 1] || '')}"></label>`).join('')}</div></details>
-    <button class="primary" type="submit">テーマを保存して児童へ配信</button>
-  </form></section>
-  <section><div class="page-heading"><h2>提出一覧</h2><input id="journal-search" class="compact-input" value="${escapeHtml(state.teacherSearch)}" placeholder="氏名・本文・テーマを検索"></div>
-    <div class="filter-row" role="group" aria-label="返却状況で絞り込む">${[['all','すべて'],['unreturned','未返却'],['returned','返却済み']].map(([value, label]) => `<button class="filter-chip ${state.teacherFilter === value ? 'active' : ''}" data-filter="${value}" type="button">${label}</button>`).join('')}</div>
-    <div class="batch-bar"><div><strong>まとめて支援</strong><span class="muted small">未返却の記録が対象です。AIの内容は返却前に確認してください。</span></div><div class="button-row compact"><button id="batch-ai-simple" class="secondary" type="button">AI下書き</button><button id="batch-ai-detail" class="secondary" type="button">AIで詳しく</button><button id="batch-return" class="primary" type="button">一括返却</button></div></div>
-    <div id="journal-list" class="journal-list">${teacherJournalCards(filterTeacherJournals(stats.all))}</div>
-  </section>`;
+  <div class="teacher-dashboard-grid">
+    <main class="teacher-submissions" aria-labelledby="submission-heading"><div class="teacher-list-heading"><div><span class="eyebrow">STUDENT JOURNALS</span><h2 id="submission-heading">提出一覧</h2></div><span id="journal-count" class="badge">${filtered.length}件</span></div>
+      <div class="teacher-list-controls"><input id="journal-search" class="compact-input" value="${escapeHtml(state.teacherSearch)}" placeholder="氏名・本文・テーマを検索" aria-label="提出を検索"><div class="filter-row" role="group" aria-label="返却状況で絞り込む">${[['all',`すべて ${stats.all.length}`],['unreturned',`未返却 ${unreturned}`],['returned',`返却済み ${stats.returned}`]].map(([value, label]) => `<button class="filter-chip ${state.teacherFilter === value ? 'active' : ''}" data-filter="${value}" type="button">${label}</button>`).join('')}</div></div>
+      <details class="batch-bar"><summary>まとめて支援・返却</summary><p class="muted small">未返却の記録が対象です。AIの内容は返却前に確認してください。</p><div class="button-row compact"><button id="batch-ai-simple" class="secondary" type="button">AI下書き</button><button id="batch-ai-detail" class="secondary" type="button">AIで詳しく</button><button id="batch-return" class="primary" type="button">一括返却</button></div></details>
+      <div id="journal-list" class="journal-list teacher-journal-list">${teacherJournalCards(filtered)}</div>
+    </main>
+    <aside class="teacher-sidebar" aria-label="授業設定と今日の状況">
+      <section class="panel teacher-theme-panel"><div class="compact-section-heading"><div><span class="eyebrow">TODAY'S THEME</span><h2>テーマ設定</h2></div></div><form id="theme-form">
+        <label><span>適用日</span><input id="theme-date" type="date" value="${escapeHtml(ctx.record.settings.todayTheme?.date || today)}"></label><label><span>今日のテーマ</span><input id="today-theme" maxlength="200" value="${escapeHtml(ctx.record.settings.todayTheme?.text || '')}" placeholder="今日の学びをふり返ろう"></label>
+        <details><summary>曜日ごとのテーマ</summary><div class="form-grid">${['月','火','水','木','金'].map((day, index) => `<label><span>${day}曜日</span><input class="weekly-theme" data-day="${index + 1}" maxlength="200" value="${escapeHtml(ctx.record.settings.weeklyThemes?.[index + 1] || '')}"></label>`).join('')}</div></details>
+        <button class="primary wide" type="submit">保存して児童へ配信</button>
+      </form></section>
+      <section class="panel today-status-panel"><div class="compact-section-heading"><div><span class="eyebrow">TODAY'S STATUS</span><h2>今日の状況</h2></div><span class="muted small">${activeMembers.length}人</span></div>
+        <h3>未提出 ${missingMembers.length}人</h3><div class="student-status-list missing">${missingMembers.length ? missingMembers.map((member) => `<span>${escapeHtml(member.name)}</span>`).join('') : '<p class="muted small">全員提出しています。</p>'}</div>
+        <details><summary>提出済み ${submittedMembers.length}人</summary><div class="student-status-list submitted">${submittedMembers.map((member) => `<span>${escapeHtml(member.name)}</span>`).join('')}</div></details>
+      </section>
+    </aside>
+  </div>`;
   document.getElementById('theme-form').addEventListener('submit', saveThemes);
   document.getElementById('journal-search').addEventListener('input', (event) => {
     state.teacherSearch = event.target.value;
-    document.getElementById('journal-list').innerHTML = teacherJournalCards(filterTeacherJournals(stats.all));
+    const next = filterTeacherJournals(stats.all);
+    document.getElementById('journal-list').innerHTML = teacherJournalCards(next);
+    document.getElementById('journal-count').textContent = `${next.length}件`;
     bindJournalCards(stats.all);
   });
   document.querySelectorAll('[data-filter]').forEach((button) => button.addEventListener('click', () => {
@@ -421,18 +514,22 @@ function renderJournalManagement() {
 
 function filterTeacherJournals(journals) {
   const query = state.teacherSearch.trim().toLowerCase();
-  return journals.filter((journal) => {
+  return [...journals].filter((journal) => {
     const returned = Boolean(state.teacher.channels.get(normalizeEmail(journal.student.email))?.feedback?.[journal.id]?.returned);
     const matchesStatus = state.teacherFilter === 'all' || (state.teacherFilter === 'returned' ? returned : !returned);
     const matchesQuery = !query || `${journal.student.name} ${journal.theme} ${journal.content}`.toLowerCase().includes(query);
     return matchesStatus && matchesQuery;
+  }).sort((a, b) => {
+    const aReturned = Boolean(state.teacher.channels.get(normalizeEmail(a.student.email))?.feedback?.[a.id]?.returned);
+    const bReturned = Boolean(state.teacher.channels.get(normalizeEmail(b.student.email))?.feedback?.[b.id]?.returned);
+    return Number(aReturned) - Number(bReturned) || new Date(b.createdAt) - new Date(a.createdAt);
   });
 }
 
 function teacherJournalCards(journals) {
   return journals.length ? journals.map((journal) => {
     const feedback = state.teacher.channels.get(normalizeEmail(journal.student.email))?.feedback?.[journal.id];
-    return `<article class="journal-card teacher-journal-card"><button class="journal-main journal-open" data-email="${escapeHtml(journal.student.email)}" data-journal="${escapeHtml(journal.id)}" type="button">
+    return `<article class="journal-card teacher-journal-card ${feedback?.returned ? 'is-returned' : 'needs-reply'}"><button class="journal-main journal-open" data-email="${escapeHtml(journal.student.email)}" data-journal="${escapeHtml(journal.id)}" type="button">
       <div class="journal-meta"><span><strong>${escapeHtml(journal.student.name)}</strong> · ${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div>
       <h3>${escapeHtml(journal.theme || 'テーマなし')}</h3><div class="journal-body clamp">${escapeHtml(journal.content)}</div>
       <span class="badge ${feedback?.returned ? 'success-badge' : ''}">${feedback?.returned ? '返却済み' : '未返却'}</span></button>
@@ -674,8 +771,8 @@ function renderVitals() {
   const stats = analyzeClass(activePortfolioItems(), state.teacher.channels);
   const days = Array.from({ length: 14 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (13 - index)); return date; });
   const content = document.getElementById('teacher-content');
-  content.innerHTML = `<section class="panel"><h2>気にかけたい児童</h2>${stats.alerts.length ? stats.alerts.map((alert) => `<div class="notice"><strong>${escapeHtml(alert.name)}</strong> — ${escapeHtml(alert.reason)}</div>`).join('') : '<div class="empty">現在の記録から強い変化は検出されていません。対面での様子も必ず合わせて見てください。</div>'}</section>
-    <section class="panel"><h2>クラスの心の波（14日間）</h2><div class="heatmap"><div class="heatmap-row heatmap-head"><span>児童</span>${days.map((date) => `<span>${date.getMonth() + 1}/${date.getDate()}</span>`).join('')}</div>${activePortfolioItems().map(({ record }) => `<div class="heatmap-row"><strong>${escapeHtml(record.student.name)}</strong>${days.map((date) => { const journal = (record.journals || []).find((item) => todayKey(new Date(item.createdAt)) === todayKey(date)); return `<span title="${escapeHtml(journal?.content || '未提出')}">${escapeHtml(journal?.emotion || '·')}</span>`; }).join('')}</div>`).join('')}</div></section>`;
+  content.innerHTML = `<div class="vitals-grid"><section class="panel vitals-alerts"><span class="eyebrow">CARE SIGNALS</span><h2>気にかけたい児童</h2>${stats.alerts.length ? stats.alerts.map((alert) => `<div class="notice"><strong>${escapeHtml(alert.name)}</strong> — ${escapeHtml(alert.reason)}</div>`).join('') : '<div class="empty">現在の記録から強い変化は検出されていません。対面での様子も必ず合わせて見てください。</div>'}</section>
+    <section class="panel vitals-heatmap"><span class="eyebrow">14 DAYS</span><h2>クラスの心の波</h2><div class="heatmap"><div class="heatmap-row heatmap-head"><span>児童</span>${days.map((date) => `<span>${date.getMonth() + 1}/${date.getDate()}</span>`).join('')}</div>${activePortfolioItems().map(({ record }) => `<div class="heatmap-row"><strong>${escapeHtml(record.student.name)}</strong>${days.map((date) => { const journal = (record.journals || []).find((item) => todayKey(new Date(item.createdAt)) === todayKey(date)); return `<span title="${escapeHtml(journal?.content || '未提出')}">${escapeHtml(journal?.emotion || '·')}</span>`; }).join('')}</div>`).join('')}</div></section></div>`;
 }
 
 function publicEntryUrl() {
@@ -694,11 +791,11 @@ function renderClassSettings() {
     acceptingMembers: true
   });
   const content = document.getElementById('teacher-content');
-  content.innerHTML = `<section class="panel invite-layout"><div><span class="eyebrow">INVITE STUDENTS</span><h2>児童を招待する</h2><p class="muted">教室ではQRコード、遠隔では専用URLを配ると簡単です。</p><div class="class-code">${escapeHtml(ctx.record.classCode)}</div><div class="button-row"><button id="copy-code" class="secondary" type="button">クラスコードをコピー</button><button id="student-preview" class="quiet" type="button">児童画面を確認</button></div><div class="url-box">${escapeHtml(link)}</div><div class="button-row" style="margin-top:12px"><button id="copy-url" class="primary" type="button">専用URLをコピー</button><button id="copy-text" class="secondary" type="button">招待文をコピー</button></div></div><div class="qr-actions"><div id="qr" class="qr-box" aria-label="児童招待用QRコード"></div><button id="download-qr" class="secondary wide" type="button">QRを画像で保存</button></div></section>
+  content.innerHTML = `<div class="teacher-settings-grid"><section class="panel invite-layout wide-setting"><div><span class="eyebrow">INVITE STUDENTS</span><h2>児童を招待する</h2><p class="muted">教室ではQRコード、遠隔では専用URLを配ると簡単です。</p><div class="class-code">${escapeHtml(ctx.record.classCode)}</div><div class="button-row"><button id="copy-code" class="secondary" type="button">クラスコードをコピー</button><button id="student-preview" class="quiet" type="button">児童画面を確認</button></div><div class="url-box">${escapeHtml(link)}</div><div class="button-row" style="margin-top:12px"><button id="copy-url" class="primary" type="button">専用URLをコピー</button><button id="copy-text" class="secondary" type="button">招待文をコピー</button></div></div><div class="qr-actions"><div id="qr" class="qr-box" aria-label="児童招待用QRコード"></div><button id="download-qr" class="secondary wide" type="button">QRを画像で保存</button></div></section>
   <section class="panel"><h2>参加設定</h2><form id="admission-form"><label class="check-label"><input id="approval" type="checkbox" ${settings.approvalRequired ? 'checked' : ''}><span>参加には先生の承認が必要</span></label><p class="muted small">承認なしにすると、児童の参加後に先生がクラス画面を開いた時点で自動承認されます。</p><button class="primary" type="submit">設定を保存</button></form></section>
-  <section class="panel"><div class="section-heading"><div><span class="eyebrow">ROSTER</span><h2>参加申請・名簿</h2></div><span class="badge">${(ctx.record.members || []).filter((member) => member.status === 'active').length}人 参加中</span></div><div id="member-list">${memberRows()}</div><form id="invite-member" class="inline-form"><input id="member-name" required placeholder="児童名"><input id="member-email" type="email" required placeholder="児童のGoogleメール"><button class="secondary" type="submit">1人追加</button></form><details><summary>名簿をまとめて追加</summary><form id="bulk-members"><label><span>1行に「名前, メールアドレス」</span><textarea id="bulk-member-text" placeholder="山田 花子, hanako@example.ed.jp\n鈴木 太郎, taro@example.ed.jp"></textarea></label><button class="secondary" type="submit">まとめて名簿へ追加</button></form></details></section>
+  <section class="panel wide-setting"><div class="section-heading"><div><span class="eyebrow">ROSTER</span><h2>参加申請・名簿</h2></div><span class="badge">${(ctx.record.members || []).filter((member) => member.status === 'active').length}人 参加中</span></div><div id="member-list">${memberRows()}</div><form id="invite-member" class="inline-form"><input id="member-name" required placeholder="児童名"><input id="member-email" type="email" required placeholder="児童のGoogleメール"><button class="secondary" type="submit">1人追加</button></form><details><summary>名簿をまとめて追加</summary><form id="bulk-members"><label><span>1行に「名前, メールアドレス」</span><textarea id="bulk-member-text" placeholder="山田 花子, hanako@example.ed.jp\n鈴木 太郎, taro@example.ed.jp"></textarea></label><button class="secondary" type="submit">まとめて名簿へ追加</button></form></details></section>
   <section class="panel"><h2>Gemini AI支援（任意）</h2><form id="gemini-form"><label><span>APIキー</span><input id="gemini-key" type="password" value="${escapeHtml(settings.geminiApiKey || '')}" autocomplete="off"></label><label><span>モデル</span><input id="gemini-model" value="${escapeHtml(settings.geminiModel || 'gemini-3.1-flash-lite')}"></label><p class="muted small">キーは先生所有の非共有クラス設定ファイルに保存され、児童へは共有されません。AIコメントは必ず先生が確認してから返却します。</p><button class="primary" type="submit">AI設定を保存</button></form></section>
-  <section class="panel"><h2>データ出力</h2><div class="button-row"><button id="csv" class="secondary" type="button">CSVをダウンロード</button><button id="print" class="secondary" type="button">印刷・PDF</button></div></section>`;
+  <section class="panel"><h2>データ出力</h2><div class="button-row"><button id="csv" class="secondary" type="button">CSVをダウンロード</button><button id="print" class="secondary" type="button">印刷・PDF</button></div></section></div>`;
   document.getElementById('copy-url').addEventListener('click', () => copy(link, '専用URLをコピーしました。'));
   document.getElementById('copy-code').addEventListener('click', () => copy(ctx.record.classCode, 'クラスコードをコピーしました。'));
   document.getElementById('copy-text').addEventListener('click', () => copy(`「${ctx.record.className}」のふりかえりジャーナルに参加してください。\nクラスコード: ${ctx.record.classCode}\n${link}`, '招待文をコピーしました。'));
@@ -822,7 +919,7 @@ async function renderStudentHome(error = '') {
   const portfolios = await loadJsonItems(files);
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">児童</span><h1>参加しているクラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
     ${errorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3>${escapeHtml(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}件のふりかえり</p></button>`).join('')}</div>` : '<div class="empty">参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。</div>'}`);
-  document.getElementById('back').addEventListener('click', () => renderHome());
+  document.getElementById('back').addEventListener('click', () => { forgetRole(); renderHome(); });
   document.querySelectorAll('.student-portfolio').forEach((button) => button.addEventListener('click', () => openPortfolio(portfolios.find(({ file }) => file.id === button.dataset.file))));
 }
 
@@ -1245,8 +1342,24 @@ function initPwaControls() {
   });
 }
 
+app.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-change-account]')) return;
+  clearSession();
+  forgetRole();
+  state.tokenClient = null;
+  state.sharedTokenClient = null;
+  state.forceAccountSelection = true;
+  renderLogin('別のGoogleアカウントで続けてください。');
+});
+
 initPwaControls();
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && document.documentElement.classList.contains('writing-focus')) setWritingFocus(false);
 });
-renderLogin();
+
+if (restoreSession()) {
+  setBusy('前回の画面をひらいています…');
+  resolveEntryRoute();
+} else {
+  renderLogin();
+}

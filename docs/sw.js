@@ -20,7 +20,7 @@
  *
  * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const APP_VERSION = 'v14';  // 端末ごとに学習領域を最大化する配置へ更新
+const APP_VERSION = 'v15';  // 教師ダッシュボードと短期セッション復元を配信
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
