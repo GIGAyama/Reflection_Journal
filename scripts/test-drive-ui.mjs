@@ -6,6 +6,10 @@ const index = readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8
 const app = readFileSync(new URL('../docs/drive-app.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../docs/drive.css', import.meta.url), 'utf8');
 const config = readFileSync(new URL('../docs/config.js', import.meta.url), 'utf8');
+const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+const manual = readFileSync(new URL('../MANUAL.md', import.meta.url), 'utf8');
+const architecture = readFileSync(new URL('../docs/DRIVE_NATIVE_ARCHITECTURE.md', import.meta.url), 'utf8');
+const oauthGuide = readFileSync(new URL('../docs/OAUTH_SHARED_RECORDS_SETUP.md', import.meta.url), 'utf8');
 
 test('GitHub Pages共通URLがDrive版を直接起動する', () => {
   assert.match(index, /drive-app\.js/);
@@ -121,4 +125,29 @@ test('ログイン画面とヘッダーはPWAと同じアプリアイコンを�
   assert.match(app, /class="app-logo" src="\.\/icon-192\.png"/);
   assert.match(app, /class="brand-icon" src="\.\/icon-192\.png"/);
   assert.doesNotMatch(app, /📔/);
+});
+
+test('READMEとMANUALが現在のDriveネイティブ実装を説明している', () => {
+  const userDocs = `${readme}\n${manual}`;
+  const technicalDocs = `${architecture}\n${oauthGuide}`;
+
+  assert.match(readme, /現在版はGASを使いません/);
+  assert.match(readme, /本番入口 `docs\/index\.html`/);
+  assert.match(readme, /ブラウザがGoogle Drive REST APIへ直接通信/);
+  assert.match(readme, /ルート直下の `\*\.gs`.*移行前のGAS版/s);
+  assert.doesNotMatch(manual, /GAS.*デプロイ.*必要です/);
+
+  assert.match(app, /const INITIAL_SCOPES = `\$\{BASE_SCOPES\} \$\{SHARED_READ_SCOPE\}`/);
+  for (const document of [readme, manual, architecture, oauthGuide]) {
+    assert.match(document, /初回|最初/);
+    assert.match(document, /drive\.readonly|Drive閲覧権限|Driveの閲覧権限/);
+  }
+  assert.doesNotMatch(technicalDocs, /drive\.readonly[^\n]*段階的|段階的[^\n]*drive\.readonly/);
+
+  assert.match(manual, /先生へもう一度届ける/);
+  assert.doesNotMatch(manual, /先生へ再共有/);
+  assert.match(userDocs, /児童.*参加済みクラス一覧/s);
+  assert.doesNotMatch(userDocs, /前回の画面へ戻/);
+  assert.match(manual, /端末の戻るジェスチャー／ボタン、ブラウザの戻るボタン/);
+  assert.match(userDocs, /利用者が入力した文章.*自動.*ふりがな/s);
 });
