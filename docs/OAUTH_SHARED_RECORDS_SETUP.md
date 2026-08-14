@@ -22,19 +22,18 @@ Google公式資料：
 
 ## 実際の認可タイミング
 
-現在の `docs/drive-app.js` は、最初の［Googleアカウントで続ける］で次を同時に要求します。
+現在の `docs/drive-app.js` は、最初の［Googleアカウントで続ける］で次を要求します。
 
 ```text
 openid
 email
 profile
 https://www.googleapis.com/auth/drive.file
-https://www.googleapis.com/auth/drive.readonly
 ```
 
-Googleの認可結果に `drive.readonly` が含まれていれば、そのまま先生／児童の画面へ進みます。含まれていなかった場合だけ、アプリ内に［共有された記録の同期を許可する］画面を表示し、理由を説明して `drive.readonly` を再要求します。
+先生／児童の役割を選び、相手の共有記録を同期する直前に、アプリ内に［共有された記録の同期を許可する］画面を表示します。`drive.readonly` がDrive全体の閲覧を許可する制限付きスコープであること、実装はアプリ印の一致する共有ファイルに限定することを説明し、利用者の操作で追加要求します。
 
-したがって「ログイン後に必ず別の追加許可画面が出る」仕様ではありません。Google側ですでに許可済みの時や、初回に両方を許可した時は追加画面が出ません。
+Google側ですでに許可済みの場合、Google自身の同意画面は省略されることがありますが、アプリ内の用途説明は役割選択時に表示します。
 
 ## Google Cloudで行う共通設定
 
@@ -46,9 +45,9 @@ Googleの認可結果に `drive.readonly` が含まれていれば、そのま�
    - `https://www.googleapis.com/auth/drive.readonly`
 5. 検証中は［対象］のテストユーザーへ、確認に使う先生・児童アカウントを登録します。
 6. OAuthクライアントを「ウェブアプリケーション」として作成します。
-7. 承認済みJavaScript生成元へ `https://gigayama.github.io` を登録します。
+7. 承認済みJavaScript生成元へ、実際の本番オリジン（現在は `https://gigayama.github.io`）を登録します。学校本番運用では、他アプリとWeb StorageやService Workerのオリジン境界を分ける専用カスタムドメインを推奨します。
 8. クライアントIDを `docs/config.js` の `googleClientId` へ設定します。
-9. `docs/config.js` の `publicEntryUrl` を `https://gigayama.github.io/Reflection_Journal/` にします。
+9. `docs/config.js` の `publicEntryUrl`、`allowedOrigins`、組織限定時の `allowedWorkspaceDomains` を設定します。
 10. GitHub Pagesの公開元を `main` ブランチの `/docs` にします。
 
 ブラウザ用OAuthクライアントIDは公開識別子です。クライアントシークレット、サービスアカウント鍵、API秘密鍵をGitHub Pagesやリポジトリへ配置しないでください。
@@ -79,12 +78,12 @@ OAuthクライアントを許可しても、組織のDrive共有ポリシーが�
 
 ## 審査用のスコープ説明例
 
-> 本アプリは学校向けの振り返り・教師フィードバックアプリです。児童と先生はそれぞれ自分のGoogle Driveで記録を所有し、相手へ閲覧者として共有します。drive.file はアプリ作成ファイルの作成・更新・共有に使用します。drive.readonly は、別の利用者から共有されたアプリ専用JSONと添付画像を自動検出・表示するために必要です。クライアントは sharedWithMe およびアプリ固有の appProperties で検索対象を限定します。OAuthアクセストークンは同じタブのメモリと sessionStorage に有効期限付きで保持し、タブ終了後も残るストレージや外部サーバーへ保存しません。
+> 本アプリは学校向けの振り返り・教師フィードバックアプリです。児童と先生はそれぞれ自分のGoogle Driveで記録を所有し、相手へ閲覧者として共有します。drive.file はアプリ作成ファイルの作成・更新・共有に使用します。drive.readonly は、別の利用者から共有されたアプリ専用JSONと添付画像を自動検出・表示するために必要です。クライアントは sharedWithMe およびアプリ固有の appProperties で検索対象を限定します。既定でOAuthアクセストークンはブラウザのJavaScriptメモリにだけ保持し、sessionStorage、localStorage、Cookie、外部サーバーへ保存しません。
 
 審査動画では、次を一続きで示します。
 
 1. 共通URLとアプリのプライバシー説明を開く。
-2. Googleログインと両Driveスコープの認可を行う。
+2. Googleログインで `drive.file` を認可し、役割選択後の用途説明から `drive.readonly` を追加認可する。
 3. 先生がクラスを作成して専用URLを発行する。
 4. 別アカウントの児童が参加し、本文と画像を提出する。
 5. 先生が共有提出を同期して閲覧し、おへんじを返却する。
@@ -97,11 +96,11 @@ OAuthクライアントを許可しても、組織のDrive共有ポリシーが�
 
 1. 個人Googleアカウント2つを先生・児童に分け、作成→招待→参加→承認→提出→画像→返却を確認する。
 2. 同一学校ドメインの先生・児童アカウントで同じ流れを確認する。
-3. 初回認可の結果に `drive.file` と `drive.readonly` が含まれることを確認する。
-4. `drive.readonly` を許可しなかった場合だけ、アプリの追加説明／再要求画面が出ることを確認する。
+3. 最初の認可では `drive.file` が要求され、役割選択後に `drive.readonly` の用途説明と追加要求が出ることを確認する。
+4. `drive.readonly` を許可しない場合、共有記録の同期へ進まないことを確認する。
 5. 先生が［↻ 最新に更新］を押すと、既存の共有提出と新規提出の両方が表示されることを確認する。
 6. 先生の返却後、児童がクラスを開き直すとおへんじが表示されることを確認する。
-7. 同じタブの再読込では有効期限内のセッションが復元され、タブ終了後にアクセストークンが残らないことを確認する。
+7. 再読込み後に再ログインが求められ、sessionStorage、localStorage、Cookieにアクセストークンが残らないことを確認する。
 8. 共有を禁止したテスト環境で、403の利用者向け説明と［先生へもう一度届ける］を確認する。
 
 既存ファイルを作り直す必要はありません。Drive共有が成功済みなら、必要な読取許可を得た後の同期で相手側へ表示されます。

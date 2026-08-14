@@ -7,17 +7,22 @@ import {
   createPortfolio,
   currentTheme,
   decodeInvite,
+  encodeSignedInvite,
+  ensureInviteSecurity,
   exportCsv,
-  inviteUrl,
   isEmail,
   mergePortfoliosIntoMembers,
   normalizeClassCode,
   normalizeEmail,
   randomClassCode,
+  rotateInviteSecurity,
   setFeedback,
+  signedInviteUrl,
   studentKey,
   syncChannel,
-  updatePastComment
+  updatePastComment,
+  validateChannelForStudent,
+  validatePortfolioForClass
 } from './drive-core.js';
 import { DriveApiError, DriveClient } from './drive-api.js';
 
@@ -26,7 +31,7 @@ const toastElement = document.getElementById('toast');
 const config = window.APP_CONFIG || {};
 const BASE_SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
 const SHARED_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
-const INITIAL_SCOPES = `${BASE_SCOPES} ${SHARED_READ_SCOPE}`;
+const INITIAL_SCOPES = BASE_SCOPES;
 const SESSION_KEY = 'rj_oauth_session_v1';
 const LAST_ROLE_KEY = 'rj_last_role';
 const state = {
@@ -55,8 +60,25 @@ const state = {
   feedbackDraftKey: '',
   feedbackDraftHighlights: [],
   teacherTab: 'journals',
-  teacherRefreshTimer: null
+  teacherRefreshTimer: null,
+  jsonCache: new Map(),
+  studentDrafts: new Map(),
+  rejectedPortfolios: []
 };
+
+const configuredOrigins = new Set(Array.isArray(config.allowedOrigins) ? config.allowedOrigins : []);
+const loopbackHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const originSecurityError = configuredOrigins.size && !configuredOrigins.has(location.origin) && !loopbackHost
+  ? 'この公開元はアプリの許可リストにありません。正しい学校用URLから開いてください。'
+  : '';
+
+function allowedWorkspaceDomain(email) {
+  const domains = Array.isArray(config.allowedWorkspaceDomains)
+    ? config.allowedWorkspaceDomains.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (!domains.length) return true;
+  return domains.includes(normalizeEmail(email).split('@')[1] || '');
+}
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -265,13 +287,14 @@ function shell(content) {
 }
 
 function renderLogin(error = '') {
+  const blockingError = originSecurityError || error;
   app.innerHTML = `<section class="center-screen"><div class="login-card">
     <img class="app-logo" src="./icon-192.png" alt="" aria-hidden="true">
     <h1>毎日のふりかえりを<br>学びの成長へ</h1>
     <p>自分の言葉で学びを残し、先生からのおへんじを受け取れます。</p>
-    ${errorNotice(error)}
-    <button id="login" class="primary wide" type="button">Googleアカウントで続ける</button>
-    <p class="muted small">同じタブでは有効期限までログイン状態を保ちます。タブを閉じると認証情報は消去されます。</p>
+    ${errorNotice(blockingError)}
+    <button id="login" class="primary wide" type="button" ${originSecurityError ? 'disabled' : ''}>Googleアカウントで続ける</button>
+    <p class="muted small">${config.persistSessionToken === true ? '同じタブでは有効期限までログイン状態を保ちます。タブを閉じると認証情報は消去されます。' : '認証情報を端末の保存領域に残しません。ページ更新後は再ログインが必要です。'}</p>
   </div></section>`;
   document.getElementById('login').addEventListener('click', requestAccess);
 }
@@ -289,6 +312,7 @@ function loadGoogleIdentity() {
 }
 
 async function requestAccess() {
+  if (originSecurityError) return renderLogin();
   if (!config.googleClientId) return renderLogin('ログインの準備が完了していません。アプリ管理者に連絡してください。');
   setBusy('Googleログインをひらいています…');
   try {
@@ -314,6 +338,10 @@ async function handleToken(response) {
     const userResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { Authorization: `Bearer ${response.access_token}` } });
     if (!userResponse.ok) throw new Error('Googleアカウント情報を確認できませんでした。');
     const profile = await userResponse.json();
+    if (!allowedWorkspaceDomain(profile.email)) {
+      clearSession();
+      return renderLogin('このGoogleアカウントのドメインは、アプリ管理者から許可されていません。');
+    }
     state.user = { email: normalizeEmail(profile.email), name: profile.name || profile.email };
     state.drive = new DriveClient(response.access_token);
     saveSession();
@@ -351,6 +379,7 @@ async function resolveEntryRoute() {
 }
 
 function saveSession() {
+  if (config.persistSessionToken !== true) return;
   if (!state.accessToken || !state.user || !state.tokenExpiresAt) return;
   try {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({
@@ -364,9 +393,18 @@ function saveSession() {
 }
 
 function restoreSession() {
+  if (config.persistSessionToken !== true) {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (error) {}
+    return false;
+  }
+  if (originSecurityError) return false;
   try {
     const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
     if (!saved || saved.clientId !== config.googleClientId || saved.expiresAt < Date.now() + 60_000 || !saved.accessToken || !saved.user?.email) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return false;
+    }
+    if (!allowedWorkspaceDomain(saved.user.email)) {
       sessionStorage.removeItem(SESSION_KEY);
       return false;
     }
@@ -415,9 +453,9 @@ function renderSharedReadPermission(role, error = '') {
   app.innerHTML = shell(`<section class="permission-page"><div class="permission-card panel">
     <div class="permission-icon" aria-hidden="true">🔄</div><span class="eyebrow">SHARED RECORDS</span>
     <h1>${isTeacher ? '児童の提出を受け取る準備' : '先生のおへんじを受け取る準備'}</h1>
-    <p>${isTeacher ? '別のアカウントから共有されたふりかえり' : '先生のアカウントから共有されたテーマやおへんじ'}を見つけるため、Google Driveの閲覧許可が必要です。</p>
+    <p>${isTeacher ? '別のアカウントから共有されたふりかえり' : '先生のアカウントから共有されたテーマやおへんじ'}を自動で見つけるため、Google Driveの閲覧許可が必要です。</p>
     ${errorNotice(error)}
-    <div class="permission-points"><p><strong>書き換えは専用ファイルだけ</strong><br><span>書込みには引き続き、アプリが作成したファイルだけを扱う権限を使います。</span></p><p><strong>他のファイルは表示しません</strong><br><span>アプリ専用の印が付いた共有JSONだけを検索し、データを外部サーバーへ送りません。</span></p></div>
+    <div class="permission-points"><p><strong>許可の範囲</strong><br><span>Googleの許可画面ではDrive全体の閲覧権限です。アプリの現在の実装は、共有済みで専用の印が付いた記録だけを検索・表示します。</span></p><p><strong>書き換えは専用ファイルだけ</strong><br><span>書込みには、アプリが作成したファイルだけを扱う権限を使います。通常の記録を運営者サーバーへ保存しません。</span></p></div>
     <button id="grant-shared-read" class="primary wide" type="button">共有された記録の同期を許可する</button>
     <button id="permission-back" class="quiet wide" type="button">使い方の選択へ戻る</button>
   </div></section>`);
@@ -474,9 +512,10 @@ async function renderTeacherHome(error = '') {
   setBusy('先生のクラスを探しています…');
   const files = await withError(() => state.drive.listClasses(), (message) => renderHome(message));
   if (!files) return;
-  const classes = (await Promise.all(files.map(async (file) => {
-    try { return { file, record: await state.drive.getJson(file.id) }; } catch (loadError) { return null; }
-  }))).filter(Boolean);
+  const classes = (await loadJsonItems(files)).filter(({ file, record }) =>
+    record?.kind === 'reflection-journal-class'
+    && normalizeEmail(record.teacher?.email) === state.user.email
+    && normalizeEmail(file.owners?.[0]?.emailAddress) === state.user.email);
   state.teacherClasses = classes;
   if (state.restoreLastTeacherClass && classes.length) {
     state.restoreLastTeacherClass = false;
@@ -511,44 +550,107 @@ async function createClass(event) {
   await withError(async () => {
     const classCode = randomClassCode();
     const classId = await computeClassId(state.user.email, classCode);
-    const record = createClassRecord({ classId, classCode, className, teacher: state.user });
+    const secured = await ensureInviteSecurity(createClassRecord({ classId, classCode, className, teacher: state.user }));
+    const record = secured.record;
     const file = await state.drive.createClass(record);
+    rememberJson(file, record);
     pushAppRoute('teacher-class', { classId: record.classId, tab: 'journals' });
     await openTeacherClass({ file, record });
   }, (message) => renderTeacherHome(message));
 }
 
+function rememberJson(file, record) {
+  if (!file?.id) return;
+  state.jsonCache.set(file.id, {
+    modifiedTime: String(file.modifiedTime || ''),
+    version: String(file.version || ''),
+    record
+  });
+}
+
+async function loadJsonItem(file) {
+  const cached = state.jsonCache.get(file.id);
+  if (cached
+    && cached.modifiedTime === String(file.modifiedTime || '')
+    && cached.version === String(file.version || '')) return { file, record: cached.record };
+  const record = await state.drive.getJson(file.id);
+  rememberJson(file, record);
+  return { file, record };
+}
+
 async function loadJsonItems(files) {
   return (await Promise.all(files.map(async (file) => {
-    try { return { file, record: await state.drive.getJson(file.id) }; } catch (error) { return null; }
+    try { return await loadJsonItem(file); } catch (error) { return null; }
   }))).filter(Boolean);
+}
+
+async function updateDocument(file, record) {
+  const updated = await state.drive.updateJson(file.id, record, { expectedVersion: file.version || '' });
+  Object.assign(file, updated || {});
+  rememberJson(file, record);
+  return updated;
+}
+
+async function persistTeacherChannel(email, channel) {
+  const normalized = normalizeEmail(email);
+  const file = state.teacher.channelFiles.get(normalized);
+  if (!file) throw new Error('おへんじ用ファイルが見つかりません。最新の状態に更新してください。');
+  await updateDocument(file, channel);
+  state.teacher.channels.set(normalized, channel);
 }
 
 async function openTeacherClass(item, tab = 'journals', error = '', options = {}) {
   if (!options.silent) setBusy('クラスのデータを読み込んでいます…');
   const previousCount = state.teacher?.record?.classId === item.record.classId ? analyzeClass(activePortfolioItems(), state.teacher.channels).all.length : 0;
   await withError(async () => {
-    const portfolioFiles = await state.drive.listSharedPortfolios(item.record.classId);
-    const portfolios = (await loadJsonItems(portfolioFiles)).filter((entry) => entry.record?.class?.id === item.record.classId);
-    let record = mergePortfoliosIntoMembers(item.record, portfolios);
-    const original = JSON.stringify(item.record);
+    const security = await ensureInviteSecurity(item.record);
+    let record = security.record;
+    const inviteValidationRecord = security.changed ? item.record : record;
+    if (security.changed) await updateDocument(item.file, record);
+    const original = JSON.stringify(record);
+    const portfolioFiles = await state.drive.listSharedPortfolios(record.classId);
+    const candidates = await loadJsonItems(portfolioFiles);
+    const portfolios = [];
+    const rejectedPortfolios = [];
+    for (const candidate of candidates) {
+      const validation = await validatePortfolioForClass(candidate.file, candidate.record, inviteValidationRecord);
+      if (validation.ok) portfolios.push(candidate);
+      else rejectedPortfolios.push({ file: candidate.file, reason: validation.reason });
+    }
+    record = mergePortfoliosIntoMembers(record, portfolios);
+    const ownChannelFiles = await state.drive.listOwnChannels(record.classId);
+    const channelFilesById = new Map(ownChannelFiles.map((file) => [file.id, file]));
     const channels = new Map();
+    const channelFiles = new Map();
     for (const member of record.members || []) {
       if (member.status !== 'active') continue;
       let channel;
-      if (member.channelFileId) {
-        try { channel = await state.drive.getJson(member.channelFileId); } catch (loadError) { member.channelFileId = ''; }
+      let channelFile = channelFilesById.get(member.channelFileId);
+      if (channelFile) {
+        try {
+          const loaded = await loadJsonItem(channelFile);
+          if (loaded.record?.kind === 'reflection-journal-channel'
+            && loaded.record.class?.id === record.classId
+            && normalizeEmail(loaded.record.student?.email) === normalizeEmail(member.email)
+            && normalizeEmail(loaded.record.teacher?.email) === state.user.email) channel = loaded.record;
+        } catch (loadError) {}
       }
       if (!channel && member.portfolioFileId) {
         channel = createChannel({ classRecord: record, member });
-        const created = await state.drive.createChannel(channel, await studentKey(member.email));
-        await state.drive.shareWithUser(created.id, member.email, 'reader');
-        member.channelFileId = created.id;
+        channelFile = await state.drive.createChannel(channel, await studentKey(member.email));
+        await state.drive.shareWithUser(channelFile.id, member.email, 'reader');
+        member.channelFileId = channelFile.id;
+        rememberJson(channelFile, channel);
       }
-      if (channel) channels.set(normalizeEmail(member.email), channel);
+      if (channel && channelFile) {
+        const email = normalizeEmail(member.email);
+        channels.set(email, channel);
+        channelFiles.set(email, channelFile);
+      }
     }
-    if (JSON.stringify(record) !== original) await state.drive.updateJson(item.file.id, record);
-    state.teacher = { file: item.file, record, portfolios, channels, syncedAt: new Date() };
+    if (JSON.stringify(record) !== original) await updateDocument(item.file, record);
+    state.rejectedPortfolios = rejectedPortfolios;
+    state.teacher = { file: item.file, record, portfolios, channels, channelFiles, rejectedPortfolios, syncedAt: new Date() };
     try { localStorage.setItem('rj_last_teacher_class', item.file.id); } catch (storageError) {}
     renderTeacherClass(tab, error);
     const nextCount = analyzeClass(activePortfolioItems(), channels).all.length;
@@ -597,8 +699,9 @@ async function refreshTeacherClass(silent = true) {
   if (!ctx?.file?.id) return;
   if (!silent) setBusy('最新の提出を確認しています…');
   await withError(async () => {
-    const record = await state.drive.getJson(ctx.file.id);
-    await openTeacherClass({ file: ctx.file, record }, state.teacherTab, '', { silent });
+    const [file, record] = await Promise.all([state.drive.getMetadata(ctx.file.id), state.drive.getJson(ctx.file.id)]);
+    rememberJson(file, record);
+    await openTeacherClass({ file, record }, state.teacherTab, '', { silent });
   }, (message) => renderTeacherClass(state.teacherTab, message));
 }
 
@@ -717,8 +820,7 @@ async function quickFeedback(email, journalId, stamp, returned) {
   const existing = channel.feedback?.[journalId] || {};
   channel = setFeedback(channel, journalId, { ...existing, stamp: stamp || existing.stamp, returned });
   await withError(async () => {
-    await state.drive.updateJson(member.channelFileId, channel);
-    state.teacher.channels.set(normalized, channel);
+    await persistTeacherChannel(normalized, channel);
     toast(returned ? `${stamp} を返しました。` : '返却を取り消しました。');
     renderJournalManagement();
   }, (message) => renderTeacherClass('journals', message));
@@ -744,9 +846,7 @@ async function batchReturn(journals) {
       changed.set(email, channel);
     }
     for (const [email, channel] of changed) {
-      const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === email);
-      if (member?.channelFileId) await state.drive.updateJson(member.channelFileId, channel);
-      state.teacher.channels.set(email, channel);
+      await persistTeacherChannel(email, channel);
     }
     toast(`${targets.length}件を返却しました。`);
     renderTeacherClass('journals');
@@ -756,6 +856,7 @@ async function batchReturn(journals) {
 async function geminiText(prompt) {
   const apiKey = state.teacher.record.settings.geminiApiKey;
   if (!apiKey) throw new Error('クラス設定でGemini APIキーを保存してください。');
+  if (!state.teacher.record.settings.geminiDataConsent) throw new Error('児童の文章をGemini APIへ送信することについて、学校の承認と同意をクラス設定で確認してください。');
   const model = state.teacher.record.settings.geminiModel || 'gemini-3.1-flash-lite';
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
@@ -782,6 +883,7 @@ async function batchAiDrafts(journals, detailed) {
   const targets = unreturnedJournals(journals);
   if (!targets.length) return toast('未返却の記録はありません。');
   if (!state.teacher.record.settings.geminiApiKey) return renderTeacherClass('settings', 'AI支援を使うにはGemini APIキーを設定してください。');
+  if (!state.teacher.record.settings.geminiDataConsent) return renderTeacherClass('settings', 'AI送信に関する学校の承認と同意を確認してください。');
   if (!window.confirm(`${targets.length}件のAI下書きを作ります。API利用料が発生する場合があります。続けますか？`)) return;
   setBusy(`AIが${targets.length}件の下書きを作っています…`);
   await withError(async () => {
@@ -801,9 +903,7 @@ async function batchAiDrafts(journals, detailed) {
       completed += 1;
     }
     for (const [email, channel] of changed) {
-      const member = state.teacher.record.members.find((item) => normalizeEmail(item.email) === email);
-      if (member?.channelFileId) await state.drive.updateJson(member.channelFileId, channel);
-      state.teacher.channels.set(email, channel);
+      await persistTeacherChannel(email, channel);
     }
     toast(`${completed}件の下書きを保存しました。確認後に返却してください。`);
     renderTeacherClass('journals');
@@ -818,12 +918,11 @@ async function saveThemes(event) {
   ctx.record.updatedAt = new Date().toISOString();
   setBusy('テーマを児童へ配信しています…');
   await withError(async () => {
-    await state.drive.updateJson(ctx.file.id, ctx.record);
+    await updateDocument(ctx.file, ctx.record);
     for (const member of ctx.record.members.filter((item) => item.status === 'active' && item.channelFileId)) {
       const email = normalizeEmail(member.email);
       const channel = syncChannel(ctx.channels.get(email), ctx.record, member);
-      await state.drive.updateJson(member.channelFileId, channel);
-      ctx.channels.set(email, channel);
+      await persistTeacherChannel(email, channel);
     }
     toast('テーマを保存しました。');
     renderTeacherClass('journals');
@@ -901,8 +1000,7 @@ async function saveFeedback(event, portfolioItem, journal) {
   channel = setFeedback(channel, journal.id, { comment: document.getElementById('feedback-comment').value, stamp: document.getElementById('feedback-stamp').value, highlights: state.feedbackDraftHighlights, returned: true });
   setBusy('おへんじを保存しています…');
   await withError(async () => {
-    await state.drive.updateJson(member.channelFileId, channel);
-    state.teacher.channels.set(email, channel);
+    await persistTeacherChannel(email, channel);
     state.feedbackDraftKey = '';
     state.feedbackDraftHighlights = [];
     toast('児童へ返却しました。');
@@ -916,19 +1014,12 @@ async function saveFeedback(event, portfolioItem, journal) {
 async function generateAiDraft(journal, portfolioItem) {
   const apiKey = state.teacher.record.settings.geminiApiKey;
   if (!apiKey) return renderFeedbackEditor(portfolioItem, journal, 'クラス設定でGemini APIキーを保存してください。');
+  if (!state.teacher.record.settings.geminiDataConsent) return renderFeedbackEditor(portfolioItem, journal, '先にクラス設定で、AI送信に関する学校の承認と同意を確認してください。');
   const button = document.getElementById('ai-draft');
   button.disabled = true;
   button.textContent = '下書きを作成中…';
   try {
-    const model = state.teacher.record.settings.geminiModel || 'gemini-3.1-flash-lite';
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: [{ parts: [{ text: `あなたは小学校の担任です。次の児童のふりかえりへ、具体的なよさを認め、次の学びにつながる温かいコメントを100字以内で日本語で書いてください。コメント本文だけを返してください。\n\nテーマ: ${journal.theme}\n本文: ${journal.content}` }] }] })
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error?.message || 'Gemini APIでエラーが発生しました。');
-    document.getElementById('feedback-comment').value = result.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('')?.trim() || '';
+    document.getElementById('feedback-comment').value = await geminiText(`あなたは小学校の担任です。次の児童のふりかえりへ、具体的なよさを認め、次の学びにつながる温かいコメントを100字以内で日本語で書いてください。コメント本文だけを返してください。\n\nテーマ: ${journal.theme}\n本文: ${journal.content}`);
     toast('AIの下書きを作成しました。内容を確認してください。');
   } catch (error) { renderFeedbackEditor(portfolioItem, journal, friendlyError(error)); }
   finally { if (button.isConnected) { button.disabled = false; button.textContent = 'AIで下書き'; } }
@@ -946,34 +1037,40 @@ function publicEntryUrl() {
   return config.publicEntryUrl || new URL('./', location.href).href;
 }
 
-function renderClassSettings() {
+async function renderClassSettings() {
   const ctx = state.teacher;
   const settings = ctx.record.settings;
-  const link = inviteUrl(publicEntryUrl(), {
+  const token = await encodeSignedInvite({
     classCode: ctx.record.classCode,
     className: ctx.record.className,
     teacherEmail: ctx.record.teacher.email,
     teacherName: ctx.record.teacher.name,
     approvalRequired: settings.approvalRequired,
-    acceptingMembers: true
-  });
+    acceptingMembers: settings.acceptingMembers !== false
+  }, settings.inviteSecurity);
+  const link = signedInviteUrl(publicEntryUrl(), token);
   const content = document.getElementById('teacher-content');
-  content.innerHTML = `<div class="teacher-settings-grid"><section class="panel invite-layout wide-setting"><div><span class="eyebrow">INVITE STUDENTS</span><h2>児童を招待する</h2><p class="muted">教室ではQRコード、遠隔では専用URLを配ると簡単です。</p><div class="class-code">${escapeHtml(ctx.record.classCode)}</div><div class="button-row"><button id="copy-code" class="secondary" type="button">クラスコードをコピー</button><button id="student-preview" class="quiet" type="button">児童画面を確認</button></div><div class="url-box">${escapeHtml(link)}</div><div class="button-row" style="margin-top:12px"><button id="copy-url" class="primary" type="button">専用URLをコピー</button><button id="copy-text" class="secondary" type="button">招待文をコピー</button></div></div><div class="qr-actions"><div id="qr" class="qr-box" aria-label="児童招待用QRコード"></div><button id="download-qr" class="secondary wide" type="button">QRを画像で保存</button></div></section>
-  <section class="panel"><h2>参加設定</h2><form id="admission-form"><label class="check-label"><input id="approval" type="checkbox" ${settings.approvalRequired ? 'checked' : ''}><span>参加には先生の承認が必要</span></label><p class="muted small">承認なしにすると、児童の参加後に先生がクラス画面を開いた時点で自動承認されます。</p><button class="primary" type="submit">設定を保存</button></form></section>
-  <section class="panel wide-setting"><div class="section-heading"><div><span class="eyebrow">ROSTER</span><h2>参加申請・名簿</h2></div><span class="badge">${(ctx.record.members || []).filter((member) => member.status === 'active').length}人 参加中</span></div><div id="member-list">${memberRows()}</div><form id="invite-member" class="inline-form"><input id="member-name" required placeholder="児童名"><input id="member-email" type="email" required placeholder="児童のGoogleメール"><button class="secondary" type="submit">1人追加</button></form><details><summary>名簿をまとめて追加</summary><form id="bulk-members"><label><span>1行に「名前, メールアドレス」</span><textarea id="bulk-member-text" placeholder="山田 花子, hanako@example.ed.jp\n鈴木 太郎, taro@example.ed.jp"></textarea></label><button class="secondary" type="submit">まとめて名簿へ追加</button></form></details></section>
-  <section class="panel"><h2>Gemini AI支援（任意）</h2><form id="gemini-form"><label><span>APIキー</span><input id="gemini-key" type="password" value="${escapeHtml(settings.geminiApiKey || '')}" autocomplete="off"></label><label><span>モデル</span><input id="gemini-model" value="${escapeHtml(settings.geminiModel || 'gemini-3.1-flash-lite')}"></label><p class="muted small">キーは先生所有の非共有クラス設定ファイルに保存され、児童へは共有されません。AIコメントは必ず先生が確認してから返却します。</p><button class="primary" type="submit">AI設定を保存</button></form></section>
-  <section class="panel"><h2>データ出力</h2><div class="button-row"><button id="csv" class="secondary" type="button">CSVをダウンロード</button><button id="print" class="secondary" type="button">印刷・PDF</button></div></section></div>`;
+  if (state.teacher !== ctx || !content) return;
+  const rejectedNotice = ctx.rejectedPortfolios?.length
+    ? `<div class="error"><strong>安全性チェックで${ctx.rejectedPortfolios.length}件を除外しました。</strong><p class="small">所有者と児童アカウントの不一致、または失効した招待が原因です。Drive上の原ファイルは変更していません。</p></div>` : '';
+  content.innerHTML = `<div class="teacher-settings-grid"><section class="panel invite-layout wide-setting"><div><span class="eyebrow">INVITE STUDENTS</span><h2>児童を招待する</h2><p class="muted">教室ではQRコード、遠隔では専用URLを配ると簡単です。</p><div class="class-code">${escapeHtml(ctx.record.classCode)}</div><div class="button-row"><button id="copy-code" class="secondary" type="button">クラスコードをコピー</button><button id="student-preview" class="quiet" type="button">児童画面を確認</button></div><div class="url-box">${escapeHtml(link)}</div><div class="button-row" style="margin-top:12px"><button id="copy-url" class="primary" type="button">専用URLをコピー</button><button id="copy-text" class="secondary" type="button">招待文をコピー</button><button id="rotate-invite" class="danger" type="button">招待URLを失効・再発行</button></div><p class="muted small">有効期限: ${escapeHtml(formatDate(settings.inviteSecurity?.expiresAt))}。再発行すると旧URLでの新規参加は拒否されます。</p></div><div class="qr-actions"><div id="qr" class="qr-box" aria-label="児童招待用QRコード"></div><button id="download-qr" class="secondary wide" type="button">QRを画像で保存</button></div></section>
+  <section class="panel"><h2>参加設定</h2><form id="admission-form"><label class="check-label"><input id="accepting-members" type="checkbox" ${settings.acceptingMembers !== false ? 'checked' : ''}><span>新しい児童の参加を受け付ける</span></label><label class="check-label"><input id="approval" type="checkbox" ${settings.approvalRequired ? 'checked' : ''}><span>参加には先生の承認が必要</span></label><p class="muted small">受付停止は新規参加だけを止め、参加済みの児童の記録は保持します。</p><button class="primary" type="submit">設定を保存</button></form></section>
+  <section class="panel wide-setting"><div class="section-heading"><div><span class="eyebrow">ROSTER</span><h2>参加申請・名簿</h2></div><span class="badge">${(ctx.record.members || []).filter((member) => member.status === 'active').length}人 参加中</span></div>${rejectedNotice}<div id="member-list">${memberRows()}</div><form id="invite-member" class="inline-form"><input id="member-name" required placeholder="児童名"><input id="member-email" type="email" required placeholder="児童のGoogleメール"><button class="secondary" type="submit">1人追加</button></form><details><summary>名簿をまとめて追加</summary><form id="bulk-members"><label><span>1行に「名前, メールアドレス」</span><textarea id="bulk-member-text" placeholder="山田 花子, hanako@example.ed.jp\n鈴木 太郎, taro@example.ed.jp"></textarea></label><button class="secondary" type="submit">まとめて名簿へ追加</button></form></details></section>
+  <section class="panel"><h2>Gemini AI支援（任意）</h2><form id="gemini-form"><label><span>APIキー</span><input id="gemini-key" type="password" value="${escapeHtml(settings.geminiApiKey || '')}" autocomplete="off"></label><label><span>モデル</span><input id="gemini-model" value="${escapeHtml(settings.geminiModel || 'gemini-3.1-flash-lite')}"></label><label class="check-label"><input id="gemini-consent" type="checkbox" ${settings.geminiDataConsent ? 'checked' : ''}><span>児童の本文がGoogle Generative Language APIへ送信されることを理解し、学校の承認を得ている</span></label><p class="muted small">APIキーは先生の非共有Driveファイルに平文保存されます。Google Cloud側でキーを学校用オリジンとAPIに制限し、AIコメントは必ず先生が確認してください。</p><button class="primary" type="submit">AI設定を保存</button></form></section>
+  <section class="panel"><h2>データ出力・保全</h2><p class="muted small">完全バックアップは、クラス設定・児童の記録・おへんじ・共有画像の複製を先生のDriveに作成します。</p><div class="button-row"><button id="archive" class="primary" type="button">Driveへ完全バックアップ</button><button id="csv" class="secondary" type="button">CSVをダウンロード</button><button id="print" class="secondary" type="button">印刷・PDF</button></div></section></div>`;
   document.getElementById('copy-url').addEventListener('click', () => copy(link, '専用URLをコピーしました。'));
   document.getElementById('copy-code').addEventListener('click', () => copy(ctx.record.classCode, 'クラスコードをコピーしました。'));
   document.getElementById('copy-text').addEventListener('click', () => copy(`「${ctx.record.className}」のふりかえりジャーナルに参加してください。\nクラスコード: ${ctx.record.classCode}\n${link}`, '招待文をコピーしました。'));
   document.getElementById('student-preview').addEventListener('click', () => window.open(link, '_blank', 'noopener'));
   document.getElementById('download-qr').addEventListener('click', () => downloadQrCode(ctx.record.className));
+  document.getElementById('rotate-invite').addEventListener('click', rotateInviteLink);
   document.getElementById('admission-form').addEventListener('submit', saveAdmissionSettings);
   document.getElementById('invite-member').addEventListener('submit', addInvitedMember);
   document.getElementById('bulk-members').addEventListener('submit', addBulkMembers);
   document.getElementById('gemini-form').addEventListener('submit', saveGeminiSettings);
   document.getElementById('csv').addEventListener('click', downloadCsv);
   document.getElementById('print').addEventListener('click', printClass);
+  document.getElementById('archive').addEventListener('click', archiveClassToDrive);
   document.querySelectorAll('[data-member-action]').forEach((button) => button.addEventListener('click', () => updateMemberStatus(button.dataset.email, button.dataset.memberAction)));
   ensureQr().then(() => renderQr(link)).catch(() => {
     const target = document.getElementById('qr');
@@ -993,6 +1090,7 @@ function statusLabel(status) {
 async function saveAdmissionSettings(event) {
   event.preventDefault();
   state.teacher.record.settings.approvalRequired = document.getElementById('approval').checked;
+  state.teacher.record.settings.acceptingMembers = document.getElementById('accepting-members').checked;
   await saveTeacherRecord('参加設定を保存しました。');
 }
 
@@ -1040,12 +1138,14 @@ async function updateMemberStatus(email, status) {
       const created = await state.drive.createChannel(channel, await studentKey(member.email));
       await state.drive.shareWithUser(created.id, member.email, 'reader');
       member.channelFileId = created.id;
+      ctx.channelFiles.set(normalizeEmail(email), created);
+      rememberJson(created, channel);
     } else if (channel && member.channelFileId) {
       channel = syncChannel(channel, ctx.record, member);
-      await state.drive.updateJson(member.channelFileId, channel);
+      await persistTeacherChannel(email, channel);
     }
     if (channel) ctx.channels.set(normalizeEmail(email), channel);
-    await state.drive.updateJson(ctx.file.id, ctx.record);
+    await updateDocument(ctx.file, ctx.record);
     toast(status === 'active' ? '児童を承認しました。' : '参加状態を更新しました。');
     renderTeacherClass('settings');
   }, (message) => renderTeacherClass('settings', message));
@@ -1053,8 +1153,12 @@ async function updateMemberStatus(email, status) {
 
 async function saveGeminiSettings(event) {
   event.preventDefault();
-  state.teacher.record.settings.geminiApiKey = document.getElementById('gemini-key').value.trim();
+  const apiKey = document.getElementById('gemini-key').value.trim();
+  const consent = document.getElementById('gemini-consent').checked;
+  if (apiKey && !consent) return renderTeacherClass('settings', '児童の文章の外部送信について、学校の承認と同意を確認してください。');
+  state.teacher.record.settings.geminiApiKey = apiKey;
   state.teacher.record.settings.geminiModel = document.getElementById('gemini-model').value.trim() || 'gemini-3.1-flash-lite';
+  state.teacher.record.settings.geminiDataConsent = Boolean(apiKey && consent);
   await saveTeacherRecord('AI設定を保存しました。');
 }
 
@@ -1062,7 +1166,73 @@ async function saveTeacherRecord(message) {
   const ctx = state.teacher;
   ctx.record.updatedAt = new Date().toISOString();
   setBusy('設定を保存しています…');
-  await withError(async () => { await state.drive.updateJson(ctx.file.id, ctx.record); toast(message); renderTeacherClass('settings'); }, (error) => renderTeacherClass('settings', error));
+  await withError(async () => { await updateDocument(ctx.file, ctx.record); toast(message); renderTeacherClass('settings'); }, (error) => renderTeacherClass('settings', error));
+}
+
+async function rotateInviteLink() {
+  if (!window.confirm('現在の招待URLを失効させ、新しいURLを発行しますか？参加済みの児童には影響しません。')) return;
+  const ctx = state.teacher;
+  setBusy('招待URLを再発行しています…');
+  await withError(async () => {
+    ctx.record = await rotateInviteSecurity(ctx.record);
+    await updateDocument(ctx.file, ctx.record);
+    toast('旧しい招待URLを失効させ、新しいURLを発行しました。');
+    renderTeacherClass('settings');
+  }, (message) => renderTeacherClass('settings', message));
+}
+
+async function archiveClassToDrive() {
+  if (!window.confirm('現在表示しているクラスの完全バックアップを、先生のGoogle Driveに作成しますか？')) return;
+  const ctx = state.teacher;
+  const archivedAt = new Date().toISOString();
+  setBusy('クラスの完全バックアップを作成しています…');
+  await withError(async () => {
+    const folder = await state.drive.createFolder(
+      `ふりかえりジャーナル_バックアップ_${ctx.record.className}_${todayKey()}`,
+      { rjType: 'archive-folder', rjClassId: ctx.record.classId, rjArchivedAt: archivedAt }
+    );
+    const properties = { rjType: 'archive-item', rjClassId: ctx.record.classId, rjArchivedAt: archivedAt };
+    await state.drive.createJson('class.json', ctx.record, properties, [folder.id]);
+    for (const { record } of ctx.portfolios) {
+      const key = await studentKey(record.student.email);
+      await state.drive.createJson(`portfolio_${key.slice(0, 12)}.json`, record, properties, [folder.id]);
+      for (const journal of record.journals || []) {
+        if (!journal.imageFileId) continue;
+        try {
+          const blob = await state.drive.getBlob(journal.imageFileId);
+          await state.drive.createFile({
+            name: `image_${journal.id}${blob.type === 'image/png' ? '.png' : '.jpg'}`,
+            mimeType: blob.type || 'application/octet-stream',
+            parents: [folder.id],
+            appProperties: { ...properties, rjJournalId: journal.id }
+          }, blob);
+        } catch (imageError) {
+          // The manifest keeps the source ID so an administrator can inspect a policy-blocked image later.
+        }
+      }
+    }
+    for (const [email, channel] of ctx.channels) {
+      const key = await studentKey(email);
+      await state.drive.createJson(`channel_${key.slice(0, 12)}.json`, channel, properties, [folder.id]);
+    }
+    await state.drive.createJson('manifest.json', {
+      schemaVersion: 1,
+      kind: 'reflection-journal-archive',
+      classId: ctx.record.classId,
+      className: ctx.record.className,
+      archivedAt,
+      archivedBy: state.user.email,
+      portfolioCount: ctx.portfolios.length,
+      channelCount: ctx.channels.size,
+      sourceFileIds: {
+        class: ctx.file.id,
+        portfolios: ctx.portfolios.map(({ file }) => file.id),
+        channels: [...ctx.channelFiles.values()].map((file) => file.id)
+      }
+    }, properties, [folder.id]);
+    toast('先生のDriveに完全バックアップを作成しました。');
+    renderTeacherClass('settings');
+  }, (message) => renderTeacherClass('settings', message));
 }
 
 function downloadCsv() {
@@ -1083,7 +1253,10 @@ async function renderStudentHome(error = '') {
   setStudentBusy('参加済みのクラスを探しています…');
   const files = await withError(() => state.drive.listOwnPortfolios(), (message) => renderHome(message));
   if (!files) return;
-  const portfolios = await loadJsonItems(files);
+  const portfolios = (await loadJsonItems(files)).filter(({ file, record }) =>
+    record?.kind === 'reflection-journal-portfolio'
+    && normalizeEmail(record.student?.email) === state.user.email
+    && normalizeEmail(file.owners?.[0]?.emailAddress) === state.user.email);
   state.studentPortfolios = portfolios;
   app.innerHTML = shell(`<div class="student-ui"><div class="page-heading"><div><span class="badge">${studentText('児童')}</span><h1>${studentText('参加しているクラス')}</h1></div><button id="back" class="quiet" type="button">${studentText('使い方を変える')}</button></div>
     ${studentErrorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button" aria-label="${escapeHtml(record.class?.name || 'クラス')}、${record.journals?.length || 0}件のふりかえり"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3 class="user-content">${studentText(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}${studentText('件')}のふりかえり</p></button>`).join('')}</div>` : `<div class="empty">${studentText('参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。')}</div>`}</div>`);
@@ -1097,6 +1270,7 @@ async function renderStudentHome(error = '') {
 
 async function renderJoin(error = '') {
   const invite = state.invite;
+  if (!allowedWorkspaceDomain(invite.teacherEmail)) return renderHome('招待元のGoogle Workspaceドメインは、このアプリで許可されていません。');
   if (!invite.acceptingMembers) return renderHome('この招待では新しい参加を受け付けていません。先生から新しいURLを受け取ってください。');
   setStudentBusy('参加状況を確認しています…');
   const files = await withError(() => state.drive.listOwnPortfolios(invite.classId), (message) => renderHome(message));
@@ -1108,6 +1282,7 @@ async function renderJoin(error = '') {
       return openPortfolio({ file: files[0], record });
     }
   }
+  if (!invite.signed) return renderHome('この招待URLは旧形式です。安全に参加するため、先生から新しいURLまたはQRコードを受け取ってください。');
   app.innerHTML = shell(`<div class="student-ui"><div class="page-heading"><div><span class="badge">${studentText('招待')}</span><h1 class="user-content">${studentText(invite.className)}</h1></div><button id="cancel" class="quiet" type="button">${studentText('戻る')}</button></div>
     ${studentErrorNotice(error)}<section class="panel"><p>${studentText('先生')}: <strong class="user-content">${escapeHtml(invite.teacherName || invite.teacherEmail)}</strong></p><p>クラスコード: <strong>${escapeHtml(invite.classCode)}</strong></p><form id="join-class"><label><span>${studentText('先生に表示する名前')}</span><input id="student-name" maxlength="80" required value="${escapeHtml(state.user.name || '')}"></label><button class="primary wide" type="submit">${studentText('このクラスに参加する')}</button></form><p class="muted small">${studentText('参加すると、あなたのふりかえりを先生が確認できるようになります。')}</p></section></div>`);
   document.getElementById('cancel').addEventListener('click', () => appBack(() => {
@@ -1124,8 +1299,10 @@ async function joinClass(event) {
   if (!name) return;
   setStudentBusy('クラスに参加しています…');
   await withError(async () => {
+    if (!state.invite?.signed || new Date(state.invite.expiresAt).getTime() <= Date.now()) throw new Error('招待URLが失効しています。先生から新しいURLを受け取ってください。');
     const record = createPortfolio({ invite: state.invite, student: { ...state.user, name } });
     const file = await state.drive.createPortfolio(record);
+    rememberJson(file, record);
     try { await state.drive.shareWithUser(file.id, state.invite.teacherEmail, 'reader'); }
     catch (error) {
       replaceAppRoute('student-portfolio', { fileId: file.id, classId: record.class.id }, location.pathname + location.search);
@@ -1140,8 +1317,8 @@ async function findStudentChannel(classId) {
   const files = await state.drive.listSharedChannels(classId);
   for (const file of files) {
     try {
-      const record = await state.drive.getJson(file.id);
-      if (record.class?.id === classId && normalizeEmail(record.student?.email) === state.user.email) return { file, record };
+      const { record } = await loadJsonItem(file);
+      if (validateChannelForStudent(file, record, state.user.email, classId)) return { file, record };
     } catch (error) {}
   }
   return null;
@@ -1150,6 +1327,9 @@ async function findStudentChannel(classId) {
 async function openPortfolio(item, error = '') {
   setStudentBusy('ふりかえりを開いています…');
   await withError(async () => {
+    if (item.record?.kind !== 'reflection-journal-portfolio'
+      || normalizeEmail(item.record.student?.email) !== state.user.email
+      || normalizeEmail(item.file.owners?.[0]?.emailAddress) !== state.user.email) throw new Error('このポートフォリオは、ログイン中の児童のDrive記録として確認できません。');
     const channelItem = await findStudentChannel(item.record.class.id);
     state.portfolioFile = item.file;
     state.portfolio = item.record;
@@ -1184,8 +1364,10 @@ function renderPortfolio(error = '') {
   const pending = !channel && portfolio.class.approvalRequired;
   const rejected = channel?.status === 'rejected';
   const theme = currentTheme(channel?.themes || {}, new Date());
-  let draft = {};
-  try { draft = JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch (loadError) {}
+  let draft = state.studentDrafts.get(draftKey()) || {};
+  if (config.persistLocalDrafts === true) {
+    try { draft = JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch (loadError) {}
+  }
   const unread = unreadFeedbackJournals();
   app.innerHTML = shell(`<div class="student-ui"><div class="page-heading student-page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1 class="user-content">${studentText(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">${studentText('クラス一覧へ')}</button></div>
     ${studentErrorNotice(error)}${typeof error === 'string' && error ? `<button id="reshare" class="secondary" type="button">${studentText('先生へもう一度届ける')}</button>` : ''}
@@ -1337,7 +1519,11 @@ function pastSelfPanel() {
 }
 
 function saveDraft() {
-  try { localStorage.setItem(draftKey(), JSON.stringify({ theme: document.getElementById('theme').value, content: document.getElementById('content').value, emotion: document.querySelector('[name="emotion"]:checked')?.value || '' })); } catch (error) {}
+  const draft = { theme: document.getElementById('theme').value, content: document.getElementById('content').value, emotion: document.querySelector('[name="emotion"]:checked')?.value || '' };
+  state.studentDrafts.set(draftKey(), draft);
+  if (config.persistLocalDrafts === true) {
+    try { localStorage.setItem(draftKey(), JSON.stringify(draft)); } catch (error) {}
+  }
   updateWritingCount();
 }
 
@@ -1409,8 +1595,9 @@ async function saveJournal(event) {
       imageName = inputFile.name;
     }
     const updated = appendJournal(state.portfolio, { id: journalId, theme, content, emotion, imageFileId, imageName });
-    await state.drive.updateJson(state.portfolioFile.id, updated);
+    await updateDocument(state.portfolioFile, updated);
     state.portfolio = updated;
+    state.studentDrafts.delete(draftKey());
     try { localStorage.removeItem(draftKey()); } catch (error) {}
     studentToast('ふりかえりを提出しました。');
     renderPortfolio();
@@ -1422,7 +1609,7 @@ async function savePastComment(event) {
   event.preventDefault();
   const updated = updatePastComment(state.portfolio, event.currentTarget.dataset.journal, document.getElementById('past-comment').value);
   setStudentBusy('メッセージを保存しています…');
-  await withError(async () => { await state.drive.updateJson(state.portfolioFile.id, updated); state.portfolio = updated; studentToast('メッセージを保存しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
+  await withError(async () => { await updateDocument(state.portfolioFile, updated); state.portfolio = updated; studentToast('メッセージを保存しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
 }
 
 async function resizeImage(file) {
@@ -1569,6 +1756,15 @@ window.addEventListener('popstate', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && document.documentElement.classList.contains('writing-focus')) appBack(() => setWritingFocus(false));
 });
+
+if (config.persistLocalDrafts !== true) {
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith('rj_draft_v2_')) localStorage.removeItem(key);
+    }
+  } catch (error) {}
+}
 
 if (restoreSession()) {
   setBusy('前回の画面をひらいています…');

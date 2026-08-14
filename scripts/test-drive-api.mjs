@@ -60,6 +60,18 @@ test('児童のおへんじ一覧もsharedWithMeとチャンネル種別で絞�
   assert.match(query, /rjClassId.*class-id/);
 });
 
+test('教師所有チャンネルは所有者とクラスIDで絞る', async () => {
+  let query = '';
+  const client = new DriveClient('token', async (url) => {
+    query = new URL(url).searchParams.get('q');
+    return jsonResponse({ files: [] });
+  });
+  await client.listOwnChannels('class-id');
+  assert.match(query, /'me' in owners/);
+  assert.match(query, /rjType.*channel/);
+  assert.match(query, /rjClassId.*class-id/);
+});
+
 test('JSON作成はメタデータと本文をmultipartで一度に送る', async () => {
   let captured;
   const client = new DriveClient('token', async (url, options) => {
@@ -71,6 +83,30 @@ test('JSON作成はメタデータと本文をmultipartで一度に送る', asyn
   assert.match(captured.url, /uploadType=multipart/);
   assert.match(captured.body, /"rjType":"portfolio"/);
   assert.match(captured.body, /"hello": "世界"/);
+});
+
+test('バックアップJSONは指定フォルダの子として作成する', async () => {
+  let body = '';
+  const client = new DriveClient('token', async (url, options) => {
+    body = await options.body.text();
+    return jsonResponse({ id: 'archive-file' });
+  });
+  await client.createJson('manifest.json', { ok: true }, { rjType: 'archive-item' }, ['folder-id']);
+  assert.match(body, /"parents":\["folder-id"\]/);
+});
+
+test('更新前にDriveバージョンを確認し、古い画面からの上書きを拒否する', async () => {
+  const calls = [];
+  const client = new DriveClient('token', async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return jsonResponse({ id: 'file-id', version: '8' });
+  });
+  await assert.rejects(
+    () => client.updateJson('file-id', { updated: true }, { expectedVersion: '7' }),
+    /別の端末でデータが更新/
+  );
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /fields=/);
 });
 
 test('共有通知を送らず特定ユーザーへreader権限を作る', async () => {

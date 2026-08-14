@@ -12,6 +12,13 @@ export class DriveApiError extends Error {
   }
 }
 
+export class DriveConflictError extends DriveApiError {
+  constructor() {
+    super('別の端末でデータが更新されました。最新の内容を読み込み直してから、もう一度保存してください。', 409, 'version_conflict');
+    this.name = 'DriveConflictError';
+  }
+}
+
 export class DriveClient {
   constructor(accessToken, fetchImpl) {
     this.accessToken = accessToken;
@@ -32,6 +39,8 @@ export class DriveClient {
         ? 'Googleへの接続期限が切れました。もう一度ログインしてください。'
         : response.status === 403
           ? '学校のGoogle Workspace設定により、この操作が許可されていません。管理者にアプリの許可設定を確認してください。'
+          : response.status === 409 || response.status === 412
+            ? '別の端末でデータが更新されました。最新の内容を読み込み直してから、もう一度保存してください。'
           : 'Google Driveとの通信に失敗しました。時間をおいてもう一度お試しください。';
       throw new DriveApiError(friendly, response.status, detail);
     }
@@ -49,7 +58,7 @@ export class DriveClient {
         spaces: 'drive',
         pageSize: '100',
         orderBy: 'modifiedTime desc',
-        fields: 'nextPageToken,files(id,name,mimeType,createdTime,modifiedTime,appProperties,owners(displayName,emailAddress))'
+        fields: 'nextPageToken,files(id,name,mimeType,createdTime,modifiedTime,version,size,appProperties,owners(displayName,emailAddress))'
       });
       if (pageToken) params.set('pageToken', pageToken);
       const result = await this.request(`${API}/files?${params}`);
@@ -59,8 +68,10 @@ export class DriveClient {
     return files;
   }
 
-  async createJson(name, data, appProperties) {
-    return this.createFile({ name, mimeType: 'application/json', appProperties }, new Blob([
+  async createJson(name, data, appProperties, parents = []) {
+    const metadata = { name, mimeType: 'application/json', appProperties };
+    if (parents.length) metadata.parents = parents;
+    return this.createFile(metadata, new Blob([
       JSON.stringify(data, null, 2)
     ], { type: 'application/json' }));
   }
@@ -74,15 +85,23 @@ export class DriveClient {
       content,
       `\r\n--${boundary}--`
     ], { type: `multipart/related; boundary=${boundary}` });
-    return this.request(`${UPLOAD}/files?uploadType=multipart&fields=id,name,mimeType,appProperties`, { method: 'POST', body });
+    return this.request(`${UPLOAD}/files?uploadType=multipart&fields=id,name,mimeType,createdTime,modifiedTime,version,size,appProperties,owners(displayName,emailAddress)`, { method: 'POST', body });
   }
 
-  async updateJson(fileId, data) {
-    return this.request(`${UPLOAD}/files/${encodeURIComponent(fileId)}?uploadType=media&fields=id,modifiedTime`, {
+  async updateJson(fileId, data, { expectedVersion = '' } = {}) {
+    if (expectedVersion) {
+      const current = await this.getMetadata(fileId);
+      if (String(current.version || '') !== String(expectedVersion)) throw new DriveConflictError();
+    }
+    return this.request(`${UPLOAD}/files/${encodeURIComponent(fileId)}?uploadType=media&fields=id,modifiedTime,version,size`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json; charset=UTF-8' },
       body: JSON.stringify(data, null, 2)
     });
+  }
+
+  getMetadata(fileId) {
+    return this.request(`${API}/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,createdTime,modifiedTime,version,size,appProperties,owners(displayName,emailAddress)`);
   }
 
   async getJson(fileId) {
@@ -104,6 +123,14 @@ export class DriveClient {
     });
   }
 
+  createFolder(name, appProperties = {}) {
+    return this.request(`${API}/files?fields=id,name,mimeType,createdTime,modifiedTime,version,appProperties`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', appProperties })
+    });
+  }
+
   listClasses() {
     return this.list("trashed = false and appProperties has { key='rjType' and value='class' }");
   }
@@ -120,6 +147,11 @@ export class DriveClient {
   listSharedChannels(classId = '') {
     const classPart = classId ? ` and appProperties has { key='rjClassId' and value='${driveQueryValue(classId)}' }` : '';
     return this.list(`trashed = false and sharedWithMe and appProperties has { key='rjType' and value='channel' }${classPart}`);
+  }
+
+  listOwnChannels(classId = '') {
+    const classPart = classId ? ` and appProperties has { key='rjClassId' and value='${driveQueryValue(classId)}' }` : '';
+    return this.list(`trashed = false and 'me' in owners and appProperties has { key='rjType' and value='channel' }${classPart}`);
   }
 
   createClass(record) {

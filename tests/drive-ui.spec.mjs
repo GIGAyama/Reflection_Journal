@@ -52,24 +52,38 @@ async function mockGoogle(page, role, { denyShared = false } = {}) {
       } }),
       hasGrantedAllScopes: (response, ...scopes) => scopes.every((scope) => String(response.scope || '').split(' ').includes(scope))
     } } };
-    window.APP_CONFIG = { googleClientId: 'e2e-client', publicEntryUrl: 'http://127.0.0.1:4173/' };
+    window.APP_CONFIG = { googleClientId: 'e2e-client', publicEntryUrl: 'http://127.0.0.1:4173/', persistSessionToken: false };
     window.__e2eEmail = email;
   }, { email, denyShared });
   await page.route('https://openidconnect.googleapis.com/v1/userinfo', (route) => route.fulfill({ json: { email, name: role === 'teacher' ? '山田先生' : '鈴木花子' } }));
+  const versions = new Map([['class-file', 1], ['portfolio-file', 1], ['channel-file', 1]]);
+  const metadataFor = (id) => ({
+    id,
+    createdTime: now,
+    modifiedTime: now,
+    version: String(versions.get(id) || 1),
+    owners: [{ emailAddress: id === 'portfolio-file' ? 'student@example.ed.jp' : 'teacher@example.ed.jp' }]
+  });
   await page.route('https://www.googleapis.com/drive/v3/**', async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const query = decodeURIComponent(url.searchParams.get('q') || '');
     if (query.includes('sharedWithMe') && route.request().headers().authorization !== 'Bearer shared-token') return route.fulfill({ json: { files: [] } });
-    if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' ? [{ id: 'class-file', modifiedTime: now }] : [] } });
-    if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: [{ id: 'portfolio-file', modifiedTime: now }] } });
-    if (path.endsWith('/files') && query.includes("value='channel'")) return route.fulfill({ json: { files: [{ id: 'channel-file', modifiedTime: now }] } });
-    if (path.endsWith('/files/class-file')) return route.fulfill({ json: classRecord });
-    if (path.endsWith('/files/portfolio-file')) return route.fulfill({ json: portfolio });
-    if (path.endsWith('/files/channel-file')) return route.fulfill({ json: channel });
+    if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' ? [metadataFor('class-file')] : [] } });
+    if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: [metadataFor('portfolio-file')] } });
+    if (path.endsWith('/files') && query.includes("value='channel'")) return route.fulfill({ json: { files: [metadataFor('channel-file')] } });
+    for (const [id, record] of Object.entries({ 'class-file': classRecord, 'portfolio-file': portfolio, 'channel-file': channel })) {
+      if (!path.endsWith(`/files/${id}`)) continue;
+      return route.fulfill({ json: url.searchParams.get('alt') === 'media' ? record : metadataFor(id) });
+    }
     return route.fulfill({ json: {} });
   });
-  await page.route('https://www.googleapis.com/upload/drive/v3/**', (route) => route.fulfill({ json: { id: 'updated-file', modifiedTime: now } }));
+  await page.route('https://www.googleapis.com/upload/drive/v3/**', (route) => {
+    const match = new URL(route.request().url()).pathname.match(/\/files\/([^/]+)$/);
+    const id = match?.[1] || 'created-file';
+    versions.set(id, (versions.get(id) || 1) + 1);
+    route.fulfill({ json: { id, modifiedTime: now, version: String(versions.get(id)) } });
+  });
 }
 
 async function loginAs(page, role) {
@@ -77,6 +91,7 @@ async function loginAs(page, role) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: role === 'teacher' ? /先生として使う/ : /児童として使う/ }).click();
+  await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
 }
 
 test('児童のモバイル画面はノートを先頭にし、横にはみ出さない', async ({ page }) => {
@@ -254,20 +269,17 @@ test('別アカウントの共有記録は説明後の追加許可で同期す�
   await loginAs(page, 'teacher');
   await expect(page.getByRole('button', { name: /5年1組/ })).toBeVisible();
   const scopes = await page.evaluate(() => window.__requestedScopes);
-  expect(scopes).toEqual(['openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly']);
+  expect(scopes).toEqual(['openid email profile https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive.readonly']);
 });
 
-test('同じタブの再読込ではログインせず前回の教師クラスへ復帰する', async ({ page }) => {
+test('再読込み時にOAuthトークンを保存領域から復元しない', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await loginAs(page, 'teacher');
   await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
-  const session = await page.evaluate(() => JSON.parse(sessionStorage.getItem('rj_oauth_session_v1')));
-  expect(session.accessToken).toBe('shared-token');
-  expect(session.expiresAt).toBeGreaterThan(Date.now());
+  expect(await page.evaluate(() => sessionStorage.getItem('rj_oauth_session_v1'))).toBeNull();
   await page.reload();
-  await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
-  await expect(page.getByRole('heading', { name: '5年1組' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Googleアカウントで続ける' })).toBeVisible();
   expect(await page.evaluate(() => window.__requestedScopes)).toEqual([]);
 });
 

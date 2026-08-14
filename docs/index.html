@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://openidconnect.googleapis.com https://generativelanguage.googleapis.com; frame-src https://accounts.google.com; font-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; upgrade-insecure-requests">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <script src="./pwa-install-hook.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ふりかえりジャーナル</title>
@@ -28,15 +30,6 @@
     <div id="pwa-update" class="pwa-update" hidden><span>新しいバージョンがあります</span><button id="pwa-refresh" class="pwa-action" type="button">さいしんにする</button><button id="pwa-later" class="pwa-later" type="button">あとで</button></div>
   </div>
   <script type="module" src="./drive-app.js"></script>
-  <script>
-    if ('serviceWorker' in navigator && location.protocol === 'https:') {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./sw.js').then(function (registration) {
-          window.__pwaRegistration = registration;
-          window.dispatchEvent(new Event('pwa-registration-ready'));
-        }).catch(function () {});
-      });
-    }
-  </script>
+  <script src="./shell-init.js" defer></script>
 </body>
 </html>
