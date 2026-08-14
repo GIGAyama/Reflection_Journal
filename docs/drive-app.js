@@ -908,13 +908,16 @@ function renderPortfolio(error = '') {
   let draft = {};
   try { draft = JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch (loadError) {}
   const unread = unreadFeedbackJournals();
-  app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1>${escapeHtml(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">クラス一覧へ</button></div>
+  app.innerHTML = shell(`<div class="page-heading student-page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1>${escapeHtml(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">クラス一覧へ</button></div>
     ${errorNotice(error)}${typeof error === 'string' && error ? '<button id="reshare" class="secondary" type="button">先生へもう一度届ける</button>' : ''}
     ${unread.length ? `<button id="unread-feedback" class="feedback-alert" type="button"><span>💌</span><strong>先生から新しいおへんじが ${unread.length}件 届いています</strong><span>見る →</span></button>` : ''}
     ${rejected ? '<div class="error">このクラスへの参加は承認されませんでした。先生へ確認してください。</div>' : pending ? '<div class="notice">参加申請を先生へ送りました。先生が承認すると、ふりかえりを書けるようになります。</div>' : studentWorkspace(theme, draft)}
     <section class="student-history"><div class="section-heading"><div><span class="eyebrow">MY JOURNAL</span><h2>これまでのふりかえり</h2></div><span class="muted">${(portfolio.journals || []).length}件</span></div><div class="journal-list">${studentJournalCards()}</div></section>
     ${pastSelfPanel()}`);
-  document.getElementById('student-classes').addEventListener('click', () => renderStudentHome());
+  document.getElementById('student-classes').addEventListener('click', () => {
+    setWritingFocus(false);
+    renderStudentHome();
+  });
   document.getElementById('reshare')?.addEventListener('click', async () => {
     await withError(async () => { await state.drive.shareWithUser(state.portfolioFile.id, portfolio.class.teacherEmail, 'reader'); toast('先生へ共有しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
   });
@@ -926,6 +929,8 @@ function renderPortfolio(error = '') {
     document.querySelectorAll('[data-template]').forEach((button) => button.addEventListener('click', () => applyTemplate(button.dataset.template)));
     document.getElementById('random-starter')?.addEventListener('click', insertRandomStarter);
     document.querySelectorAll('[name="emotion"]').forEach((input) => input.addEventListener('change', saveDraft));
+    document.getElementById('writing-focus')?.addEventListener('click', () => setWritingFocus(!document.documentElement.classList.contains('writing-focus')));
+    updateWritingCount();
   }
   document.querySelectorAll('[data-student-journal]').forEach((button) => button.addEventListener('click', () => openStudentJournal(button.dataset.studentJournal)));
   document.getElementById('calendar-prev')?.addEventListener('click', () => changeStudentMonth(-1));
@@ -935,21 +940,23 @@ function renderPortfolio(error = '') {
 }
 
 function studentWorkspace(theme, draft) {
+  const auxiliaryOpen = !window.matchMedia?.('(max-width: 680px), (max-height: 520px) and (orientation: landscape)').matches;
+  const focusActive = document.documentElement.classList.contains('writing-focus');
   return `<section class="student-workspace">
-    <aside class="student-calendar panel"><div class="calendar-heading"><button id="calendar-prev" class="icon-button" type="button" aria-label="前の月">‹</button><strong>${state.studentMonth.getFullYear()}年 ${state.studentMonth.getMonth() + 1}月</strong><button id="calendar-next" class="icon-button" type="button" aria-label="次の月">›</button></div>${studentCalendar()}</aside>
-    <section class="notebook panel"><div class="notebook-top"><div><span class="eyebrow">TODAY'S JOURNAL</span><h2>${ruby('今日', 'きょう')}のふりかえり</h2></div><span class="notebook-date">${new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())}</span></div>
+    <aside class="student-calendar panel"><details class="auxiliary-details" ${auxiliaryOpen ? 'open' : ''}><summary class="auxiliary-summary">📅 ${ruby('記録', 'きろく')}カレンダー</summary><div class="auxiliary-content"><div class="calendar-heading"><button id="calendar-prev" class="icon-button" type="button" aria-label="前の月">‹</button><strong>${state.studentMonth.getFullYear()}年 ${state.studentMonth.getMonth() + 1}月</strong><button id="calendar-next" class="icon-button" type="button" aria-label="次の月">›</button></div>${studentCalendar()}</div></details></aside>
+    <section class="notebook panel"><div class="notebook-top"><div><span class="eyebrow">TODAY'S JOURNAL</span><h2>${ruby('今日', 'きょう')}のふりかえり</h2></div><div class="notebook-controls"><span class="notebook-date">${new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())}</span><button id="writing-focus" class="focus-button" type="button" aria-pressed="${focusActive}">${focusActive ? '↙ もとに戻す' : '↗ 広く書く'}</button></div></div>
       <div class="theme-banner"><span>${ruby('今日', 'きょう')}のテーマ</span><strong>${escapeHtml(theme)}</strong></div><form id="journal-form">
       <label class="visually-hidden"><span>テーマ</span><input id="theme" maxlength="200" value="${escapeHtml(draft.theme || theme)}"></label>
       <label><span>${ruby('自分', 'じぶん')}のことばで${ruby('書', 'か')}こう</span><textarea id="content" class="lined-paper" maxlength="20000" required placeholder="できたこと、考えたこと、次にやってみたいことを書こう">${escapeHtml(draft.content || '')}</textarea></label>
-      <span><strong>${ruby('今', 'いま')}の${ruby('気持', 'きも')}ち</strong> <span class="muted small">（えらばなくてもOK）</span></span><div class="emotion-row labeled-emotions" role="radiogroup" aria-label="いまの気持ち">${[['😊','うれしい'],['😠','くやしい'],['💡','なるほど'],['🤔','もやもや']].map(([emotion, label]) => `<label><input type="radio" name="emotion" value="${emotion}" ${draft.emotion === emotion ? 'checked' : ''}><span><b>${emotion}</b><small>${label}</small></span></label>`).join('')}</div>
-      <details class="attachment"><summary>📎 ${ruby('作品', 'さくひん')}や${ruby('写真', 'しゃしん')}をつける</summary><label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">見やすい大きさにして先生へ届けます。</p></details>
-      <button class="primary wide submit-journal" type="submit">できた！ 先生にとどける</button>
+      <div class="notebook-options"><fieldset class="emotion-fieldset"><legend><strong>${ruby('今', 'いま')}の${ruby('気持', 'きも')}ち</strong> <span class="muted small">（えらばなくてもOK）</span></legend><div class="emotion-row labeled-emotions" role="radiogroup" aria-label="いまの気持ち">${[['😊','うれしい'],['😠','くやしい'],['💡','なるほど'],['🤔','もやもや']].map(([emotion, label]) => `<label><input type="radio" name="emotion" value="${emotion}" ${draft.emotion === emotion ? 'checked' : ''}><span><b>${emotion}</b><small>${label}</small></span></label>`).join('')}</div></fieldset>
+      <details class="attachment"><summary>📎 ${ruby('作品', 'さくひん')}や${ruby('写真', 'しゃしん')}をつける</summary><label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">見やすい大きさにして先生へ届けます。</p></details></div>
+      <div class="notebook-submit"><span id="writing-count" class="writing-count" aria-live="polite">0文字</span><button class="primary submit-journal" type="submit">できた！ 先生にとどける</button></div>
     </form></section>
-    <aside class="writing-tools panel"><h3>✏️ ${ruby('書', 'か')}き${ruby('方', 'かた')}サポート</h3><p class="muted small">ボタンをおすと、文の書き出しが入ります。</p>
+    <aside class="writing-tools panel"><details class="auxiliary-details" ${auxiliaryOpen ? 'open' : ''}><summary class="auxiliary-summary">✏️ ${ruby('書', 'か')}き${ruby('方', 'かた')}サポート</summary><div class="auxiliary-content"><p class="muted small">ボタンをおすと、文の書き出しが入ります。</p>
       <button id="random-starter" class="secondary wide" type="button">🎲 おまかせ書き出し</button>
       <details open><summary>かたをえらぶ</summary><div class="template-grid">${JOURNAL_TEMPLATES.map(([label, value]) => `<button class="template-button" data-template="${escapeHtml(value)}" type="button">${escapeHtml(label)}</button>`).join('')}</div></details>
       ${HINT_GROUPS.map(([label, hints], index) => `<details ${index === 0 ? 'open' : ''}><summary>${escapeHtml(label)}のヒント</summary><div class="hint-list">${hints.map((hint) => `<button class="hint-button" data-insert="${escapeHtml(hint)}" type="button">${escapeHtml(hint)}</button>`).join('')}</div></details>`).join('')}
-    </aside>
+    </div></details></aside>
   </section>`;
 }
 
@@ -1024,11 +1031,27 @@ function pastSelfPanel() {
   const old = (state.portfolio.journals || []).filter((journal) => new Date(journal.createdAt).getTime() < cutoff);
   if (!old.length) return '';
   const journal = old[Math.floor(Math.random() * old.length)];
-  return `<section class="panel"><h2>過去の自分と対話</h2><blockquote>${escapeHtml(journal.content)}</blockquote><form id="past-comment-form" data-journal="${escapeHtml(journal.id)}"><label><span>今の自分からひとこと</span><textarea id="past-comment" maxlength="4000">${escapeHtml(journal.pastComment || '')}</textarea></label><button class="secondary" type="submit">メッセージを保存</button></form></section>`;
+  return `<section class="panel past-self-panel"><h2>過去の自分と対話</h2><blockquote>${escapeHtml(journal.content)}</blockquote><form id="past-comment-form" data-journal="${escapeHtml(journal.id)}"><label><span>今の自分からひとこと</span><textarea id="past-comment" maxlength="4000">${escapeHtml(journal.pastComment || '')}</textarea></label><button class="secondary" type="submit">メッセージを保存</button></form></section>`;
 }
 
 function saveDraft() {
   try { localStorage.setItem(draftKey(), JSON.stringify({ theme: document.getElementById('theme').value, content: document.getElementById('content').value, emotion: document.querySelector('[name="emotion"]:checked')?.value || '' })); } catch (error) {}
+  updateWritingCount();
+}
+
+function updateWritingCount() {
+  const count = document.getElementById('content')?.value.length || 0;
+  const output = document.getElementById('writing-count');
+  if (output) output.textContent = `${count.toLocaleString('ja-JP')}文字`;
+}
+
+function setWritingFocus(active) {
+  document.documentElement.classList.toggle('writing-focus', Boolean(active));
+  const button = document.getElementById('writing-focus');
+  if (!button) return;
+  button.setAttribute('aria-pressed', String(Boolean(active)));
+  button.textContent = active ? '↙ もとに戻す' : '↗ 広く書く';
+  if (active) document.getElementById('content')?.focus({ preventScroll: true });
 }
 
 function insertText(text) {
@@ -1223,4 +1246,7 @@ function initPwaControls() {
 }
 
 initPwaControls();
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.documentElement.classList.contains('writing-focus')) setWritingFocus(false);
+});
 renderLogin();
