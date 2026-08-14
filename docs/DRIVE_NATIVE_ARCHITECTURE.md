@@ -33,8 +33,9 @@
 ## OAuth
 
 - GIS token modelを使用する。
-- ログインと自分の専用ファイル作成・更新には `openid email profile drive.file` を使う。
-- 別ユーザーから共有されたportfolio/channelの検索・読込み時だけ `drive.readonly` を段階的に追加要求する。
+- 初回のトークン要求へ `openid email profile drive.file drive.readonly` をまとめて含める。
+- `drive.readonly` が認可結果へ含まれなかった場合だけ、用途を説明する専用画面を表示して同スコープを再要求する。常に二段階になる仕様ではない。
+- 自分の専用ファイルの作成・更新・共有は `drive.file`、別ユーザーから共有されたportfolio/channel/画像の検索・読込みは `drive.readonly` を使う。
 - `drive.readonly` でDrive全体の閲覧権限が付与されるが、実装は `sharedWithMe` と `rjType` / `rjClassId` の一致する専用ファイルだけを取得する。
 - アクセストークンはJavaScriptメモリと、同じタブの再読込に必要な `sessionStorage` にだけ有効期限付きで置く。
 - タブ終了後も残る `localStorage` やCookieへ認証情報を保存しない。
@@ -44,7 +45,7 @@
 
 1. 先生がクラスを作り、専用URL／QRを配る。
 2. 児童がポートフォリオを自分のDriveへ作り、先生へreader共有する。
-3. 先生アプリが追加の読取許可を使い、`sharedWithMe` からポートフォリオを見つける。
+3. 先生アプリが認可済みの読取許可を使い、`sharedWithMe` からポートフォリオを見つける。
 4. 承認時、先生が児童別チャンネルを作って児童へreader共有する。
 5. 以後、児童はポートフォリオを更新し、先生はチャンネルを更新する。
 
@@ -65,7 +66,7 @@ Geminiは任意機能。APIキーは先生所有の非共有classファイルへ
 
 1. 個人アカウント2つで作成・参加・承認・提出・画像・返却を確認する。
 2. 同一学校ドメインの先生・児童アカウントで同じ経路を確認する。
-3. 段階的な `drive.readonly` 許可後、`sharedWithMe` と `appProperties` の検索結果が両者で取得できることを確認する。
+3. 初回認可に `drive.readonly` が含まれることと、許可不足時の再要求後に `sharedWithMe` と `appProperties` の検索結果を両者で取得できることを確認する。
 4. 共有を禁止したテスト環境で、403の説明と再共有UIを確認する。
 5. 複数児童の同時提出中に、教師返却が児童ポートフォリオを上書きしないことを確認する。
 6. 同じタブでは有効期限内のセッションを復元し、タブ終了後にアクセストークンが残らないことを確認する。
