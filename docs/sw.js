@@ -20,13 +20,19 @@
  *
  * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const APP_VERSION = 'v17';  // 署名付き招待・競合検知・セキュリティ強化を配信
+const APP_VERSION = 'v18';  // 共通部分をDriveネイティブ・キット（./kit/）へ切り出した版
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',
   './diag.html',
   './drive.css',
+  './kit/namespace.js',
+  './kit/invite.js',
+  './kit/drive-client.js',
+  './kit/records.js',
+  './kit/session.js',
+  './kit/index.js',
   './drive-core.js',
   './drive-api.js',
   './drive-app.js',

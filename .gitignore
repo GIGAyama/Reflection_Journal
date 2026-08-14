@@ -18,3 +18,7 @@ node_modules
 
 # ビルドの作業ディレクトリ
 dist/
+
+# Playwright の実行結果（失敗時のスクリーンショットなど）
+test-results/
+playwright-report/

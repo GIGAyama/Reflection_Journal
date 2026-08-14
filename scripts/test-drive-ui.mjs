@@ -10,6 +10,18 @@ const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const manual = readFileSync(new URL('../MANUAL.md', import.meta.url), 'utf8');
 const architecture = readFileSync(new URL('../docs/DRIVE_NATIVE_ARCHITECTURE.md', import.meta.url), 'utf8');
 const oauthGuide = readFileSync(new URL('../docs/OAUTH_SHARED_RECORDS_SETUP.md', import.meta.url), 'utf8');
+// 共通部分（分散ポートフォリオのキット）。本体と同じく初期表示で読み込まれる。
+const kitSources = Object.fromEntries(
+  ['namespace.js', 'invite.js', 'drive-client.js', 'records.js', 'session.js', 'index.js']
+    .map((name) => [name, readFileSync(new URL(`../docs/kit/${name}`, import.meta.url), 'utf8')])
+);
+const kitSession = kitSources['session.js'];
+const kitIndex = kitSources['index.js'];
+const core = readFileSync(new URL('../docs/drive-core.js', import.meta.url), 'utf8');
+const api = readFileSync(new URL('../docs/drive-api.js', import.meta.url), 'utf8');
+const sw = readFileSync(new URL('../docs/sw.js', import.meta.url), 'utf8');
+const portingGuide = readFileSync(new URL('../docs/PORTING_FROM_GAS.md', import.meta.url), 'utf8');
+const kitReadme = readFileSync(new URL('../docs/kit/README.md', import.meta.url), 'utf8');
 
 test('GitHub Pages共通URLがDrive版を直接起動する', () => {
   assert.match(index, /drive-app\.js/);
@@ -34,18 +46,24 @@ test('本番配信と共有データの安全境界を実装する', () => {
 
 test('認証情報と児童下書きは共有オリジンの永続領域へ残さない', () => {
   assert.match(app, /initTokenClient/);
-  assert.match(app, /drive\.file/);
-  assert.match(app, /drive\.readonly/);
+  assert.match(kitIndex, /drive\.file/);
+  assert.match(kitIndex, /drive\.readonly/);
   assert.match(app, /requireSharedRead/);
   assert.match(app, /INITIAL_SCOPES/);
-  assert.match(app, /sessionStorage\.setItem\(SESSION_KEY/);
-  assert.match(app, /persistSessionToken !== true/);
+  assert.match(app, /tokenExpiresAt/);
   assert.match(config, /persistSessionToken:\s*false/);
   assert.match(config, /persistLocalDrafts:\s*false/);
-  assert.match(app, /tokenExpiresAt/);
-  assert.match(app, /sessionStorage\.removeItem\(SESSION_KEY/);
-  assert.doesNotMatch(app, /localStorage\.setItem\([^\n]*(token|credential|auth)/i);
-  assert.doesNotMatch(app, /localStorage\.setItem\(SESSION_KEY/);
+
+  // 保存の可否はキットの SessionPolicy が握る。保存を選んだときだけ sessionStorage を使う。
+  assert.match(app, /persist:\s*config\.persistSessionToken === true/);
+  assert.match(kitSession, /if \(!this\.persist[^)]*\) return false;/);
+  assert.match(kitSession, /this\.storage\?\.setItem\(this\.storageKey/);
+  assert.match(kitSession, /this\.storage\?\.removeItem\(this\.storageKey/);
+  assert.match(kitSession, /globalThis\.sessionStorage/);
+  // 起動時に読むJSのどこにも、localStorage への認証情報の書き込みを置かない。
+  for (const source of [app, kitSession, kitIndex]) {
+    assert.doesNotMatch(source, /localStorage\.setItem\([^\n]*(token|credential|auth|session)/i);
+  }
 });
 
 test('完全移行した主要な教師・児童フローを含む', () => {
@@ -168,4 +186,36 @@ test('READMEとMANUALが現在のDriveネイティブ実装を説明している
   assert.doesNotMatch(userDocs, /前回の画面へ戻/);
   assert.match(manual, /端末の戻るジェスチャー／ボタン、ブラウザの戻るボタン/);
   assert.match(userDocs, /利用者が入力した文章.*自動.*ふりがな/s);
+});
+
+test('本体は共通部分をキットから読み、キットは本体に依存しない', () => {
+  // 本体側がキットを実際に使っていること（コピーを持ち直していないこと）
+  assert.match(app, /from '\.\/kit\/(index|records|session)\.js'/);
+  assert.match(core, /from '\.\/kit\/(namespace|invite|records)\.js'/);
+  assert.match(api, /from '\.\/kit\/drive-client\.js'/);
+
+  // キットは他アプリへそのまま持ち出せる状態を保つ（アプリ固有の名前・文言を持たない）
+  for (const [name, source] of Object.entries(kitSources)) {
+    assert.doesNotMatch(source, /\.\.\/|from '\.\/(drive-core|drive-api|drive-app)/, `${name} が本体を読んでいます`);
+    assert.doesNotMatch(source, /ふりかえりジャーナル|reflection-journal|rjType|rjClassId/, `${name} にアプリ固有の名前が残っています`);
+  }
+});
+
+test('オフラインでもキットを含むシェル一式が配信される', () => {
+  for (const asset of ['namespace.js', 'invite.js', 'drive-client.js', 'records.js', 'session.js', 'index.js']) {
+    assert.ok(sw.includes(`./kit/${asset}`), `Service Workerのキャッシュ対象に kit/${asset} がありません`);
+  }
+  assert.match(sw, /const CACHE_PREFIX = 'rj-shell-'/);
+});
+
+test('横展開の手順書が、移し替えの前提と落とし穴を説明している', () => {
+  assert.match(portingGuide, /appId[^\n]*propertyPrefix|propertyPrefix[^\n]*appId/);
+  assert.match(portingGuide, /drive\.file[\s\S]*drive\.readonly/);
+  // 共有が禁止された環境では動かないこと、drive.file だけでは共有同期できないことを必ず書く
+  assert.match(portingGuide, /共有.*禁止|禁止.*共有/);
+  assert.match(portingGuide, /drive\.file[^\n]*だけで/);
+  assert.match(portingGuide, /Registry\.gs/);
+  assert.match(portingGuide, /version/);
+  assert.match(kitReadme, /createDriveNativeApp/);
+  assert.match(readme, /PORTING_FROM_GAS\.md/);
 });
