@@ -44,9 +44,11 @@ async function mockGoogle(page, role, { denyShared = false } = {}) {
     window.google = { accounts: { oauth2: {
       initTokenClient: ({ callback, scope }) => ({ requestAccessToken: () => {
         window.__requestedScopes.push(scope);
+        const sharedOnly = scope.trim() === sharedScope;
         const shared = scope.includes('drive.readonly');
-        if (shared && denyShared) return callback({ error: 'access_denied', error_description: '閲覧許可がキャンセルされました。' });
-        callback({ access_token: shared ? 'shared-token' : 'base-token', scope: shared ? `${baseScopes} ${sharedScope}` : baseScopes });
+        if (sharedOnly && denyShared) return callback({ error: 'access_denied', error_description: '閲覧許可がキャンセルされました。' });
+        const grantedShared = shared && !denyShared;
+        callback({ access_token: grantedShared ? 'shared-token' : 'base-token', expires_in: 3600, scope: grantedShared ? `${baseScopes} ${sharedScope}` : baseScopes });
       } }),
       hasGrantedAllScopes: (response, ...scopes) => scopes.every((scope) => String(response.scope || '').split(' ').includes(scope))
     } } };
@@ -75,7 +77,6 @@ async function loginAs(page, role) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: role === 'teacher' ? /先生として使う/ : /児童として使う/ }).click();
-  await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
 }
 
 test('児童のモバイル画面はノートを先頭にし、横にはみ出さない', async ({ page }) => {
@@ -164,6 +165,14 @@ test('教師は提出率・絞り込み・クイック返却・範囲コメン�
   await loginAs(page, 'teacher');
   await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.submission-donut')).toContainText('100%');
+  await expect(page.locator('.teacher-overview .metric')).toHaveCount(4);
+  const dashboard = await page.evaluate(() => ({
+    submissions: document.querySelector('.teacher-submissions').getBoundingClientRect().left,
+    sidebar: document.querySelector('.teacher-sidebar').getBoundingClientRect().left,
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+  }));
+  expect(dashboard.submissions).toBeLessThan(dashboard.sidebar);
+  expect(dashboard.overflow).toBeLessThanOrEqual(1);
   await page.locator('[data-filter="returned"]').click();
   await expect(page.locator('.teacher-journal-card')).toHaveCount(1);
   await page.getByRole('button', { name: /最新に更新/ }).click();
@@ -185,10 +194,46 @@ test('別アカウントの共有記録は説明後の追加許可で同期す�
   await loginAs(page, 'teacher');
   await expect(page.getByRole('button', { name: /5年1組/ })).toBeVisible();
   const scopes = await page.evaluate(() => window.__requestedScopes);
-  expect(scopes).toEqual([
-    'openid email profile https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/drive.readonly'
-  ]);
+  expect(scopes).toEqual(['openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly']);
+});
+
+test('同じタブの再読込ではログインせず前回の教師クラスへ復帰する', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await loginAs(page, 'teacher');
+  await page.getByRole('button', { name: /5年1組/ }).click();
+  await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
+  const session = await page.evaluate(() => JSON.parse(sessionStorage.getItem('rj_oauth_session_v1')));
+  expect(session.accessToken).toBe('shared-token');
+  expect(session.expiresAt).toBeGreaterThan(Date.now());
+  await page.reload();
+  await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '5年1組' })).toBeVisible();
+  expect(await page.evaluate(() => window.__requestedScopes)).toEqual([]);
+});
+
+test('教師のモバイル画面は概要を2列にし横へはみ出さない', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAs(page, 'teacher');
+  await page.getByRole('button', { name: /5年1組/ }).click();
+  await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
+  const layout = await page.evaluate(() => {
+    const metrics = [...document.querySelectorAll('.teacher-overview .metric')].map((node) => node.getBoundingClientRect());
+    const submissions = document.querySelector('.teacher-submissions').getBoundingClientRect();
+    const sidebar = document.querySelector('.teacher-sidebar').getBoundingClientRect();
+    return {
+      secondLeft: metrics[1].left,
+      thirdLeft: metrics[2].left,
+      fourthTop: metrics[3].top,
+      secondTop: metrics[1].top,
+      submissionsTop: submissions.top,
+      sidebarTop: sidebar.top,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    };
+  });
+  expect(layout.thirdLeft).toBeGreaterThan(layout.secondLeft);
+  expect(layout.fourthTop).toBeGreaterThan(layout.secondTop);
+  expect(layout.submissionsTop).toBeLessThan(layout.sidebarTop);
+  expect(layout.overflow).toBeLessThanOrEqual(1);
 });
 
 test('共有記録の閲覧を許可しなかった場合は理由と再試行を表示する', async ({ page }) => {

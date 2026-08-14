@@ -36,9 +36,9 @@
 - ログインと自分の専用ファイル作成・更新には `openid email profile drive.file` を使う。
 - 別ユーザーから共有されたportfolio/channelの検索・読込み時だけ `drive.readonly` を段階的に追加要求する。
 - `drive.readonly` でDrive全体の閲覧権限が付与されるが、実装は `sharedWithMe` と `rjType` / `rjClassId` の一致する専用ファイルだけを取得する。
-- アクセストークンはJavaScriptメモリ内だけに置く。
-- 認証情報はlocalStorage、sessionStorage、Cookieへ保存しない。
-- localStorageへ保存するのは児童の未提出下書きだけ。
+- アクセストークンはJavaScriptメモリと、同じタブの再読込に必要な `sessionStorage` にだけ有効期限付きで置く。
+- タブ終了後も残る `localStorage` やCookieへ認証情報を保存しない。
+- `localStorage` へ保存するのは児童の未提出下書き、既読状態、前回の役割・クラスIDだけで、トークンは含めない。
 
 ## 参加フロー
 
@@ -68,4 +68,4 @@ Geminiは任意機能。APIキーは先生所有の非共有classファイルへ
 3. 段階的な `drive.readonly` 許可後、`sharedWithMe` と `appProperties` の検索結果が両者で取得できることを確認する。
 4. 共有を禁止したテスト環境で、403の説明と再共有UIを確認する。
 5. 複数児童の同時提出中に、教師返却が児童ポートフォリオを上書きしないことを確認する。
-6. ログアウト／タブ終了後にアクセストークンが残らないことを確認する。
+6. 同じタブでは有効期限内のセッションを復元し、タブ終了後にアクセストークンが残らないことを確認する。

@@ -14,20 +14,23 @@ test('GitHub Pages共通URLがDrive版を直接起動する', () => {
   assert.doesNotMatch(config, /execUrlA|execUrlB|backendMode/);
 });
 
-test('認証情報をブラウザストレージへ保存しない', () => {
+test('認証情報は期限付き短期セッションだけへ保存する', () => {
   assert.match(app, /initTokenClient/);
   assert.match(app, /drive\.file/);
   assert.match(app, /drive\.readonly/);
   assert.match(app, /requireSharedRead/);
-  assert.match(app, /共有された記録の同期を許可する/);
+  assert.match(app, /INITIAL_SCOPES/);
+  assert.match(app, /sessionStorage\.setItem\(SESSION_KEY/);
+  assert.match(app, /tokenExpiresAt/);
+  assert.match(app, /sessionStorage\.removeItem\(SESSION_KEY/);
   assert.doesNotMatch(app, /localStorage\.setItem\([^\n]*(token|credential|auth)/i);
-  assert.doesNotMatch(app, /sessionStorage/);
+  assert.doesNotMatch(app, /localStorage\.setItem\(SESSION_KEY/);
 });
 
 test('完全移行した主要な教師・児童フローを含む', () => {
   for (const marker of [
     '参加申請・名簿',
-    'テーマを保存して児童へ配信',
+    '保存して児童へ配信',
     '保存して返却',
     'AIで下書き',
     'クラスの心の波',
@@ -79,6 +82,14 @@ test('別アカウント共有と教師画面の更新を明示的に扱う', ()
   }
   assert.match(css, /\.permission-card/);
   assert.match(css, /\.sync-status/);
+});
+
+test('教師ダッシュボードは提出確認を主役に構造化している', () => {
+  for (const marker of ['teacher-dashboard-grid', 'teacher-submissions', 'teacher-sidebar', 'today-status-panel', 'teacher-settings-grid', 'vitals-grid']) {
+    assert.ok(app.includes(marker) || css.includes(marker), `教師画面に「${marker}」がありません`);
+  }
+  assert.match(css, /\.teacher-journal-list/);
+  assert.match(css, /\.teacher-overview/);
 });
 
 test('トップ画面は中央配置され、内部用語やクリックイベントを表示しない', () => {
