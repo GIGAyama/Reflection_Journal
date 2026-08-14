@@ -25,14 +25,14 @@ import {
   validatePortfolioForClass
 } from './drive-core.js';
 import { DriveApiError, DriveClient } from './drive-api.js';
+import { BASE_SCOPES, SHARED_READ_SCOPE } from './kit/index.js';
+import { RecordCache } from './kit/records.js';
+import { ScopeGrant, SessionPolicy, tokenExpiryFrom } from './kit/session.js';
 
 const app = document.getElementById('app');
 const toastElement = document.getElementById('toast');
 const config = window.APP_CONFIG || {};
-const BASE_SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
-const SHARED_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const INITIAL_SCOPES = BASE_SCOPES;
-const SESSION_KEY = 'rj_oauth_session_v1';
 const LAST_ROLE_KEY = 'rj_last_role';
 const state = {
   user: null,
@@ -43,7 +43,7 @@ const state = {
   invite: null,
   tokenClient: null,
   sharedTokenClient: null,
-  grantedScopes: new Set(),
+  grantedScopes: new ScopeGrant(),
   pendingSharedAction: null,
   pendingSharedRole: '',
   teacher: null,
@@ -61,23 +61,25 @@ const state = {
   feedbackDraftHighlights: [],
   teacherTab: 'journals',
   teacherRefreshTimer: null,
-  jsonCache: new Map(),
+  jsonCache: new RecordCache(),
   studentDrafts: new Map(),
   rejectedPortfolios: []
 };
 
-const configuredOrigins = new Set(Array.isArray(config.allowedOrigins) ? config.allowedOrigins : []);
-const loopbackHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-const originSecurityError = configuredOrigins.size && !configuredOrigins.has(location.origin) && !loopbackHost
-  ? 'この公開元はアプリの許可リストにありません。正しい学校用URLから開いてください。'
-  : '';
+// 公開元・ドメイン・トークン保存の方針はキットへ寄せる（他アプリでも同じ規則を使う）。
+const sessionPolicy = new SessionPolicy({
+  clientId: config.googleClientId,
+  storageKey: 'rj_oauth_session_v1',
+  allowedOrigins: Array.isArray(config.allowedOrigins) ? config.allowedOrigins : [],
+  allowedDomains: Array.isArray(config.allowedWorkspaceDomains) ? config.allowedWorkspaceDomains : [],
+  persist: config.persistSessionToken === true
+});
+const originSecurityError = sessionPolicy.originAllowed(location.origin, location.hostname)
+  ? ''
+  : 'この公開元はアプリの許可リストにありません。正しい学校用URLから開いてください。';
 
 function allowedWorkspaceDomain(email) {
-  const domains = Array.isArray(config.allowedWorkspaceDomains)
-    ? config.allowedWorkspaceDomains.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
-    : [];
-  if (!domains.length) return true;
-  return domains.includes(normalizeEmail(email).split('@')[1] || '');
+  return sessionPolicy.domainAllowed(email);
 }
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -245,16 +247,8 @@ function friendlyError(error) {
   return error?.message || '操作を完了できませんでした。もう一度お試しください。';
 }
 
-function responseScopes(response) {
-  return new Set(String(response?.scope || '').split(/\s+/).filter(Boolean));
-}
-
 function rememberGrantedScopes(response, required = []) {
-  const scopes = responseScopes(response);
-  for (const scope of scopes) state.grantedScopes.add(scope);
-  for (const scope of required) {
-    if (scopes.has(scope) || window.google?.accounts?.oauth2?.hasGrantedAllScopes?.(response, scope)) state.grantedScopes.add(scope);
-  }
+  state.grantedScopes.remember(response, required, window.google?.accounts?.oauth2);
 }
 
 function errorNotice(message) {
@@ -331,7 +325,7 @@ async function handleToken(response) {
   if (!response?.access_token) return renderLogin(response?.error_description || 'Googleログインがキャンセルされました。');
   rememberGrantedScopes(response, INITIAL_SCOPES.split(' '));
   state.accessToken = response.access_token;
-  state.tokenExpiresAt = Date.now() + Math.max(60, Number(response.expires_in) || 3600) * 1000;
+  state.tokenExpiresAt = tokenExpiryFrom(response);
   state.forceAccountSelection = false;
   setBusy('アカウントを確認しています…');
   try {
@@ -379,54 +373,33 @@ async function resolveEntryRoute() {
 }
 
 function saveSession() {
-  if (config.persistSessionToken !== true) return;
-  if (!state.accessToken || !state.user || !state.tokenExpiresAt) return;
-  try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-      clientId: config.googleClientId,
-      accessToken: state.accessToken,
-      expiresAt: state.tokenExpiresAt,
-      scopes: [...state.grantedScopes],
-      user: state.user
-    }));
-  } catch (error) {}
+  sessionPolicy.save({
+    accessToken: state.accessToken,
+    expiresAt: state.tokenExpiresAt,
+    scopes: state.grantedScopes.list(),
+    user: state.user
+  });
 }
 
 function restoreSession() {
-  if (config.persistSessionToken !== true) {
-    try { sessionStorage.removeItem(SESSION_KEY); } catch (error) {}
-    return false;
-  }
   if (originSecurityError) return false;
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
-    if (!saved || saved.clientId !== config.googleClientId || saved.expiresAt < Date.now() + 60_000 || !saved.accessToken || !saved.user?.email) {
-      sessionStorage.removeItem(SESSION_KEY);
-      return false;
-    }
-    if (!allowedWorkspaceDomain(saved.user.email)) {
-      sessionStorage.removeItem(SESSION_KEY);
-      return false;
-    }
-    state.accessToken = saved.accessToken;
-    state.tokenExpiresAt = saved.expiresAt;
-    state.user = { email: normalizeEmail(saved.user.email), name: saved.user.name || saved.user.email };
-    state.grantedScopes = new Set(Array.isArray(saved.scopes) ? saved.scopes : []);
-    state.drive = new DriveClient(saved.accessToken);
-    return true;
-  } catch (error) {
-    try { sessionStorage.removeItem(SESSION_KEY); } catch (storageError) {}
-    return false;
-  }
+  const saved = sessionPolicy.restore();
+  if (!saved) return false;
+  state.accessToken = saved.accessToken;
+  state.tokenExpiresAt = saved.expiresAt;
+  state.user = saved.user;
+  state.grantedScopes = new ScopeGrant(saved.scopes);
+  state.drive = new DriveClient(saved.accessToken);
+  return true;
 }
 
 function clearSession() {
-  try { sessionStorage.removeItem(SESSION_KEY); } catch (error) {}
+  sessionPolicy.clear();
   state.accessToken = '';
   state.tokenExpiresAt = 0;
   state.user = null;
   state.drive = null;
-  state.grantedScopes = new Set();
+  state.grantedScopes = new ScopeGrant();
 }
 
 function preferredRole() {
@@ -487,7 +460,7 @@ async function handleSharedToken(response) {
   rememberGrantedScopes(response, [SHARED_READ_SCOPE]);
   if (!state.grantedScopes.has(SHARED_READ_SCOPE)) return renderSharedReadPermission(state.pendingSharedRole, 'Google Driveの閲覧許可が選択されていません。共有記録を受け取るには、この許可が必要です。');
   state.accessToken = response.access_token;
-  state.tokenExpiresAt = Date.now() + Math.max(60, Number(response.expires_in) || 3600) * 1000;
+  state.tokenExpiresAt = tokenExpiryFrom(response);
   state.drive = new DriveClient(response.access_token);
   saveSession();
   const action = state.pendingSharedAction;
@@ -560,19 +533,12 @@ async function createClass(event) {
 }
 
 function rememberJson(file, record) {
-  if (!file?.id) return;
-  state.jsonCache.set(file.id, {
-    modifiedTime: String(file.modifiedTime || ''),
-    version: String(file.version || ''),
-    record
-  });
+  state.jsonCache.remember(file, record);
 }
 
 async function loadJsonItem(file) {
-  const cached = state.jsonCache.get(file.id);
-  if (cached
-    && cached.modifiedTime === String(file.modifiedTime || '')
-    && cached.version === String(file.version || '')) return { file, record: cached.record };
+  const cached = state.jsonCache.read(file);
+  if (cached !== null) return { file, record: cached };
   const record = await state.drive.getJson(file.id);
   rememberJson(file, record);
   return { file, record };

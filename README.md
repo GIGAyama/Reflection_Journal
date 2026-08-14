@@ -142,9 +142,12 @@ Drive上のJSONと画像は通常のDriveファイルとして所有者のアカ
 | `docs/drive-app.js` | Google認可、先生・児童の画面と操作 |
 | `docs/drive-core.js` | データモデル、招待、分析、CSV |
 | `docs/drive-api.js` | Google Drive REST API通信 |
+| `docs/kit/` | 他アプリへ持ち出せる共通部分（ID・署名付き招待・Drive通信・共有記録の検証・ログイン方針） |
 | `docs/drive.css` | レスポンシブUIとアクセシビリティ |
 | `docs/config.js` | 共通URLとOAuthクライアントID |
 | `docs/sw.js` | PWAの画面資産キャッシュと更新 |
+
+`docs/kit/` はこのアプリに依存しません。GASでマルチテナント化している別のアプリを同じ「Driveネイティブ・分散ポートフォリオ」方式へ移すときは、`docs/kit/` をコピーし、記録の形と画面だけを書きます。手順は [GAS版からの移し替え手順](docs/PORTING_FROM_GAS.md)、キットの詳細は [キットのREADME](docs/kit/README.md) にあります。
 
 ルート直下の `*.gs`、`index.html`、`app.html`、`qr.html` などは移行前のGAS版です。検索結果に現れても、本番版の動作根拠にはしません。また、現在版を使うためにApps Scriptへ貼り付けたりデプロイしたりする必要はありません。
 
@@ -154,6 +157,7 @@ Drive上のJSONと画像は通常のDriveファイルとして所有者のアカ
 - アーキテクチャと権限境界： [Driveネイティブ設計](docs/DRIVE_NATIVE_ARCHITECTURE.md)
 - 運営者向けOAuth設定： [OAuth設定手順](docs/OAUTH_SHARED_RECORDS_SETUP.md)
 - 学校本番配備： [セキュリティ・配備チェックリスト](docs/SECURITY_DEPLOYMENT.md)
+- 他アプリへの横展開： [GAS版からの移し替え手順](docs/PORTING_FROM_GAS.md) / [Driveネイティブ・キット](docs/kit/README.md)
 
 ```bash
 npm ci

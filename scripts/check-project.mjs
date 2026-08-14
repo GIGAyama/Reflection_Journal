@@ -27,6 +27,10 @@ const stripComments = (s) =>
   s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
 const htmlFiles = ['docs/index.html', 'docs/diag.html', 'docs/offline.html'];
+// 初期表示で読み込むJS。キットも同じ予算に入れる（切り出したぶんを見落とさないため）。
+const kitFiles = ['namespace.js', 'invite.js', 'drive-client.js', 'records.js', 'session.js', 'index.js']
+  .map((name) => `docs/kit/${name}`);
+const appJsFiles = ['docs/drive-app.js', 'docs/drive-api.js', 'docs/drive-core.js', ...kitFiles];
 // GitHub Pages + Drive API が本番実装。ルート直下の旧GAS資産は品質判定に含めない。
 const gsFiles = [];
 
@@ -170,7 +174,7 @@ const gsFiles = [];
 
 // ── C5: localStorage.clear() ──
 {
-  const files = [...htmlFiles, 'docs/drive-app.js'].filter((f) => existsSync(join(ROOT, f)));
+  const files = [...htmlFiles, ...appJsFiles].filter((f) => existsSync(join(ROOT, f)));
   const bad = files.filter((f) => /localStorage\.clear\s*\(/.test(stripComments(read(f))));
   bad.length ? fail('C5', `localStorage.clear() を使っている: ${bad.join(', ')}`)
              : pass('C5', 'localStorage.clear() を使っていない');
@@ -178,7 +182,7 @@ const gsFiles = [];
 
 // ── F5: 初回 JS 300KB 以下 ──
 {
-  const js = ['docs/drive-app.js', 'docs/drive-api.js', 'docs/drive-core.js'].reduce((s, f) => s + size(f), 0);
+  const js = appJsFiles.reduce((s, f) => s + size(f), 0);
   const kb = js / 1024;
   kb <= 300 ? pass('F5', `初回 JS ${kb.toFixed(1)} KB（300KB 以下）`)
             : fail('F5', `初回 JS が ${kb.toFixed(1)} KB（300KB を超えている）`);
@@ -187,7 +191,7 @@ const gsFiles = [];
 // ── F6: 1ファイル 5,000行 / 400KB ──
 {
   const bad = [];
-  for (const f of [...htmlFiles, 'docs/qrcode.js', 'docs/drive-app.js', 'docs/drive-core.js', 'docs/drive-api.js']) {
+  for (const f of [...htmlFiles, 'docs/qrcode.js', ...appJsFiles]) {
     if (!existsSync(join(ROOT, f))) continue;
     const s = read(f);
     if (s.split('\n').length > 5000 || size(f) > 400 * 1024) bad.push(f);
