@@ -52,7 +52,7 @@ p { line-height: 1.75; }
 .brand-icon { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 10px; object-fit: cover; }
 .account { text-align: right; font-size: 12px; color: var(--muted); }
 .account strong { display: block; color: var(--ink); font-size: 14px; }
-.page { width: min(1100px, calc(100% - 28px)); margin: 0 auto; padding: 24px 0 calc(60px + env(safe-area-inset-bottom)); }
+.page { width: min(1440px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 calc(60px + env(safe-area-inset-bottom)); }
 .page-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .page-heading h1 { margin: 0; }
 .role-home { width: min(100%, 900px); min-height: calc(100dvh - 130px); display: grid; align-content: center; gap: 22px; margin-inline: auto; padding-block: clamp(24px, 7vh, 72px); }
@@ -170,25 +170,39 @@ summary { cursor: pointer; font-weight: 900; }
 .section-heading, .notebook-top, .calendar-heading, .journal-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-heading { margin: 36px 0 14px; }
 .section-heading h2, .notebook-top h2 { margin: 0; }
-.student-workspace { display: grid; grid-template-columns: minmax(190px, .65fr) minmax(390px, 1.45fr) minmax(220px, .8fr); gap: 16px; align-items: start; }
+.student-workspace { display: grid; grid-template-areas: "calendar notebook tools"; grid-template-columns: 220px minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
 .student-workspace > .panel { min-width: 0; margin: 0; padding: 20px; }
-.notebook { position: relative; overflow: hidden; border-top: 7px solid #f97316; }
+.student-calendar { grid-area: calendar; }
+.notebook { grid-area: notebook; position: relative; overflow: hidden; border-top: 7px solid #f97316; }
+.writing-tools { grid-area: tools; }
 .notebook::before { content: ''; position: absolute; top: 0; bottom: 0; left: 28px; width: 2px; background: rgba(248,113,113,.18); pointer-events: none; }
 .notebook form { position: relative; }
+.notebook-controls { display: grid; justify-items: end; gap: 7px; }
 .notebook-date { color: var(--muted); font-size: 12px; font-weight: 800; }
+.focus-button { min-height: 36px; padding: 6px 10px; border: 1px solid #fdba74; border-radius: 999px; background: #fff7ed; color: var(--orange-dark); font-size: 12px; font-weight: 900; }
+.focus-button[aria-pressed="true"] { border-color: #1e293b; background: #1e293b; color: #fff; }
 .notebook .theme-banner { display: grid; gap: 6px; margin-top: 18px; font-size: 13px; }
 .notebook .theme-banner strong { font-size: 18px; }
 .lined-paper, .lined-reading { background-color: #fffef8; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 34px, #dbeafe 35px, transparent 36px); background-attachment: local; line-height: 36px; }
-.lined-paper { min-height: 330px; padding: 5px 15px; border-color: #fed7aa; border-radius: 8px; font-size: 17px; }
+.lined-paper { min-height: clamp(360px, 52dvh, 680px); padding: 5px 15px; border-color: #fed7aa; border-radius: 8px; font-size: 17px; }
 .lined-reading { min-height: 180px; padding: 4px 12px; }
+.notebook-options { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(210px, .7fr); gap: 14px; align-items: start; }
+.emotion-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.emotion-fieldset legend { margin-bottom: 8px; }
 .labeled-emotions { display: grid; grid-template-columns: repeat(4, 1fr); }
 .labeled-emotions span { min-width: 0; padding: 6px 3px; }
 .labeled-emotions b, .labeled-emotions small { display: block; }
 .labeled-emotions small { margin-top: 2px; font-size: 10px; color: var(--muted); }
 .attachment { background: #f8fafc; }
-.submit-journal { min-height: 56px; margin-top: 8px; font-size: 17px; }
-.writing-tools h3 { margin-top: 0; }
+.notebook-submit { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 8px; }
+.writing-count { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-weight: 800; }
+.submit-journal { min-width: min(100%, 320px); min-height: 56px; font-size: 17px; }
+.auxiliary-details { margin: 0; padding: 0; border: 0; }
+.auxiliary-summary { list-style-position: outside; color: var(--ink); font-size: 16px; font-weight: 950; }
+.auxiliary-content { margin-top: 14px; }
+.writing-tools .auxiliary-content > p { margin-top: 0; }
 .writing-tools details { padding: 10px 0; border-width: 0 0 1px; border-radius: 0; }
+.writing-tools > .auxiliary-details { padding: 0; border: 0; }
 .template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
 .template-button, .hint-button { border: 1px solid #fed7aa; border-radius: 10px; background: #fffaf4; color: #7c2d12; font-size: 12px; font-weight: 800; }
 .template-button { padding: 8px 5px; }
@@ -205,6 +219,7 @@ button.calendar-cell { cursor: pointer; }
 .calendar-key { display: flex; justify-content: center; gap: 10px; color: var(--muted); font-size: 9px; }
 .feedback-alert { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; padding: 15px 18px; border: 2px solid #fbbf24; border-radius: 16px; background: linear-gradient(90deg, #fffbeb, #fff7ed); color: #92400e; text-align: left; box-shadow: 0 8px 24px rgba(245,158,11,.12); }
 .student-journal-card { width: 100%; color: inherit; text-align: left; }
+.student-history .journal-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .student-journal-card.unread { border: 2px solid #f59e0b; box-shadow: 0 10px 30px rgba(245,158,11,.16); }
 .journal-footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
 .journal-dialog { width: min(720px, calc(100% - 24px)); max-height: calc(100dvh - 30px); padding: 0; border: 0; border-radius: 24px; color: var(--ink); box-shadow: 0 30px 90px rgba(15,23,42,.3); }
@@ -241,7 +256,33 @@ blockquote { margin: 0 0 16px; padding: 14px 18px; border-left: 5px solid #f59e0
 .pwa-update[hidden], .pwa-action[hidden] { display: none; }
 .pwa-later { min-height: 38px; padding-inline: 8px; border: 0; background: transparent; color: #cbd5e1; font-size: 11px; }
 
-@media (max-width: 680px) {
+html.writing-focus .topbar,
+html.writing-focus .student-page-heading,
+html.writing-focus .feedback-alert,
+html.writing-focus .student-calendar,
+html.writing-focus .writing-tools,
+html.writing-focus .student-history,
+html.writing-focus .past-self-panel,
+html.writing-focus .pwa-controls { display: none; }
+html.writing-focus .page { width: min(1180px, calc(100% - 24px)); padding-top: 12px; }
+html.writing-focus .student-workspace { display: grid; grid-template-areas: "notebook"; grid-template-columns: minmax(0, 1fr); }
+html.writing-focus .notebook { width: 100%; }
+html.writing-focus .lined-paper { min-height: clamp(360px, calc(100dvh - 300px), 760px); }
+
+@media (min-width: 681px) and (max-width: 1050px) and (min-height: 521px) {
+  .student-workspace { grid-template-areas: "notebook tools" "notebook calendar"; grid-template-columns: minmax(0, 1fr) minmax(230px, .48fr); }
+  .notebook-options { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px), (max-height: 520px) and (orientation: landscape) {
+  .topbar { padding-block: 8px; }
+  .brand { gap: 8px; font-size: 14px; }
+  .brand-icon { width: 30px; height: 30px; border-radius: 8px; }
+  .page { width: calc(100% - 20px); padding-top: 14px; }
+  .page-heading { margin-bottom: 12px; }
+  .student-page-heading { align-items: center; flex-wrap: nowrap; }
+  .student-page-heading h1 { max-width: 62vw; overflow: hidden; font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
+  .student-page-heading .quiet { min-height: 40px; padding: 8px 10px; font-size: 12px; }
   .role-home { min-height: auto; padding-block: 28px; }
   .role-choice-grid { grid-template-columns: 1fr; }
   .role-choice-grid .item-card { min-height: 150px; }
@@ -253,12 +294,24 @@ blockquote { margin: 0 0 16px; padding: 14px 18px; border-left: 5px solid #f59e0
   .inline-form { grid-template-columns: 1fr; }
   .member-row { grid-template-columns: 1fr auto; }
   .member-row .button-row { grid-column: 1 / -1; }
-  .student-workspace { display: flex; flex-direction: column; }
+  .student-workspace { display: grid; grid-template-areas: "notebook" "tools" "calendar"; grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .student-workspace > * { width: 100%; }
-  .notebook { order: 1; }
-  .writing-tools { order: 2; }
-  .student-calendar { order: 3; }
-  .lined-paper { min-height: 300px; }
+  .student-workspace > .panel { padding: 14px; border-radius: 17px; }
+  .student-calendar, .writing-tools { padding-block: 13px !important; }
+  .auxiliary-summary { padding: 2px 4px; font-size: 15px; }
+  .auxiliary-content { margin-top: 12px; }
+  .notebook-top { align-items: flex-start; }
+  .notebook-top h2 { font-size: 21px; }
+  .notebook-controls { min-width: 96px; }
+  .focus-button { min-height: 34px; padding: 5px 8px; }
+  .notebook .theme-banner { gap: 3px; margin: 12px 0; padding: 11px 13px; }
+  .notebook .theme-banner strong { font-size: 16px; }
+  .lined-paper { min-height: max(320px, 45dvh); padding-inline: 11px; font-size: 16px; }
+  .notebook-options { grid-template-columns: 1fr; gap: 4px; }
+  .attachment { margin-block: 8px; }
+  .notebook-submit { position: sticky; bottom: calc(6px + env(safe-area-inset-bottom)); z-index: 5; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; margin: 8px -4px -4px; padding: 8px; border: 1px solid #fed7aa; border-radius: 14px; background: rgba(255,255,255,.96); box-shadow: 0 8px 24px rgba(15,23,42,.12); }
+  .submit-journal { width: 100%; min-width: 0; min-height: 52px; }
+  .section-heading { margin-top: 28px; }
   .feedback-alert { align-items: flex-start; }
   .feedback-alert span:last-child { display: none; }
   .batch-bar { align-items: stretch; flex-direction: column; }
@@ -269,11 +322,24 @@ blockquote { margin: 0 0 16px; padding: 14px 18px; border-left: 5px solid #f59e0
   .pwa-controls { right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); }
   .pwa-update > span { display: none; }
 }
-@media (min-width: 681px) and (max-width: 980px) {
-  .student-workspace { grid-template-columns: minmax(0, 1fr) minmax(230px, .55fr); }
-  .notebook { grid-row: span 2; }
-  .student-calendar { grid-column: 2; }
-  .writing-tools { grid-column: 2; }
+
+@media (max-width: 420px) {
+  .account { max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account strong { overflow: hidden; text-overflow: ellipsis; }
+  .notebook-date { font-size: 11px; }
+  .labeled-emotions small { font-size: 9px; }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .page { padding-top: 10px; }
+  .student-page-heading { margin-bottom: 8px; }
+  .lined-paper { min-height: max(230px, 52dvh); }
+  .student-history .journal-list { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+}
+
+@media (min-width: 1500px) {
+  .student-workspace { grid-template-columns: 230px minmax(0, 1fr) 280px; gap: 20px; }
+  .student-workspace > .panel { padding: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
