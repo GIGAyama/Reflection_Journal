@@ -18,13 +18,30 @@ test('GitHub Pages共通URLがDrive版を直接起動する', () => {
   assert.doesNotMatch(config, /execUrlA|execUrlB|backendMode/);
 });
 
-test('認証情報は期限付き短期セッションだけへ保存する', () => {
+test('本番配信と共有データの安全境界を実装する', () => {
+  assert.match(index, /Content-Security-Policy/);
+  assert.match(index, /default-src 'self'/);
+  assert.doesNotMatch(index, /<script>[^<]/s);
+  assert.match(config, /allowedOrigins/);
+  assert.match(config, /allowedWorkspaceDomains/);
+  assert.match(app, /validatePortfolioForClass/);
+  assert.match(app, /validateChannelForStudent/);
+  assert.match(app, /encodeSignedInvite/);
+  assert.match(app, /expectedVersion/);
+  assert.match(app, /Driveへ完全バックアップ/);
+  assert.match(app, /geminiDataConsent/);
+});
+
+test('認証情報と児童下書きは共有オリジンの永続領域へ残さない', () => {
   assert.match(app, /initTokenClient/);
   assert.match(app, /drive\.file/);
   assert.match(app, /drive\.readonly/);
   assert.match(app, /requireSharedRead/);
   assert.match(app, /INITIAL_SCOPES/);
   assert.match(app, /sessionStorage\.setItem\(SESSION_KEY/);
+  assert.match(app, /persistSessionToken !== true/);
+  assert.match(config, /persistSessionToken:\s*false/);
+  assert.match(config, /persistLocalDrafts:\s*false/);
   assert.match(app, /tokenExpiresAt/);
   assert.match(app, /sessionStorage\.removeItem\(SESSION_KEY/);
   assert.doesNotMatch(app, /localStorage\.setItem\([^\n]*(token|credential|auth)/i);
@@ -137,12 +154,13 @@ test('READMEとMANUALが現在のDriveネイティブ実装を説明している
   assert.match(readme, /ルート直下の `\*\.gs`.*移行前のGAS版/s);
   assert.doesNotMatch(manual, /GAS.*デプロイ.*必要です/);
 
-  assert.match(app, /const INITIAL_SCOPES = `\$\{BASE_SCOPES\} \$\{SHARED_READ_SCOPE\}`/);
+  assert.match(app, /const INITIAL_SCOPES = BASE_SCOPES/);
+  assert.match(app, /requireSharedRead/);
   for (const document of [readme, manual, architecture, oauthGuide]) {
     assert.match(document, /初回|最初/);
     assert.match(document, /drive\.readonly|Drive閲覧権限|Driveの閲覧権限/);
   }
-  assert.doesNotMatch(technicalDocs, /drive\.readonly[^\n]*段階的|段階的[^\n]*drive\.readonly/);
+  assert.match(technicalDocs, /drive\.readonly[^\n]*段階的|段階的[^\n]*drive\.readonly/);
 
   assert.match(manual, /先生へもう一度届ける/);
   assert.doesNotMatch(manual, /先生へ再共有/);

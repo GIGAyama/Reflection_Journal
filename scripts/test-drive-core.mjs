@@ -6,17 +6,21 @@ import {
   computeClassId,
   createChannel,
   createClassRecord,
+  createInviteSecurity,
   createPortfolio,
   currentTheme,
   decodeInvite,
   driveQueryValue,
   encodeInvite,
+  encodeSignedInvite,
   exportCsv,
   inviteUrl,
   mergePortfoliosIntoMembers,
   normalizeClassCode,
   setFeedback,
-  syncChannel
+  syncChannel,
+  validateChannelForStudent,
+  validatePortfolioForClass
 } from '../docs/drive-core.js';
 
 test('クラスIDは先生メールと正規化済みコードから決定的に作られる', async () => {
@@ -39,6 +43,47 @@ test('日本語を含む招待情報をURL安全に往復できる', async () =>
   assert.match(decoded.classId, /^[0-9a-f]{64}$/);
   const url = inviteUrl('https://example.github.io/app/', decoded);
   assert.match(url, /^https:\/\/example\.github\.io\/app\/#join=/);
+});
+
+test('署名付き招待を検証し、改ざんと期限切れを拒否する', async () => {
+  const invite = {
+    classCode: 'ABC23456', className: '５年１組',
+    teacherEmail: 'sensei@example.ed.jp', teacherName: '山田 先生'
+  };
+  const security = await createInviteSecurity({ now: new Date('2099-01-01T00:00:00.000Z') });
+  const token = await encodeSignedInvite(invite, security);
+  const decoded = await decodeInvite(token);
+  assert.equal(decoded.signed, true);
+  assert.equal(decoded.keyId, security.keyId);
+  assert.equal(decoded.generation, 1);
+  const parts = token.split('.');
+  const tampered = `${parts[0]}.${parts[1].slice(0, -1)}${parts[1].endsWith('A') ? 'B' : 'A'}.${parts[2]}`;
+  await assert.rejects(() => decodeInvite(tampered), /招待情報/);
+
+  const expiredSecurity = await createInviteSecurity({ now: new Date('2000-01-01T00:00:00.000Z'), validityDays: 1 });
+  const expired = await encodeSignedInvite(invite, expiredSecurity);
+  await assert.rejects(() => decodeInvite(expired), /有効期限/);
+});
+
+test('共有記録のDrive所有者と署名付き招待を検証する', async () => {
+  const klass = createClassRecord({
+    classId: await computeClassId('teacher@example.ed.jp', 'ABC23456'),
+    classCode: 'ABC23456', className: '5年1組',
+    teacher: { email: 'teacher@example.ed.jp', name: '先生' }
+  });
+  klass.settings.inviteSecurity = await createInviteSecurity({ now: new Date('2099-01-01T00:00:00.000Z') });
+  const invite = await decodeInvite(await encodeSignedInvite({
+    classCode: klass.classCode, className: klass.className,
+    teacherEmail: klass.teacher.email, teacherName: klass.teacher.name
+  }, klass.settings.inviteSecurity));
+  const portfolio = createPortfolio({ invite, student: { email: 'student@example.ed.jp', name: '児童' } });
+  const file = { id: 'portfolio-1', owners: [{ emailAddress: 'student@example.ed.jp' }] };
+  assert.equal((await validatePortfolioForClass(file, portfolio, klass)).ok, true);
+  assert.equal((await validatePortfolioForClass({ ...file, owners: [{ emailAddress: 'attacker@example.ed.jp' }] }, portfolio, klass)).ok, false);
+
+  const channel = createChannel({ classRecord: klass, member: { email: 'student@example.ed.jp', name: '児童' } });
+  assert.equal(validateChannelForStudent({ owners: [{ emailAddress: 'teacher@example.ed.jp' }] }, channel, 'student@example.ed.jp', klass.classId), true);
+  assert.equal(validateChannelForStudent({ owners: [{ emailAddress: 'other@example.ed.jp' }] }, channel, 'student@example.ed.jp', klass.classId), false);
 });
 
 test('教師所有チャンネルへテーマと返却を保存し、児童ポートフォリオと分離する', () => {

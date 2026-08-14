@@ -44,7 +44,11 @@ function base64UrlToBytes(value) {
   return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
 }
 
-export function encodeInvite(invite) {
+function canonicalPublicKey(jwk) {
+  return { kty: String(jwk?.kty || ''), crv: String(jwk?.crv || ''), x: String(jwk?.x || ''), y: String(jwk?.y || '') };
+}
+
+function invitePayload(invite, security = null) {
   const compact = {
     v: SCHEMA_VERSION,
     c: normalizeClassCode(invite.classCode),
@@ -54,12 +58,92 @@ export function encodeInvite(invite) {
     a: invite.approvalRequired !== false,
     o: invite.acceptingMembers !== false
   };
-  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(compact)));
+  if (security) {
+    compact.g = Math.max(1, Number.parseInt(security.generation, 10) || 1);
+    compact.x = String(security.expiresAt || '');
+    compact.i = String(security.keyId || '');
+    compact.k = canonicalPublicKey(security.publicKeyJwk);
+  }
+  return compact;
 }
 
-export async function decodeInvite(encoded) {
+export function encodeInvite(invite) {
+  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(invitePayload(invite))));
+}
+
+export async function createInviteSecurity({ generation = 1, validityDays = 35, now = new Date(), cryptoObject = globalThis.crypto } = {}) {
+  const pair = await cryptoObject.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
+  );
+  const publicKeyJwk = canonicalPublicKey(await cryptoObject.subtle.exportKey('jwk', pair.publicKey));
+  const privateKeyJwk = await cryptoObject.subtle.exportKey('jwk', pair.privateKey);
+  const keyId = await sha256(`reflection-journal:invite-key:v1:${publicKeyJwk.crv}:${publicKeyJwk.x}:${publicKeyJwk.y}`, cryptoObject);
+  const expiresAt = new Date(now.getTime() + Math.max(1, Number(validityDays) || 35) * 86400000).toISOString();
+  return { algorithm: 'ECDSA-P256-SHA256', generation, keyId, publicKeyJwk, privateKeyJwk, expiresAt, createdAt: now.toISOString() };
+}
+
+export async function ensureInviteSecurity(classRecord, { now = new Date(), cryptoObject = globalThis.crypto } = {}) {
+  const current = classRecord?.settings?.inviteSecurity;
+  if (current?.keyId && current?.publicKeyJwk?.x && current?.privateKeyJwk?.d && new Date(current.expiresAt).getTime() > now.getTime()) {
+    return { record: classRecord, changed: false };
+  }
+  const generation = Math.max(1, Number.parseInt(current?.generation, 10) || 0) + (current ? 1 : 0);
+  const inviteSecurity = await createInviteSecurity({ generation, validityDays: classRecord?.settings?.inviteValidityDays || 35, now, cryptoObject });
+  return {
+    changed: true,
+    record: {
+      ...classRecord,
+      settings: { ...defaultSettings(), ...(classRecord.settings || {}), inviteSecurity },
+      updatedAt: now.toISOString()
+    }
+  };
+}
+
+export async function rotateInviteSecurity(classRecord, options = {}) {
+  const currentGeneration = Number.parseInt(classRecord?.settings?.inviteSecurity?.generation, 10) || 0;
+  const inviteSecurity = await createInviteSecurity({
+    generation: currentGeneration + 1,
+    validityDays: classRecord?.settings?.inviteValidityDays || 35,
+    ...options
+  });
+  return {
+    ...classRecord,
+    settings: { ...defaultSettings(), ...(classRecord.settings || {}), inviteSecurity },
+    updatedAt: (options.now || new Date()).toISOString()
+  };
+}
+
+export async function encodeSignedInvite(invite, security, cryptoObject = globalThis.crypto) {
+  if (!security?.privateKeyJwk?.d || !security?.publicKeyJwk?.x || !security?.keyId) throw new Error('招待署名の準備が完了していません。');
+  const payload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(invitePayload(invite, security))));
+  const privateKey = await cryptoObject.subtle.importKey(
+    'jwk', security.privateKeyJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+  );
+  const signature = await cryptoObject.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(payload)
+  );
+  return `rj2.${payload}.${bytesToBase64Url(new Uint8Array(signature))}`;
+}
+
+export async function decodeInvite(encoded, { allowExpired = false, now = Date.now() } = {}) {
   let raw;
-  try { raw = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded))); }
+  let signed = false;
+  try {
+    const parts = String(encoded || '').split('.');
+    if (parts.length === 3 && parts[0] === 'rj2') {
+      const payload = parts[1];
+      raw = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload)));
+      const publicKey = await globalThis.crypto.subtle.importKey(
+        'jwk', canonicalPublicKey(raw.k), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+      );
+      signed = await globalThis.crypto.subtle.verify(
+        { name: 'ECDSA', hash: 'SHA-256' }, publicKey, base64UrlToBytes(parts[2]), new TextEncoder().encode(payload)
+      );
+      if (!signed) throw new Error('invalid signature');
+    } else {
+      raw = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded)));
+    }
+  }
   catch (error) { throw new Error('招待情報を読み取れませんでした。先生から新しいURLを受け取ってください。'); }
   const invite = {
     version: Number(raw.v),
@@ -68,10 +152,19 @@ export async function decodeInvite(encoded) {
     teacherEmail: normalizeEmail(raw.e),
     teacherName: String(raw.t || '').trim().slice(0, 80),
     approvalRequired: raw.a !== false,
-    acceptingMembers: raw.o !== false
+    acceptingMembers: raw.o !== false,
+    signed,
+    generation: Math.max(0, Number.parseInt(raw.g, 10) || 0),
+    expiresAt: String(raw.x || ''),
+    keyId: String(raw.i || ''),
+    publicKeyJwk: raw.k ? canonicalPublicKey(raw.k) : null,
+    token: String(encoded || '')
   };
   if (invite.version !== SCHEMA_VERSION || invite.classCode.length < 6 || !invite.className || !isEmail(invite.teacherEmail)) {
     throw new Error('招待情報が正しくありません。先生から新しいURLを受け取ってください。');
+  }
+  if (signed && (!invite.keyId || !invite.expiresAt || (!allowExpired && new Date(invite.expiresAt).getTime() <= now))) {
+    throw new Error('この招待URLの有効期限が切れています。先生から新しいURLを受け取ってください。');
   }
   invite.classId = await computeClassId(invite.teacherEmail, invite.classCode);
   return invite;
@@ -83,8 +176,11 @@ export function defaultSettings() {
     acceptingMembers: true,
     todayTheme: { date: '', text: '' },
     weeklyThemes: { 1: '', 2: '', 3: '', 4: '', 5: '' },
+    inviteValidityDays: 35,
+    inviteSecurity: null,
     geminiApiKey: '',
-    geminiModel: 'gemini-3.1-flash-lite'
+    geminiModel: 'gemini-3.1-flash-lite',
+    geminiDataConsent: false
   };
 }
 
@@ -114,7 +210,11 @@ export function createPortfolio({ invite, student, now = new Date().toISOString(
       teacherEmail: normalizeEmail(invite.teacherEmail),
       teacherName: String(invite.teacherName || '').trim(),
       approvalRequired: invite.approvalRequired !== false,
-      acceptingMembers: invite.acceptingMembers !== false
+      acceptingMembers: invite.acceptingMembers !== false,
+      inviteToken: String(invite.token || ''),
+      inviteKeyId: String(invite.keyId || ''),
+      inviteGeneration: Math.max(0, Number.parseInt(invite.generation, 10) || 0),
+      inviteExpiresAt: String(invite.expiresAt || '')
     },
     student: { email: normalizeEmail(student.email), name: String(student.name || '').trim() },
     journals: [],
@@ -242,6 +342,40 @@ export function mergePortfoliosIntoMembers(classRecord, portfolioItems, now = ne
   return { ...classRecord, members, updatedAt: now };
 }
 
+function fileOwnerEmail(file) {
+  return normalizeEmail(file?.owners?.[0]?.emailAddress || '');
+}
+
+export async function validatePortfolioForClass(file, record, classRecord) {
+  const studentEmail = normalizeEmail(record?.student?.email);
+  const ownerEmail = fileOwnerEmail(file);
+  if (record?.kind !== 'reflection-journal-portfolio') return { ok: false, reason: 'ポートフォリオ形式が正しくありません。' };
+  if (record?.class?.id !== classRecord?.classId || normalizeEmail(record?.class?.teacherEmail) !== normalizeEmail(classRecord?.teacher?.email)) {
+    return { ok: false, reason: 'クラス情報が一致しません。' };
+  }
+  if (!studentEmail || !ownerEmail || studentEmail !== ownerEmail) return { ok: false, reason: '児童アカウントとDrive所有者が一致しません。' };
+  const existing = (classRecord.members || []).find((member) => normalizeEmail(member.email) === studentEmail);
+  if (existing?.portfolioFileId === file.id) return { ok: true, legacy: !record.class.inviteToken };
+  if (!record.class.inviteToken) return { ok: false, reason: '署名された招待情報がありません。' };
+  let invite;
+  try { invite = await decodeInvite(record.class.inviteToken, { allowExpired: true }); }
+  catch (error) { return { ok: false, reason: error.message }; }
+  const security = classRecord?.settings?.inviteSecurity;
+  if (!invite.signed || invite.classId !== classRecord.classId || invite.keyId !== security?.keyId || invite.generation !== security?.generation) {
+    return { ok: false, reason: '招待URLが失効しているか、正しいクラスから発行されていません。' };
+  }
+  const createdAt = new Date(file?.createdTime || record?.createdAt || '').getTime();
+  const expiresAt = new Date(invite.expiresAt).getTime();
+  if (!Number.isFinite(createdAt) || createdAt > expiresAt) return { ok: false, reason: '招待URLの有効期限後に作成された記録です。' };
+  return { ok: true, invite };
+}
+
+export function validateChannelForStudent(file, record, studentEmail, classId) {
+  if (record?.kind !== 'reflection-journal-channel' || record?.class?.id !== classId) return false;
+  if (normalizeEmail(record?.student?.email) !== normalizeEmail(studentEmail)) return false;
+  return fileOwnerEmail(file) === normalizeEmail(record?.teacher?.email);
+}
+
 export function analyzeClass(portfolioItems, channels = new Map(), today = new Date()) {
   const all = portfolioItems.flatMap(({ record }) => (record.journals || []).map((journal) => ({ ...journal, student: record.student })))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -292,5 +426,12 @@ export function inviteUrl(baseUrl, invite) {
   const url = new URL(baseUrl);
   url.search = '';
   url.hash = `join=${encodeInvite(invite)}`;
+  return url.href;
+}
+
+export function signedInviteUrl(baseUrl, token) {
+  const url = new URL(baseUrl);
+  url.search = '';
+  url.hash = `join=${String(token || '')}`;
   return url.href;
 }
