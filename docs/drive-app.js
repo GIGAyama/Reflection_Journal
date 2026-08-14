@@ -47,6 +47,7 @@ const state = {
   channel: null,
   channelFile: null,
   studentMonth: new Date(),
+  studentPortfolios: [],
   teacherFilter: 'all',
   teacherSearch: '',
   teacherClasses: [],
@@ -62,6 +63,123 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => 
 })[char]);
 const todayKey = (date = new Date()) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 const ruby = (word, reading) => `<ruby>${escapeHtml(word)}<rt>${escapeHtml(reading)}</rt></ruby>`;
+const APP_HISTORY_ID = 'reflection-journal';
+const STUDENT_READINGS = [
+  ['参加している', 'さんかしている'], ['参加済み', 'さんかずみ'], ['参加申請', 'さんかしんせい'], ['参加状況', 'さんかじょうきょう'],
+  ['受け付けて', 'うけつけて'], ['読み込んで', 'よみこんで'], ['書き出し', 'かきだし'], ['書き方', 'かきかた'],
+  ['使い方', 'つかいかた'], ['新しい', 'あたらしい'], ['表示できません', 'ひょうじできません'], ['表示する', 'ひょうじする'], ['確認できる', 'かくにんできる'], ['探しています', 'さがしています'], ['開いて', 'ひらいて'],
+  ['もう一度', 'もういちど'], ['過去', 'かこ'], ['自分', 'じぶん'], ['今日', 'きょう'], ['明日', 'あした'],
+  ['先生', 'せんせい'], ['児童', 'じどう'], ['招待', 'しょうたい'], ['専用', 'せんよう'], ['名前', 'なまえ'],
+  ['一覧', 'いちらん'], ['戻る', 'もどる'], ['戻す', 'もどす'], ['変える', 'かえる'], ['件', 'けん'], ['届けます', 'とどけます'], ['届ける', 'とどける'], ['届いて', 'とどいて'],
+  ['参加', 'さんか'], ['承認', 'しょうにん'], ['申請', 'しんせい'], ['提出しました', 'ていしゅつしました'], ['提出', 'ていしゅつ'], ['送る', 'おくる'], ['送りました', 'おくりました'],
+  ['記録', 'きろく'], ['書いた日', 'かいたひ'], ['書ける', 'かける'], ['書こう', 'かこう'], ['書く', 'かく'], ['書き', 'かき'],
+  ['考えた', 'かんがえた'], ['気持ち', 'きもち'], ['気持', 'きも'], ['気づき', 'きづき'], ['学び', 'まなび'],
+  ['広く', 'ひろく'], ['作品', 'さくひん'], ['写真', 'しゃしん'], ['画像', 'がぞう'], ['任意', 'にんい'],
+  ['見やすい', 'みやすい'], ['大きさ', 'おおきさ'], ['共有', 'きょうゆう'], ['学校側', 'がっこうがわ'], ['拒否', 'きょひ'],
+  ['完了', 'かんりょう'], ['設定', 'せってい'], ['確認', 'かくにん'], ['文章', 'ぶんしょう'], ['注目', 'ちゅうもく'], ['今', 'いま'],
+  ['次', 'つぎ'], ['前', 'まえ'], ['見る', 'みる'], ['待っています', 'まっています'], ['閉じる', 'とじる'],
+  ['対話', 'たいわ'], ['保存', 'ほぞん'], ['文字', 'もじ'], ['文', 'ぶん'], ['入ります', 'はいります'],
+  ['心', 'こころ'], ['残った', 'のこった'], ['初めて', 'はじめて'], ['瞬間', 'しゅんかん'], ['新しく', 'あたらしく'],
+  ['調べたい', 'しらべたい'], ['知りたい', 'しりたい'], ['友だち', 'ともだち'], ['思った', 'おもった'], ['言いたい', 'いいたい'], ['言う', 'いう'], ['協力', 'きょうりょく'],
+  ['年間', 'ねんかん'], ['年', 'ねん'], ['組', 'くみ'], ['月', 'がつ'], ['日', 'にち'], ['火', 'か'], ['水', 'すい'], ['木', 'もく'], ['金', 'きん'], ['土', 'ど']
+].sort((a, b) => b[0].length - a[0].length);
+
+function studentText(value) {
+  const source = String(value ?? '');
+  let result = '';
+  let plain = '';
+  const flush = () => { result += escapeHtml(plain); plain = ''; };
+  for (let index = 0; index < source.length;) {
+    const match = STUDENT_READINGS.find(([word]) => source.startsWith(word, index));
+    if (!match) { plain += source[index]; index += 1; continue; }
+    flush();
+    result += ruby(match[0], match[1]);
+    index += match[0].length;
+  }
+  flush();
+  return result;
+}
+
+function appHistoryState() {
+  return history.state?.app === APP_HISTORY_ID ? history.state : null;
+}
+
+function replaceAppRoute(route, data = {}, url = location.href) {
+  const current = appHistoryState();
+  history.replaceState({ app: APP_HISTORY_ID, route, data, depth: current?.depth || 0 }, '', url);
+}
+
+function resetAppRoute(route = 'home', data = {}, url = location.href) {
+  history.replaceState({ app: APP_HISTORY_ID, route, data, depth: 0 }, '', url);
+}
+
+function pushAppRoute(route, data = {}) {
+  const current = appHistoryState();
+  if (current?.route === route && JSON.stringify(current.data || {}) === JSON.stringify(data)) return;
+  history.pushState({ app: APP_HISTORY_ID, route, data, depth: (current?.depth || 0) + 1 }, '', location.href);
+}
+
+function appBack(fallback) {
+  const current = appHistoryState();
+  if (current && current.depth > 0) history.back();
+  else fallback?.();
+}
+
+function closeStudentDialog() {
+  const dialog = document.querySelector('dialog.journal-dialog');
+  if (!dialog) return;
+  dialog.dataset.historyClose = 'true';
+  if (dialog.open) dialog.close();
+  else dialog.remove();
+}
+
+async function renderHistoryRoute(entry) {
+  closeStudentDialog();
+  setWritingFocus(false);
+  const route = entry?.route || 'home';
+  const data = entry?.data || {};
+  if (!state.user || !state.drive) return renderLogin();
+  if (route === 'home') {
+    forgetRole();
+    state.restoreLastTeacherClass = false;
+    return renderHome();
+  }
+  if (route === 'teacher-home') {
+    rememberRole('teacher');
+    state.restoreLastTeacherClass = false;
+    return requireSharedRead('teacher', () => renderTeacherHome());
+  }
+  if (route === 'teacher-class') {
+    rememberRole('teacher');
+    const current = state.teacher?.record?.classId === data.classId ? { file: state.teacher.file, record: state.teacher.record } : null;
+    const item = current || state.teacherClasses.find(({ record }) => record.classId === data.classId);
+    return item ? openTeacherClass(item, data.tab || 'journals') : renderTeacherHome();
+  }
+  if (route === 'teacher-feedback') {
+    const portfolioItem = state.teacher?.portfolios?.find(({ record }) => normalizeEmail(record.student.email) === normalizeEmail(data.email));
+    const journal = portfolioItem?.record?.journals?.find((item) => item.id === data.journalId);
+    return portfolioItem && journal ? renderFeedbackEditor(portfolioItem, journal) : renderTeacherClass('journals');
+  }
+  if (route === 'student-home') {
+    rememberRole('student');
+    state.invite = null;
+    if (/^#join=/.test(location.hash)) history.replaceState(entry, '', location.pathname + location.search);
+    return requireSharedRead('student', () => renderStudentHome());
+  }
+  if (route === 'student-join') return state.invite ? renderJoin() : renderStudentHome();
+  if (['student-portfolio', 'student-writing-focus', 'student-journal'].includes(route)) {
+    const item = state.portfolio?.class?.id === data.classId
+      ? { file: state.portfolioFile, record: state.portfolio }
+      : state.studentPortfolios?.find(({ file, record }) => file.id === data.fileId || record.class.id === data.classId);
+    if (!item) return renderStudentHome();
+    if (state.portfolio?.class?.id !== item.record.class.id) await openPortfolio(item);
+    else renderPortfolio();
+    if (route === 'student-writing-focus') setWritingFocus(true);
+    if (route === 'student-journal') openStudentJournal(data.journalId);
+    return;
+  }
+  return renderHome();
+}
 
 const JOURNAL_TEMPLATES = [
   ['YWT', '【Y: やったこと】\n\n【W: わかったこと】\n\n【T: つぎにやること】\n'],
@@ -84,8 +202,19 @@ function toast(message) {
   toast.timer = setTimeout(() => toastElement.classList.remove('visible'), 3200);
 }
 
+function studentToast(message) {
+  toastElement.innerHTML = studentText(message);
+  toastElement.classList.add('visible');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => toastElement.classList.remove('visible'), 3200);
+}
+
 function setBusy(message = 'データを読み込んでいます…') {
   app.innerHTML = `<section class="center-screen"><div class="loader" aria-hidden="true"></div><p>${escapeHtml(message)}</p></section>`;
+}
+
+function setStudentBusy(message) {
+  app.innerHTML = `<section class="center-screen student-ui"><div class="loader" aria-hidden="true"></div><p>${studentText(message)}</p></section>`;
 }
 
 function friendlyError(error) {
@@ -109,6 +238,11 @@ function rememberGrantedScopes(response, required = []) {
 function errorNotice(message) {
   const text = typeof message === 'string' ? message.trim() : '';
   return text ? `<div class="error" role="alert">${escapeHtml(text)}</div>` : '';
+}
+
+function studentErrorNotice(message) {
+  const text = typeof message === 'string' ? message.trim() : '';
+  return text ? `<div class="error" role="alert">${studentText(text)}</div>` : '';
 }
 
 async function withError(action, fallback) {
@@ -192,6 +326,10 @@ async function resolveEntryRoute() {
   if (encoded) {
     try {
       state.invite = await decodeInvite(encoded);
+      rememberRole('student');
+      if (appHistoryState()?.route === 'home') pushAppRoute('student-home');
+      else if (appHistoryState()?.route !== 'student-home' && appHistoryState()?.route !== 'student-join') replaceAppRoute('student-home');
+      pushAppRoute('student-join');
       return requireSharedRead('student', () => renderJoin());
     }
     catch (error) { return renderHome(error.message); }
@@ -199,9 +337,16 @@ async function resolveEntryRoute() {
   const role = preferredRole();
   if (role === 'teacher') {
     state.restoreLastTeacherClass = true;
+    if (appHistoryState()?.route === 'home') pushAppRoute('teacher-home');
+    else if (appHistoryState()?.route !== 'teacher-home') replaceAppRoute('teacher-home');
     return requireSharedRead('teacher', () => renderTeacherHome());
   }
-  if (role === 'student') return requireSharedRead('student', () => renderStudentHome());
+  if (role === 'student') {
+    if (appHistoryState()?.route === 'home') pushAppRoute('student-home');
+    else if (appHistoryState()?.route !== 'student-home') replaceAppRoute('student-home');
+    return requireSharedRead('student', () => renderStudentHome());
+  }
+  replaceAppRoute('home');
   return renderHome();
 }
 
@@ -277,7 +422,11 @@ function renderSharedReadPermission(role, error = '') {
     <button id="permission-back" class="quiet wide" type="button">使い方の選択へ戻る</button>
   </div></section>`);
   document.getElementById('grant-shared-read').addEventListener('click', requestSharedRead);
-  document.getElementById('permission-back').addEventListener('click', () => { state.pendingSharedAction = null; state.pendingSharedRole = ''; forgetRole(); renderHome(); });
+  document.getElementById('permission-back').addEventListener('click', () => {
+    state.pendingSharedAction = null;
+    state.pendingSharedRole = '';
+    appBack(() => { forgetRole(); replaceAppRoute('home'); renderHome(); });
+  });
 }
 
 async function requestSharedRead() {
@@ -317,8 +466,8 @@ function renderHome(error = '') {
       <button class="item-card" id="teacher-home" type="button"><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
       <button class="item-card" id="student-home" type="button"><h2>児童として使う</h2><p class="muted">参加したクラスで書き、おへんじを受け取ります。</p></button>
     </div></section>`);
-  document.getElementById('teacher-home').addEventListener('click', () => { rememberRole('teacher'); state.restoreLastTeacherClass = true; requireSharedRead('teacher', () => renderTeacherHome()); });
-  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); requireSharedRead('student', () => renderStudentHome()); });
+  document.getElementById('teacher-home').addEventListener('click', () => { rememberRole('teacher'); state.restoreLastTeacherClass = true; pushAppRoute('teacher-home'); requireSharedRead('teacher', () => renderTeacherHome()); });
+  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); pushAppRoute('student-home'); requireSharedRead('student', () => renderStudentHome()); });
 }
 
 async function renderTeacherHome(error = '') {
@@ -334,7 +483,7 @@ async function renderTeacherHome(error = '') {
     let last = '';
     try { last = localStorage.getItem('rj_last_teacher_class') || ''; } catch (storageError) {}
     const match = classes.find(({ file }) => file.id === last);
-    if (match) return openTeacherClass(match);
+    if (match) { pushAppRoute('teacher-class', { classId: match.record.classId, tab: 'journals' }); return openTeacherClass(match); }
   }
   state.restoreLastTeacherClass = false;
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">先生</span><h1>クラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
@@ -345,9 +494,13 @@ async function renderTeacherHome(error = '') {
     </form></section>
     <section><h2>作成済みのクラス</h2>${classes.length ? `<div class="grid">${classes.map(({ file, record }) => `
       <button class="item-card class-item" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.classCode)}</span><h3>${escapeHtml(record.className)}</h3><p>${(record.members || []).filter((member) => member.status === 'active').length}人</p><p class="muted small">更新: ${escapeHtml(formatDate(file.modifiedTime))}</p></button>`).join('')}</div>` : '<div class="empty">まだクラスはありません。</div>'}</section>`);
-  document.getElementById('back').addEventListener('click', () => { forgetRole(); renderHome(); });
+  document.getElementById('back').addEventListener('click', () => appBack(() => { forgetRole(); replaceAppRoute('home'); renderHome(); }));
   document.getElementById('create-class').addEventListener('submit', createClass);
-  document.querySelectorAll('.class-item').forEach((button) => button.addEventListener('click', () => openTeacherClass(classes.find(({ file }) => file.id === button.dataset.file))));
+  document.querySelectorAll('.class-item').forEach((button) => button.addEventListener('click', () => {
+    const item = classes.find(({ file }) => file.id === button.dataset.file);
+    pushAppRoute('teacher-class', { classId: item.record.classId, tab: 'journals' });
+    openTeacherClass(item);
+  }));
 }
 
 async function createClass(event) {
@@ -360,6 +513,7 @@ async function createClass(event) {
     const classId = await computeClassId(state.user.email, classCode);
     const record = createClassRecord({ classId, classCode, className, teacher: state.user });
     const file = await state.drive.createClass(record);
+    pushAppRoute('teacher-class', { classId: record.classId, tab: 'journals' });
     await openTeacherClass({ file, record });
   }, (message) => renderTeacherHome(message));
 }
@@ -410,13 +564,19 @@ function teacherTabs(active) {
 }
 
 function bindTeacherTabs() {
-  document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => renderTeacherClass(button.dataset.tab)));
-  document.getElementById('classes')?.addEventListener('click', () => renderTeacherHome());
+  document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => {
+    replaceAppRoute('teacher-class', { classId: state.teacher.record.classId, tab: button.dataset.tab });
+    renderTeacherClass(button.dataset.tab);
+  }));
+  document.getElementById('classes')?.addEventListener('click', () => appBack(() => { replaceAppRoute('teacher-home'); renderTeacherHome(); }));
   document.getElementById('refresh-class')?.addEventListener('click', () => refreshTeacherClass(false));
   document.getElementById('class-switch')?.addEventListener('change', (event) => {
-    if (event.target.value === 'new') return renderTeacherHome();
+    if (event.target.value === 'new') return appBack(() => { replaceAppRoute('teacher-home'); renderTeacherHome(); });
     const next = state.teacherClasses.find(({ file }) => file.id === event.target.value);
-    if (next) openTeacherClass(next);
+    if (next) {
+      replaceAppRoute('teacher-class', { classId: next.record.classId, tab: 'journals' });
+      openTeacherClass(next);
+    }
   });
 }
 
@@ -542,6 +702,7 @@ function bindJournalCards(all) {
   document.querySelectorAll('.journal-open').forEach((button) => button.addEventListener('click', () => {
     const journal = all.find((item) => item.id === button.dataset.journal && normalizeEmail(item.student.email) === normalizeEmail(button.dataset.email));
     const portfolio = state.teacher.portfolios.find(({ record }) => normalizeEmail(record.student.email) === normalizeEmail(button.dataset.email));
+    pushAppRoute('teacher-feedback', { classId: state.teacher.record.classId, email: button.dataset.email, journalId: button.dataset.journal });
     renderFeedbackEditor(portfolio, journal);
   }));
   document.querySelectorAll('[data-quick-stamp]').forEach((button) => button.addEventListener('click', () => quickFeedback(button.dataset.email, button.dataset.journal, button.dataset.quickStamp, true)));
@@ -688,7 +849,10 @@ function renderFeedbackEditor(portfolioItem, journal, error = '') {
       <div class="highlight-editor"><h3>文章ごとのおへんじ</h3><div id="highlight-list">${feedbackHighlightRows()}</div></div>
       <div class="button-row"><button class="primary" type="submit">保存して返却</button><button id="ai-draft" class="secondary" type="button">AIで下書き</button></div>
     </form></section></div>`);
-  document.getElementById('journal-back').addEventListener('click', () => renderTeacherClass('journals'));
+  document.getElementById('journal-back').addEventListener('click', () => appBack(() => {
+    replaceAppRoute('teacher-class', { classId: state.teacher.record.classId, tab: 'journals' });
+    renderTeacherClass('journals');
+  }));
   document.getElementById('feedback-form').addEventListener('submit', (event) => saveFeedback(event, portfolioItem, journal));
   document.getElementById('ai-draft').addEventListener('click', () => generateAiDraft(journal, portfolioItem));
   document.getElementById('add-highlight').addEventListener('click', () => addSelectionHighlight(portfolioItem, journal));
@@ -742,7 +906,10 @@ async function saveFeedback(event, portfolioItem, journal) {
     state.feedbackDraftKey = '';
     state.feedbackDraftHighlights = [];
     toast('児童へ返却しました。');
-    renderTeacherClass('journals');
+    appBack(() => {
+      replaceAppRoute('teacher-class', { classId: state.teacher.record.classId, tab: 'journals' });
+      renderTeacherClass('journals');
+    });
   }, (message) => renderFeedbackEditor(portfolioItem, journal, message));
 }
 
@@ -913,29 +1080,41 @@ function printClass() {
 }
 
 async function renderStudentHome(error = '') {
-  setBusy('参加済みのクラスを探しています…');
+  setStudentBusy('参加済みのクラスを探しています…');
   const files = await withError(() => state.drive.listOwnPortfolios(), (message) => renderHome(message));
   if (!files) return;
   const portfolios = await loadJsonItems(files);
-  app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">児童</span><h1>参加しているクラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
-    ${errorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3>${escapeHtml(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}件のふりかえり</p></button>`).join('')}</div>` : '<div class="empty">参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。</div>'}`);
-  document.getElementById('back').addEventListener('click', () => { forgetRole(); renderHome(); });
-  document.querySelectorAll('.student-portfolio').forEach((button) => button.addEventListener('click', () => openPortfolio(portfolios.find(({ file }) => file.id === button.dataset.file))));
+  state.studentPortfolios = portfolios;
+  app.innerHTML = shell(`<div class="student-ui"><div class="page-heading"><div><span class="badge">${studentText('児童')}</span><h1>${studentText('参加しているクラス')}</h1></div><button id="back" class="quiet" type="button">${studentText('使い方を変える')}</button></div>
+    ${studentErrorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button" aria-label="${escapeHtml(record.class?.name || 'クラス')}、${record.journals?.length || 0}件のふりかえり"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3 class="user-content">${studentText(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}${studentText('件')}のふりかえり</p></button>`).join('')}</div>` : `<div class="empty">${studentText('参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。')}</div>`}</div>`);
+  document.getElementById('back').addEventListener('click', () => appBack(() => { forgetRole(); replaceAppRoute('home'); renderHome(); }));
+  document.querySelectorAll('.student-portfolio').forEach((button) => button.addEventListener('click', () => {
+    const item = portfolios.find(({ file }) => file.id === button.dataset.file);
+    pushAppRoute('student-portfolio', { fileId: item.file.id, classId: item.record.class.id });
+    openPortfolio(item);
+  }));
 }
 
 async function renderJoin(error = '') {
   const invite = state.invite;
   if (!invite.acceptingMembers) return renderHome('この招待では新しい参加を受け付けていません。先生から新しいURLを受け取ってください。');
-  setBusy('参加状況を確認しています…');
+  setStudentBusy('参加状況を確認しています…');
   const files = await withError(() => state.drive.listOwnPortfolios(invite.classId), (message) => renderHome(message));
   if (!files) return;
   if (files.length) {
     const record = await withError(() => state.drive.getJson(files[0].id), (message) => renderHome(message));
-    if (record) return openPortfolio({ file: files[0], record });
+    if (record) {
+      replaceAppRoute('student-portfolio', { fileId: files[0].id, classId: record.class.id }, location.pathname + location.search);
+      return openPortfolio({ file: files[0], record });
+    }
   }
-  app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">招待</span><h1>${escapeHtml(invite.className)}</h1></div><button id="cancel" class="quiet" type="button">戻る</button></div>
-    ${errorNotice(error)}<section class="panel"><p>先生: <strong>${escapeHtml(invite.teacherName || invite.teacherEmail)}</strong></p><p>クラスコード: <strong>${escapeHtml(invite.classCode)}</strong></p><form id="join-class"><label><span>先生に表示する名前</span><input id="student-name" maxlength="80" required value="${escapeHtml(state.user.name || '')}"></label><button class="primary wide" type="submit">このクラスに参加する</button></form><p class="muted small">参加すると、あなたのふりかえりを先生が確認できるようになります。</p></section>`);
-  document.getElementById('cancel').addEventListener('click', () => { history.replaceState(null, '', location.pathname); state.invite = null; renderStudentHome(); });
+  app.innerHTML = shell(`<div class="student-ui"><div class="page-heading"><div><span class="badge">${studentText('招待')}</span><h1 class="user-content">${studentText(invite.className)}</h1></div><button id="cancel" class="quiet" type="button">${studentText('戻る')}</button></div>
+    ${studentErrorNotice(error)}<section class="panel"><p>${studentText('先生')}: <strong class="user-content">${escapeHtml(invite.teacherName || invite.teacherEmail)}</strong></p><p>クラスコード: <strong>${escapeHtml(invite.classCode)}</strong></p><form id="join-class"><label><span>${studentText('先生に表示する名前')}</span><input id="student-name" maxlength="80" required value="${escapeHtml(state.user.name || '')}"></label><button class="primary wide" type="submit">${studentText('このクラスに参加する')}</button></form><p class="muted small">${studentText('参加すると、あなたのふりかえりを先生が確認できるようになります。')}</p></section></div>`);
+  document.getElementById('cancel').addEventListener('click', () => appBack(() => {
+    state.invite = null;
+    replaceAppRoute('student-home', {}, location.pathname + location.search);
+    renderStudentHome();
+  }));
   document.getElementById('join-class').addEventListener('submit', joinClass);
 }
 
@@ -943,13 +1122,16 @@ async function joinClass(event) {
   event.preventDefault();
   const name = document.getElementById('student-name').value.trim();
   if (!name) return;
-  setBusy('クラスに参加しています…');
+  setStudentBusy('クラスに参加しています…');
   await withError(async () => {
     const record = createPortfolio({ invite: state.invite, student: { ...state.user, name } });
     const file = await state.drive.createPortfolio(record);
     try { await state.drive.shareWithUser(file.id, state.invite.teacherEmail, 'reader'); }
-    catch (error) { return openPortfolio({ file, record }, 'クラスへの参加は完了しましたが、先生へ記録を届ける設定が学校側で拒否されました。「先生へもう一度届ける」を押してください。'); }
-    history.replaceState(null, '', location.pathname);
+    catch (error) {
+      replaceAppRoute('student-portfolio', { fileId: file.id, classId: record.class.id }, location.pathname + location.search);
+      return openPortfolio({ file, record }, 'クラスへの参加は完了しましたが、先生へ記録を届ける設定が学校側で拒否されました。「先生へもう一度届ける」を押してください。');
+    }
+    replaceAppRoute('student-portfolio', { fileId: file.id, classId: record.class.id }, location.pathname + location.search);
     await openPortfolio({ file, record });
   }, (message) => renderJoin(message));
 }
@@ -966,7 +1148,7 @@ async function findStudentChannel(classId) {
 }
 
 async function openPortfolio(item, error = '') {
-  setBusy('ふりかえりを開いています…');
+  setStudentBusy('ふりかえりを開いています…');
   await withError(async () => {
     const channelItem = await findStudentChannel(item.record.class.id);
     state.portfolioFile = item.file;
@@ -1005,18 +1187,18 @@ function renderPortfolio(error = '') {
   let draft = {};
   try { draft = JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch (loadError) {}
   const unread = unreadFeedbackJournals();
-  app.innerHTML = shell(`<div class="page-heading student-page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1>${escapeHtml(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">クラス一覧へ</button></div>
-    ${errorNotice(error)}${typeof error === 'string' && error ? '<button id="reshare" class="secondary" type="button">先生へもう一度届ける</button>' : ''}
-    ${unread.length ? `<button id="unread-feedback" class="feedback-alert" type="button"><span>💌</span><strong>先生から新しいおへんじが ${unread.length}件 届いています</strong><span>見る →</span></button>` : ''}
-    ${rejected ? '<div class="error">このクラスへの参加は承認されませんでした。先生へ確認してください。</div>' : pending ? '<div class="notice">参加申請を先生へ送りました。先生が承認すると、ふりかえりを書けるようになります。</div>' : studentWorkspace(theme, draft)}
-    <section class="student-history"><div class="section-heading"><div><span class="eyebrow">MY JOURNAL</span><h2>これまでのふりかえり</h2></div><span class="muted">${(portfolio.journals || []).length}件</span></div><div class="journal-list">${studentJournalCards()}</div></section>
-    ${pastSelfPanel()}`);
+  app.innerHTML = shell(`<div class="student-ui"><div class="page-heading student-page-heading"><div><span class="badge">${escapeHtml(portfolio.class.code)}</span><h1 class="user-content">${studentText(portfolio.class.name)}</h1></div><button id="student-classes" class="quiet" type="button">${studentText('クラス一覧へ')}</button></div>
+    ${studentErrorNotice(error)}${typeof error === 'string' && error ? `<button id="reshare" class="secondary" type="button">${studentText('先生へもう一度届ける')}</button>` : ''}
+    ${unread.length ? `<button id="unread-feedback" class="feedback-alert" type="button" aria-label="先生から新しいおへんじが ${unread.length}件 届いています"><span>💌</span><strong>${studentText('先生から新しいおへんじが')} ${unread.length}${studentText('件 届いています')}</strong><span>${studentText('見る')} →</span></button>` : ''}
+    ${rejected ? `<div class="error">${studentText('このクラスへの参加は承認されませんでした。先生へ確認してください。')}</div>` : pending ? `<div class="notice">${studentText('参加申請を先生へ送りました。先生が承認すると、ふりかえりを書けるようになります。')}</div>` : studentWorkspace(theme, draft)}
+    <section class="student-history"><div class="section-heading"><div><span class="eyebrow">MY JOURNAL</span><h2>これまでのふりかえり</h2></div><span class="muted">${(portfolio.journals || []).length}${studentText('件')}</span></div><div class="journal-list">${studentJournalCards()}</div></section>
+    ${pastSelfPanel()}</div>`);
   document.getElementById('student-classes').addEventListener('click', () => {
     setWritingFocus(false);
-    renderStudentHome();
+    appBack(() => { replaceAppRoute('student-home'); renderStudentHome(); });
   });
   document.getElementById('reshare')?.addEventListener('click', async () => {
-    await withError(async () => { await state.drive.shareWithUser(state.portfolioFile.id, portfolio.class.teacherEmail, 'reader'); toast('先生へ共有しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
+    await withError(async () => { await state.drive.shareWithUser(state.portfolioFile.id, portfolio.class.teacherEmail, 'reader'); studentToast('先生へ共有しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
   });
   if (!pending && !rejected) {
     const form = document.getElementById('journal-form');
@@ -1026,33 +1208,50 @@ function renderPortfolio(error = '') {
     document.querySelectorAll('[data-template]').forEach((button) => button.addEventListener('click', () => applyTemplate(button.dataset.template)));
     document.getElementById('random-starter')?.addEventListener('click', insertRandomStarter);
     document.querySelectorAll('[name="emotion"]').forEach((input) => input.addEventListener('change', saveDraft));
-    document.getElementById('writing-focus')?.addEventListener('click', () => setWritingFocus(!document.documentElement.classList.contains('writing-focus')));
+    document.getElementById('writing-focus')?.addEventListener('click', () => {
+      const active = document.documentElement.classList.contains('writing-focus');
+      if (active) appBack(() => setWritingFocus(false));
+      else { pushAppRoute('student-writing-focus', { fileId: state.portfolioFile.id, classId: portfolio.class.id }); setWritingFocus(true); }
+    });
     updateWritingCount();
   }
-  document.querySelectorAll('[data-student-journal]').forEach((button) => button.addEventListener('click', () => openStudentJournal(button.dataset.studentJournal)));
+  document.querySelectorAll('[data-student-journal]').forEach((button) => button.addEventListener('click', () => {
+    pushAppRoute('student-journal', { fileId: state.portfolioFile.id, classId: portfolio.class.id, journalId: button.dataset.studentJournal });
+    openStudentJournal(button.dataset.studentJournal);
+  }));
   document.getElementById('calendar-prev')?.addEventListener('click', () => changeStudentMonth(-1));
   document.getElementById('calendar-next')?.addEventListener('click', () => changeStudentMonth(1));
-  document.getElementById('unread-feedback')?.addEventListener('click', () => openStudentJournal(unread[0]?.id));
+  document.getElementById('unread-feedback')?.addEventListener('click', () => {
+    if (!unread[0]?.id) return;
+    pushAppRoute('student-journal', { fileId: state.portfolioFile.id, classId: portfolio.class.id, journalId: unread[0].id });
+    openStudentJournal(unread[0].id);
+  });
   document.getElementById('past-comment-form')?.addEventListener('submit', savePastComment);
+}
+
+function studentShortDate(date = new Date()) {
+  const weekdays = [['日', 'にち'], ['月', 'げつ'], ['火', 'か'], ['水', 'すい'], ['木', 'もく'], ['金', 'きん'], ['土', 'ど']];
+  const weekday = weekdays[date.getDay()];
+  return `${date.getMonth() + 1}${ruby('月', 'がつ')}${date.getDate()}${ruby('日', 'にち')}（${ruby(weekday[0], weekday[1])}）`;
 }
 
 function studentWorkspace(theme, draft) {
   const auxiliaryOpen = !window.matchMedia?.('(max-width: 680px), (max-height: 520px) and (orientation: landscape)').matches;
   const focusActive = document.documentElement.classList.contains('writing-focus');
   return `<section class="student-workspace">
-    <aside class="student-calendar panel"><details class="auxiliary-details" ${auxiliaryOpen ? 'open' : ''}><summary class="auxiliary-summary">📅 ${ruby('記録', 'きろく')}カレンダー</summary><div class="auxiliary-content"><div class="calendar-heading"><button id="calendar-prev" class="icon-button" type="button" aria-label="前の月">‹</button><strong>${state.studentMonth.getFullYear()}年 ${state.studentMonth.getMonth() + 1}月</strong><button id="calendar-next" class="icon-button" type="button" aria-label="次の月">›</button></div>${studentCalendar()}</div></details></aside>
-    <section class="notebook panel"><div class="notebook-top"><div><span class="eyebrow">TODAY'S JOURNAL</span><h2>${ruby('今日', 'きょう')}のふりかえり</h2></div><div class="notebook-controls"><span class="notebook-date">${new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())}</span><button id="writing-focus" class="focus-button" type="button" aria-pressed="${focusActive}">${focusActive ? '↙ もとに戻す' : '↗ 広く書く'}</button></div></div>
-      <div class="theme-banner"><span>${ruby('今日', 'きょう')}のテーマ</span><strong>${escapeHtml(theme)}</strong></div><form id="journal-form">
+    <aside class="student-calendar panel"><details class="auxiliary-details" ${auxiliaryOpen ? 'open' : ''}><summary class="auxiliary-summary">📅 ${studentText('記録カレンダー')}</summary><div class="auxiliary-content"><div class="calendar-heading"><button id="calendar-prev" class="icon-button" type="button" aria-label="前の月">‹</button><strong>${state.studentMonth.getFullYear()}${ruby('年', 'ねん')} ${state.studentMonth.getMonth() + 1}${ruby('月', 'がつ')}</strong><button id="calendar-next" class="icon-button" type="button" aria-label="次の月">›</button></div>${studentCalendar()}</div></details></aside>
+    <section class="notebook panel"><div class="notebook-top"><div><span class="eyebrow">TODAY'S JOURNAL</span><h2>${studentText('今日のふりかえり')}</h2></div><div class="notebook-controls"><span class="notebook-date">${studentShortDate()}</span><button id="writing-focus" class="focus-button" type="button" aria-label="${focusActive ? 'もとに戻す' : '広く書く'}" aria-pressed="${focusActive}">${focusActive ? `↙ ${studentText('もとに戻す')}` : `↗ ${studentText('広く書く')}`}</button></div></div>
+      <div class="theme-banner"><span>${studentText('今日のテーマ')}</span><strong class="user-content">${studentText(theme)}</strong></div><form id="journal-form">
       <label class="visually-hidden"><span>テーマ</span><input id="theme" maxlength="200" value="${escapeHtml(draft.theme || theme)}"></label>
-      <label><span>${ruby('自分', 'じぶん')}のことばで${ruby('書', 'か')}こう</span><textarea id="content" class="lined-paper" maxlength="20000" required placeholder="できたこと、考えたこと、次にやってみたいことを書こう">${escapeHtml(draft.content || '')}</textarea></label>
-      <div class="notebook-options"><fieldset class="emotion-fieldset"><legend><strong>${ruby('今', 'いま')}の${ruby('気持', 'きも')}ち</strong> <span class="muted small">（えらばなくてもOK）</span></legend><div class="emotion-row labeled-emotions" role="radiogroup" aria-label="いまの気持ち">${[['😊','うれしい'],['😠','くやしい'],['💡','なるほど'],['🤔','もやもや']].map(([emotion, label]) => `<label><input type="radio" name="emotion" value="${emotion}" ${draft.emotion === emotion ? 'checked' : ''}><span><b>${emotion}</b><small>${label}</small></span></label>`).join('')}</div></fieldset>
-      <details class="attachment"><summary>📎 ${ruby('作品', 'さくひん')}や${ruby('写真', 'しゃしん')}をつける</summary><label><span>画像・作品（任意）</span><input id="image" type="file" accept="image/*"></label><p class="field-note">見やすい大きさにして先生へ届けます。</p></details></div>
-      <div class="notebook-submit"><span id="writing-count" class="writing-count" aria-live="polite">0文字</span><button class="primary submit-journal" type="submit">できた！ 先生にとどける</button></div>
+      <label><span>${studentText('自分のことばで書こう')}</span><textarea id="content" class="lined-paper" maxlength="20000" required placeholder="できたこと、かんがえたこと、つぎにやってみたいことをかこう">${escapeHtml(draft.content || '')}</textarea></label>
+      <div class="notebook-options"><fieldset class="emotion-fieldset"><legend><strong>${studentText('今の気持ち')}</strong> <span class="muted small">（えらばなくてもOK）</span></legend><div class="emotion-row labeled-emotions" role="radiogroup" aria-label="いまの気持ち">${[['😊','うれしい'],['😠','くやしい'],['💡','なるほど'],['🤔','もやもや']].map(([emotion, label]) => `<label><input type="radio" name="emotion" value="${emotion}" ${draft.emotion === emotion ? 'checked' : ''}><span><b>${emotion}</b><small>${label}</small></span></label>`).join('')}</div></fieldset>
+      <details class="attachment"><summary>📎 ${studentText('作品や写真をつける')}</summary><label><span>${studentText('画像・作品（任意）')}</span><input id="image" type="file" accept="image/*"></label><p class="field-note">${studentText('見やすい大きさにして先生へ届けます。')}</p></details></div>
+      <div class="notebook-submit"><span id="writing-count" class="writing-count" aria-live="polite">0${studentText('文字')}</span><button class="primary submit-journal" type="submit" aria-label="できた！ 先生にとどける">できた！ ${studentText('先生')}にとどける</button></div>
     </form></section>
-    <aside class="writing-tools panel"><details class="auxiliary-details" ${auxiliaryOpen ? 'open' : ''}><summary class="auxiliary-summary">✏️ ${ruby('書', 'か')}き${ruby('方', 'かた')}サポート</summary><div class="auxiliary-content"><p class="muted small">ボタンをおすと、文の書き出しが入ります。</p>
-      <button id="random-starter" class="secondary wide" type="button">🎲 おまかせ書き出し</button>
-      <details open><summary>かたをえらぶ</summary><div class="template-grid">${JOURNAL_TEMPLATES.map(([label, value]) => `<button class="template-button" data-template="${escapeHtml(value)}" type="button">${escapeHtml(label)}</button>`).join('')}</div></details>
-      ${HINT_GROUPS.map(([label, hints], index) => `<details ${index === 0 ? 'open' : ''}><summary>${escapeHtml(label)}のヒント</summary><div class="hint-list">${hints.map((hint) => `<button class="hint-button" data-insert="${escapeHtml(hint)}" type="button">${escapeHtml(hint)}</button>`).join('')}</div></details>`).join('')}
+    <aside class="writing-tools panel"><details class="auxiliary-details" ${auxiliaryOpen ? 'open' : ''}><summary class="auxiliary-summary">✏️ ${studentText('書き方サポート')}</summary><div class="auxiliary-content"><p class="muted small">${studentText('ボタンをおすと、文の書き出しが入ります。')}</p>
+      <button id="random-starter" class="secondary wide" type="button" aria-label="おまかせ書き出し">🎲 おまかせ${studentText('書き出し')}</button>
+      <details open><summary>かたをえらぶ</summary><div class="template-grid">${JOURNAL_TEMPLATES.map(([label, value]) => `<button class="template-button" data-template="${escapeHtml(value)}" type="button">${studentText(label)}</button>`).join('')}</div></details>
+      ${HINT_GROUPS.map(([label, hints], index) => `<details ${index === 0 ? 'open' : ''}><summary>${studentText(label)}のヒント</summary><div class="hint-list">${hints.map((hint) => `<button class="hint-button" data-insert="${escapeHtml(hint)}" type="button">${studentText(hint)}</button>`).join('')}</div></details>`).join('')}
     </div></details></aside>
   </section>`;
 }
@@ -1070,7 +1269,8 @@ function studentCalendar() {
     const returned = journal && state.channel?.feedback?.[journal.id]?.returned;
     cells.push(journal ? `<button class="calendar-cell has-journal ${returned ? 'has-feedback' : ''}" data-student-journal="${escapeHtml(journal.id)}" type="button"><span>${day}</span><small>${returned ? '💬' : '●'}</small></button>` : `<span class="calendar-cell"><span>${day}</span></span>`);
   }
-  return `<div class="calendar-week">${['日','月','火','水','木','金','土'].map((day) => `<strong>${day}</strong>`).join('')}</div><div class="calendar-grid">${cells.join('')}</div><p class="calendar-key"><span>● 書いた日</span><span>💬 おへんじ</span></p>`;
+  const weekdays = [['日', 'にち'], ['月', 'げつ'], ['火', 'か'], ['水', 'すい'], ['木', 'もく'], ['金', 'きん'], ['土', 'ど']];
+  return `<div class="calendar-week">${weekdays.map(([day, reading]) => `<strong>${ruby(day, reading)}</strong>`).join('')}</div><div class="calendar-grid">${cells.join('')}</div><p class="calendar-key"><span>● ${studentText('書いた日')}</span><span>💬 おへんじ</span></p>`;
 }
 
 function changeStudentMonth(offset) {
@@ -1083,7 +1283,7 @@ function studentJournalCards() {
   return journals.length ? [...journals].reverse().map((journal) => {
     const feedback = state.channel?.feedback?.[journal.id];
     const unread = feedback?.returned && !readJournalIds().has(journal.id);
-    return `<button class="journal-card student-journal-card ${unread ? 'unread' : ''}" data-student-journal="${escapeHtml(journal.id)}" type="button"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h3>${escapeHtml(journal.theme || '')}</h3><div class="journal-body clamp">${escapeHtml(journal.content)}</div><div class="journal-footer">${journal.imageFileId ? '<span>📎 作品つき</span>' : '<span></span>'}${feedback?.returned ? `<span class="badge success-badge">${unread ? 'NEW ' : ''}${escapeHtml(feedback.stamp || '💬')} おへんじ</span>` : ''}</div></button>`;
+    return `<button class="journal-card student-journal-card ${unread ? 'unread' : ''}" data-student-journal="${escapeHtml(journal.id)}" type="button"><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h3 class="user-content">${studentText(journal.theme || '')}</h3><div class="journal-body clamp user-content">${escapeHtml(journal.content)}</div><div class="journal-footer">${journal.imageFileId ? `<span>📎 ${studentText('作品')}つき</span>` : '<span></span>'}${feedback?.returned ? `<span class="badge success-badge">${unread ? 'NEW ' : ''}${escapeHtml(feedback.stamp || '💬')} おへんじ</span>` : ''}</div></button>`;
   }).join('') : '<div class="empty">まだふりかえりはありません。</div>';
 }
 
@@ -1104,7 +1304,7 @@ function highlightedJournalHtml(journal, feedback) {
 
 function studentHighlightNotes(feedback) {
   const items = (feedback?.highlights || []).filter((item) => item.comment || item.stamp);
-  return items.length ? `<div class="highlight-notes"><h3>文章についたおへんじ</h3>${items.map((item) => `<div><strong>${escapeHtml(item.stamp || '⭐')} 「${escapeHtml(item.text || '')}」</strong><p>${escapeHtml(item.comment || '')}</p></div>`).join('')}</div>` : '';
+  return items.length ? `<div class="highlight-notes"><h3>${studentText('文章についたおへんじ')}</h3>${items.map((item) => `<div><strong>${escapeHtml(item.stamp || '⭐')} 「${escapeHtml(item.text || '')}」</strong><p class="user-content">${escapeHtml(item.comment || '')}</p></div>`).join('')}</div>` : '';
 }
 
 function openStudentJournal(journalId) {
@@ -1113,11 +1313,16 @@ function openStudentJournal(journalId) {
   if (!journal) return;
   const feedback = state.channel?.feedback?.[journal.id];
   if (feedback?.returned) markJournalRead(journal.id);
+  closeStudentDialog();
   const dialog = document.createElement('dialog');
   dialog.className = 'journal-dialog';
-  dialog.innerHTML = `<article><form method="dialog"><button class="dialog-close" aria-label="閉じる">×</button></form><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h2>${escapeHtml(journal.theme || 'ふりかえり')}</h2><div class="journal-body lined-reading">${highlightedJournalHtml(journal, feedback)}</div>${journal.imageFileId ? `<div class="image-slot" data-file="${escapeHtml(journal.imageFileId)}"><p>作品を読み込んでいます…</p></div>` : ''}${feedback?.returned ? `${studentHighlightNotes(feedback)}<div class="feedback-box large"><strong>${escapeHtml(feedback.stamp || '💬')} 先生からのおへんじ</strong><p>${escapeHtml(feedback.comment)}</p></div>` : '<div class="muted dialog-note">先生からのおへんじを待っています。</div>'}${journal.pastComment ? `<div class="notice"><strong>今の自分から:</strong> ${escapeHtml(journal.pastComment)}</div>` : ''}</article>`;
+  dialog.innerHTML = `<article class="student-ui"><form method="dialog"><button class="dialog-close" aria-label="閉じる">×</button></form><div class="journal-meta"><span>${escapeHtml(formatDate(journal.createdAt))}</span><span>${escapeHtml(journal.emotion || '')}</span></div><h2 class="user-content">${studentText(journal.theme || 'ふりかえり')}</h2><div class="journal-body lined-reading user-content">${highlightedJournalHtml(journal, feedback)}</div>${journal.imageFileId ? `<div class="image-slot" data-file="${escapeHtml(journal.imageFileId)}"><p>${studentText('作品を読み込んでいます…')}</p></div>` : ''}${feedback?.returned ? `${studentHighlightNotes(feedback)}<div class="feedback-box large"><strong>${escapeHtml(feedback.stamp || '💬')} ${studentText('先生からのおへんじ')}</strong><p class="user-content">${escapeHtml(feedback.comment)}</p></div>` : `<div class="muted dialog-note">${studentText('先生からのおへんじを待っています。')}</div>`}${journal.pastComment ? `<div class="notice"><strong>${studentText('今の自分から')}:</strong> <span class="user-content">${escapeHtml(journal.pastComment)}</span></div>` : ''}</article>`;
   document.body.appendChild(dialog);
-  dialog.addEventListener('close', () => { dialog.remove(); renderPortfolio(); });
+  dialog.addEventListener('close', () => {
+    const historyClose = dialog.dataset.historyClose === 'true';
+    dialog.remove();
+    if (!historyClose) appBack(() => renderPortfolio());
+  });
   dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
   dialog.showModal();
   loadImages();
@@ -1128,7 +1333,7 @@ function pastSelfPanel() {
   const old = (state.portfolio.journals || []).filter((journal) => new Date(journal.createdAt).getTime() < cutoff);
   if (!old.length) return '';
   const journal = old[Math.floor(Math.random() * old.length)];
-  return `<section class="panel past-self-panel"><h2>過去の自分と対話</h2><blockquote>${escapeHtml(journal.content)}</blockquote><form id="past-comment-form" data-journal="${escapeHtml(journal.id)}"><label><span>今の自分からひとこと</span><textarea id="past-comment" maxlength="4000">${escapeHtml(journal.pastComment || '')}</textarea></label><button class="secondary" type="submit">メッセージを保存</button></form></section>`;
+  return `<section class="panel past-self-panel"><h2>${studentText('過去の自分と対話')}</h2><blockquote class="user-content">${escapeHtml(journal.content)}</blockquote><form id="past-comment-form" data-journal="${escapeHtml(journal.id)}"><label><span>${studentText('今の自分からひとこと')}</span><textarea id="past-comment" maxlength="4000">${escapeHtml(journal.pastComment || '')}</textarea></label><button class="secondary" type="submit">メッセージを${studentText('保存')}</button></form></section>`;
 }
 
 function saveDraft() {
@@ -1139,7 +1344,7 @@ function saveDraft() {
 function updateWritingCount() {
   const count = document.getElementById('content')?.value.length || 0;
   const output = document.getElementById('writing-count');
-  if (output) output.textContent = `${count.toLocaleString('ja-JP')}文字`;
+  if (output) output.innerHTML = `${count.toLocaleString('ja-JP')}${studentText('文字')}`;
 }
 
 function setWritingFocus(active) {
@@ -1147,7 +1352,8 @@ function setWritingFocus(active) {
   const button = document.getElementById('writing-focus');
   if (!button) return;
   button.setAttribute('aria-pressed', String(Boolean(active)));
-  button.textContent = active ? '↙ もとに戻す' : '↗ 広く書く';
+  button.setAttribute('aria-label', active ? 'もとに戻す' : '広く書く');
+  button.innerHTML = active ? `↙ ${studentText('もとに戻す')}` : `↗ ${studentText('広く書く')}`;
   if (active) document.getElementById('content')?.focus({ preventScroll: true });
 }
 
@@ -1191,7 +1397,7 @@ async function saveJournal(event) {
   const inputFile = document.getElementById('image').files[0] || null;
   if (!content) return;
   const journalId = crypto.randomUUID();
-  setBusy('ふりかえりを保存しています…');
+  setStudentBusy('ふりかえりを保存しています…');
   await withError(async () => {
     let imageFileId = null;
     let imageName = null;
@@ -1206,7 +1412,7 @@ async function saveJournal(event) {
     await state.drive.updateJson(state.portfolioFile.id, updated);
     state.portfolio = updated;
     try { localStorage.removeItem(draftKey()); } catch (error) {}
-    toast('ふりかえりを提出しました。');
+    studentToast('ふりかえりを提出しました。');
     renderPortfolio();
     celebrateSubmission();
   }, (message) => renderPortfolio(message));
@@ -1215,8 +1421,8 @@ async function saveJournal(event) {
 async function savePastComment(event) {
   event.preventDefault();
   const updated = updatePastComment(state.portfolio, event.currentTarget.dataset.journal, document.getElementById('past-comment').value);
-  setBusy('メッセージを保存しています…');
-  await withError(async () => { await state.drive.updateJson(state.portfolioFile.id, updated); state.portfolio = updated; toast('メッセージを保存しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
+  setStudentBusy('メッセージを保存しています…');
+  await withError(async () => { await state.drive.updateJson(state.portfolioFile.id, updated); state.portfolio = updated; studentToast('メッセージを保存しました。'); renderPortfolio(); }, (message) => renderPortfolio(message));
 }
 
 async function resizeImage(file) {
@@ -1236,7 +1442,7 @@ async function resizeImage(file) {
 async function loadImages() {
   document.querySelectorAll('.image-slot').forEach(async (slot) => {
     try { const blob = await state.drive.getBlob(slot.dataset.file); const url = URL.createObjectURL(blob); slot.innerHTML = '<img class="journal-image" alt="児童が添付した成果物">'; slot.querySelector('img').src = url; }
-    catch (error) { slot.innerHTML = '<p class="error small">画像を表示できませんでした。</p>'; }
+    catch (error) { slot.innerHTML = `<p class="error small">${slot.closest('.student-ui') ? studentText('画像を表示できませんでした。') : '画像を表示できませんでした。'}</p>`; }
   });
 }
 
@@ -1346,6 +1552,7 @@ app.addEventListener('click', (event) => {
   if (!event.target.closest('[data-change-account]')) return;
   clearSession();
   forgetRole();
+  resetAppRoute('home', {}, location.pathname + location.search);
   state.tokenClient = null;
   state.sharedTokenClient = null;
   state.forceAccountSelection = true;
@@ -1353,8 +1560,14 @@ app.addEventListener('click', (event) => {
 });
 
 initPwaControls();
+if (!appHistoryState()) resetAppRoute('home');
+window.addEventListener('popstate', (event) => {
+  const entry = event.state?.app === APP_HISTORY_ID ? event.state : null;
+  if (!entry) return;
+  renderHistoryRoute(entry);
+});
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && document.documentElement.classList.contains('writing-focus')) setWritingFocus(false);
+  if (event.key === 'Escape' && document.documentElement.classList.contains('writing-focus')) appBack(() => setWritingFocus(false));
 });
 
 if (restoreSession()) {

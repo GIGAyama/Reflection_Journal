@@ -57,6 +57,22 @@ test('PR #10の児童向け学習体験をDrive版で復元している', () => 
   assert.match(css, /@keyframes confetti-fall/);
 });
 
+test('端末の戻る操作をアプリ内階層として管理する', () => {
+  for (const marker of ['APP_HISTORY_ID', 'pushAppRoute', 'appBack', 'renderHistoryRoute', "window.addEventListener('popstate'", 'student-writing-focus', 'student-journal', 'teacher-feedback']) {
+    assert.ok(app.includes(marker), `アプリ内履歴に「${marker}」がありません`);
+  }
+  assert.match(app, /history\.pushState/);
+  assert.match(app, /history\.back\(\)/);
+});
+
+test('児童向け固定UIはふりがなを使い、ノートの赤い縦線を表示しない', () => {
+  for (const marker of ['STUDENT_READINGS', 'studentText', "studentText('参加しているクラス')", "studentText('自分のことばで書こう')", "studentText('文章についたおへんじ')"]) {
+    assert.ok(app.includes(marker), `ふりがな対応に「${marker}」がありません`);
+  }
+  assert.match(app, /placeholder="できたこと、かんがえたこと、つぎにやってみたいことをかこう"/);
+  assert.doesNotMatch(css, /\.notebook::before/);
+});
+
 test('PR #10の教師支援・招待・PWA操作をDrive版で復元している', () => {
   for (const marker of [
     'submission-donut',

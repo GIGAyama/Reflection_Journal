@@ -107,6 +107,62 @@ test('児童のモバイル画面はノートを先頭にし、横にはみ出�
   await expect(page.locator('dialog')).toContainText('友だちの考えから方法を広げられましたね');
 });
 
+test('端末の戻る操作は児童画面を一階層だけ戻し、アプリを終了しない', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAs(page, 'student');
+  const appPath = new URL(page.url()).pathname;
+  await page.getByRole('button', { name: /5年1組/ }).click();
+  await expect(page.locator('.notebook')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-portfolio');
+
+  await page.getByRole('button', { name: /広く書く/ }).click();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-writing-focus');
+  await page.goBack();
+  await expect(page.locator('html')).not.toHaveClass(/writing-focus/);
+  await expect(page.locator('.notebook')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(appPath);
+
+  await page.getByRole('button', { name: /新しいおへんじ/ }).click();
+  await expect(page.locator('dialog')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-journal');
+  await page.goBack();
+  await expect(page.locator('dialog')).toHaveCount(0);
+  await expect(page.locator('.notebook')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(appPath);
+
+  await page.goBack();
+  await expect(page.locator('.student-portfolio')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-home');
+  expect(new URL(page.url()).pathname).toBe(appPath);
+});
+
+test('児童向け固定文言にはふりがながあり、ノートの赤い縦線はない', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAs(page, 'student');
+  await page.getByRole('button', { name: /5年1組/ }).click();
+  await expect(page.locator('.notebook')).toBeVisible();
+  expect(await page.locator('.student-ui ruby').count()).toBeGreaterThan(20);
+  const audit = await page.evaluate(() => {
+    const root = document.querySelector('.student-ui');
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const uncovered = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const parent = node.parentElement;
+      if (!/[一-龯々]/u.test(node.textContent || '') || parent.closest('ruby, .user-content, .visually-hidden')) continue;
+      uncovered.push(node.textContent.trim());
+    }
+    return {
+      uncovered,
+      placeholder: document.getElementById('content').getAttribute('placeholder'),
+      notebookLine: getComputedStyle(document.querySelector('.notebook'), '::before').content
+    };
+  });
+  expect(audit.uncovered).toEqual([]);
+  expect(audit.placeholder).not.toMatch(/[一-龯々]/u);
+  expect(audit.notebookLine).toBe('none');
+});
+
 test('児童のデスクトップ画面はカレンダー・ノート・支援を3列表示する', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await loginAs(page, 'student');
@@ -188,6 +244,10 @@ test('教師は提出率・絞り込み・クイック返却・範囲コメン�
   });
   await page.getByRole('button', { name: /選んだ部分にコメント/ }).click();
   await expect(page.locator('.highlight-row')).toHaveCount(1);
+  expect(await page.evaluate(() => history.state?.route)).toBe('teacher-feedback');
+  await page.goBack();
+  await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('teacher-class');
 });
 
 test('別アカウントの共有記録は説明後の追加許可で同期する', async ({ page }) => {
