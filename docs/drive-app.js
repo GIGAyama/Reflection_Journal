@@ -88,6 +88,41 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => 
 })[char]);
 const todayKey = (date = new Date()) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 const ruby = (word, reading) => `<ruby>${escapeHtml(word)}<rt>${escapeHtml(reading)}</rt></ruby>`;
+const KANJI_RUN = /[\u4e00-\u9faf\u3005]+|[^\u4e00-\u9faf\u3005]+/g;
+const IS_KANJI = /[\u4e00-\u9faf\u3005]/;
+
+// 「使い方（つかいかた）」を 使(つか)い方(かた) に割る。ふりがなは漢字にだけ付け、
+// 送り仮名には付けない。送り仮名は読みの中にもそのまま現れるので、その位置を手がかりに
+// 漢字の読みを切り出せる。割れない語（読みと綴りが対応しない当て字など）は null を返し、
+// 語まるごとのふりがなへ落とす。
+function splitReading(word, reading) {
+  const runs = word.match(KANJI_RUN) || [];
+  const parts = [];
+  let rest = reading;
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index];
+    if (!IS_KANJI.test(run)) {
+      if (!rest.startsWith(run)) return null;
+      rest = rest.slice(run.length);
+      parts.push({ text: run });
+      continue;
+    }
+    const following = runs[index + 1];
+    if (!following) {
+      if (!rest) return null;
+      parts.push({ text: run, reading: rest });
+      rest = '';
+      continue;
+    }
+    const at = rest.indexOf(following, 1);   // 漢字には最低1文字の読みを残す
+    if (at < 1) return null;
+    parts.push({ text: run, reading: rest.slice(0, at) });
+    rest = rest.slice(at);
+  }
+  return rest ? null : parts;
+}
+
+const rubyParts = (parts) => parts.map((part) => (part.reading ? ruby(part.text, part.reading) : escapeHtml(part.text))).join('');
 const APP_HISTORY_ID = 'reflection-journal';
 const STUDENT_READINGS = [
   ['参加している', 'さんかしている'], ['参加済み', 'さんかずみ'], ['参加申請', 'さんかしんせい'], ['参加状況', 'さんかじょうきょう'],
@@ -107,7 +142,8 @@ const STUDENT_READINGS = [
   ['心', 'こころ'], ['残った', 'のこった'], ['初めて', 'はじめて'], ['瞬間', 'しゅんかん'], ['新しく', 'あたらしく'],
   ['調べたい', 'しらべたい'], ['知りたい', 'しりたい'], ['友だち', 'ともだち'], ['思った', 'おもった'], ['言いたい', 'いいたい'], ['言う', 'いう'], ['協力', 'きょうりょく'],
   ['年間', 'ねんかん'], ['年', 'ねん'], ['組', 'くみ'], ['月', 'がつ'], ['日', 'にち'], ['火', 'か'], ['水', 'すい'], ['木', 'もく'], ['金', 'きん'], ['土', 'ど']
-].sort((a, b) => b[0].length - a[0].length);
+].sort((a, b) => b[0].length - a[0].length)
+  .map(([word, reading]) => [word, reading, splitReading(word, reading) || [{ text: word, reading }]]);
 
 function studentText(value) {
   const source = String(value ?? '');
@@ -118,7 +154,7 @@ function studentText(value) {
     const match = STUDENT_READINGS.find(([word]) => source.startsWith(word, index));
     if (!match) { plain += source[index]; index += 1; continue; }
     flush();
-    result += ruby(match[0], match[1]);
+    result += rubyParts(match[2]);
     index += match[0].length;
   }
   flush();

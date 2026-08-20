@@ -112,6 +112,33 @@ test('児童向け固定UIはふりがなを使い、ノートの赤い縦線を
   assert.doesNotMatch(css, /\.notebook::before/);
 });
 
+test('ふりがなは漢字にだけ付き、送り仮名には付かない', () => {
+  // 文字列の一致だけでは、割り方が正しいかまでは分からない。
+  // ふりがなの部分だけを実際に動かして、語彙表の全件を確かめる。
+  const source = app.slice(app.indexOf('const escapeHtml'), app.indexOf('function appHistoryState'));
+  const { STUDENT_READINGS, splitReading, studentText } = new Function(
+    `${source}; return { STUDENT_READINGS, splitReading, studentText };`
+  )();
+
+  assert.ok(STUDENT_READINGS.length > 50, '語彙表が読めていません');
+  const kana = /[\u3041-\u309f\u30a1-\u30fa\u30fc]/u;
+  for (const [word, reading, parts] of STUDENT_READINGS) {
+    assert.ok(splitReading(word, reading), `「${word}」を漢字と送り仮名へ割れていません`);
+    assert.equal(parts.map((part) => part.text).join(''), word, `「${word}」の綴りが変わっています`);
+    assert.equal(parts.map((part) => part.reading || part.text).join(''), reading, `「${word}」の読みが元と変わっています`);
+    for (const part of parts) {
+      if (!part.reading) continue;
+      assert.doesNotMatch(part.text, kana, `「${word}」の送り仮名にふりがなが付いています`);
+    }
+  }
+
+  // 代表例。送り仮名は ruby の外に出す
+  assert.equal(studentText('使い方'), '<ruby>使<rt>つか</rt></ruby>い<ruby>方<rt>かた</rt></ruby>');
+  assert.equal(studentText('書こう'), '<ruby>書<rt>か</rt></ruby>こう');
+  assert.equal(studentText('参加している'), '<ruby>参加<rt>さんか</rt></ruby>している');
+  assert.equal(studentText('もう一度'), 'もう<ruby>一度<rt>いちど</rt></ruby>');
+});
+
 test('PR #10の教師支援・招待・PWA操作をDrive版で復元している', () => {
   for (const marker of [
     'submission-donut',

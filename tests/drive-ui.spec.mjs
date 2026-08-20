@@ -202,6 +202,12 @@ test('児童向け固定文言にはふりがながあり、ノートの赤い�
   expect(audit.uncovered).toEqual([]);
   expect(audit.placeholder).not.toMatch(/[一-龯々]/u);
   expect(audit.notebookLine).toBe('none');
+
+  // ふりがなは漢字にだけ付ける。送り仮名まで ruby に入れない
+  const rubyWithKana = await page.evaluate(() => [...document.querySelectorAll('.student-ui ruby')]
+    .map((node) => [...node.childNodes].filter((child) => child.nodeType === 3).map((child) => child.textContent).join(''))
+    .filter((base) => /[\u3041-\u309f\u30a1-\u30fa\u30fc]/u.test(base)));
+  expect(rubyWithKana).toEqual([]);
 });
 
 test('児童のデスクトップ画面はカレンダー・ノート・支援を3列表示する', async ({ page }) => {
