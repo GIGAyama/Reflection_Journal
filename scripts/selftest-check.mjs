@@ -25,7 +25,7 @@ const CASES = [
   ['E6',  'docs/sw.js',      (s) => s.replace("self.clients.claim();", "localStorage.removeItem('x'); self.clients.claim();")],
   ['E5',  'docs/sw.js',      (s) => s.replace(".filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)", ".filter((k) => k !== CACHE_NAME)")],
   ['D10', 'docs/drive.css', (s) => s.replace('animation-duration: .01ms !important;', 'animation-duration: 0 !important;')],
-  ['E1',  'docs/manifest.webmanifest', (s) => s.replace('"id": "/Reflection_Journal/"', '"id": "/"')],
+  ['E1',  'docs/manifest.webmanifest', (s) => s.replace('"id": "/"', '"id": "/Reflection_Journal/"')],
   ['C5',  'docs/drive-app.js', (s) => s.replace('localStorage.removeItem(draftKey());', 'localStorage.clear();')]
 ];
 

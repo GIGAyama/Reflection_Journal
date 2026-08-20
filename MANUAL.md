@@ -2,7 +2,7 @@
 
 ## このアプリについて
 
-先生と児童が [共通URL](https://gigayama.github.io/Reflection_Journal/) からGoogleアカウントで利用する振り返りアプリです。学校ごとのGASデプロイやスプレッドシート作成は必要ありません。
+先生と児童が [共通URL](https://reflection-journal.giga-school.com/) からGoogleアカウントで利用する振り返りアプリです。学校ごとのGASデプロイやスプレッドシート作成は必要ありません。
 
 記録は運営者のサーバーではなく、先生・児童それぞれのGoogle Driveに保存されます。
 
