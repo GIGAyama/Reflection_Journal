@@ -57,6 +57,7 @@ const state = {
   teacherSearch: '',
   teacherClasses: [],
   restoreLastTeacherClass: false,
+  restoreSingleStudentClass: false,
   feedbackDraftKey: '',
   feedbackDraftHighlights: [],
   teacherTab: 'journals',
@@ -91,12 +92,12 @@ const APP_HISTORY_ID = 'reflection-journal';
 const STUDENT_READINGS = [
   ['参加している', 'さんかしている'], ['参加済み', 'さんかずみ'], ['参加申請', 'さんかしんせい'], ['参加状況', 'さんかじょうきょう'],
   ['受け付けて', 'うけつけて'], ['読み込んで', 'よみこんで'], ['書き出し', 'かきだし'], ['書き方', 'かきかた'],
-  ['使い方', 'つかいかた'], ['新しい', 'あたらしい'], ['表示できません', 'ひょうじできません'], ['表示する', 'ひょうじする'], ['確認できる', 'かくにんできる'], ['探しています', 'さがしています'], ['開いて', 'ひらいて'],
+  ['使い方', 'つかいかた'], ['使う', 'つかう'], ['新しい', 'あたらしい'], ['表示できません', 'ひょうじできません'], ['表示する', 'ひょうじする'], ['確認できる', 'かくにんできる'], ['探しています', 'さがしています'], ['開いて', 'ひらいて'],
   ['もう一度', 'もういちど'], ['過去', 'かこ'], ['自分', 'じぶん'], ['今日', 'きょう'], ['明日', 'あした'],
   ['先生', 'せんせい'], ['児童', 'じどう'], ['招待', 'しょうたい'], ['専用', 'せんよう'], ['名前', 'なまえ'],
-  ['一覧', 'いちらん'], ['戻る', 'もどる'], ['戻す', 'もどす'], ['変える', 'かえる'], ['件', 'けん'], ['届けます', 'とどけます'], ['届ける', 'とどける'], ['届いて', 'とどいて'],
+  ['一覧', 'いちらん'], ['戻る', 'もどる'], ['戻す', 'もどす'], ['変える', 'かえる'], ['件', 'けん'], ['届けます', 'とどけます'], ['届ける', 'とどける'], ['届いて', 'とどいて'], ['届きます', 'とどきます'],
   ['参加', 'さんか'], ['承認', 'しょうにん'], ['申請', 'しんせい'], ['提出しました', 'ていしゅつしました'], ['提出', 'ていしゅつ'], ['送る', 'おくる'], ['送りました', 'おくりました'],
-  ['記録', 'きろく'], ['書いた日', 'かいたひ'], ['書ける', 'かける'], ['書こう', 'かこう'], ['書く', 'かく'], ['書き', 'かき'],
+  ['記録', 'きろく'], ['書いた日', 'かいたひ'], ['書ける', 'かける'], ['書こう', 'かこう'], ['書いて', 'かいて'], ['書く', 'かく'], ['書き', 'かき'],
   ['考えた', 'かんがえた'], ['気持ち', 'きもち'], ['気持', 'きも'], ['気づき', 'きづき'], ['学び', 'まなび'],
   ['広く', 'ひろく'], ['作品', 'さくひん'], ['写真', 'しゃしん'], ['画像', 'がぞう'], ['任意', 'にんい'],
   ['見やすい', 'みやすい'], ['大きさ', 'おおきさ'], ['共有', 'きょうゆう'], ['学校側', 'がっこうがわ'], ['拒否', 'きょひ'],
@@ -166,6 +167,7 @@ async function renderHistoryRoute(entry) {
   if (route === 'home') {
     forgetRole();
     state.restoreLastTeacherClass = false;
+    state.restoreSingleStudentClass = false;
     return renderHome();
   }
   if (route === 'teacher-home') {
@@ -186,6 +188,7 @@ async function renderHistoryRoute(entry) {
   }
   if (route === 'student-home') {
     rememberRole('student');
+    state.restoreSingleStudentClass = false;
     state.invite = null;
     if (/^#join=/.test(location.hash)) history.replaceState(entry, '', location.pathname + location.search);
     return requireSharedRead('student', () => renderStudentHome());
@@ -364,6 +367,7 @@ async function resolveEntryRoute() {
     return requireSharedRead('teacher', () => renderTeacherHome());
   }
   if (role === 'student') {
+    state.restoreSingleStudentClass = true;
     if (appHistoryState()?.route === 'home') pushAppRoute('student-home');
     else if (appHistoryState()?.route !== 'student-home') replaceAppRoute('student-home');
     return requireSharedRead('student', () => renderStudentHome());
@@ -471,14 +475,15 @@ async function handleSharedToken(response) {
 }
 
 function renderHome(error = '') {
-  app.innerHTML = shell(`<section class="role-home"><div class="role-home-intro"><h1>どの使い方をしますか？</h1><p>あなたに合った入口を選んでください。</p></div>
+  // ログイン直後に最初に見る画面。児童側のカードは、低学年でも読めるようふりがなを付ける。
+  app.innerHTML = shell(`<section class="role-home"><div class="role-home-intro"><h1>どの使い方をしますか？</h1><p>あなたに合った入口を選んでください。あとから［使い方を変える］で切り替えられます。</p></div>
     ${errorNotice(error)}
     <div class="grid role-choice-grid">
-      <button class="item-card" id="teacher-home" type="button"><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
-      <button class="item-card" id="student-home" type="button"><h2>児童として使う</h2><p class="muted">参加したクラスで書き、おへんじを受け取ります。</p></button>
+      <button class="item-card role-card" id="teacher-home" type="button" aria-label="先生として使う。クラス作成、招待、返却、分析、名簿とテーマを管理します"><span class="role-icon" aria-hidden="true">🧑‍🏫</span><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
+      <button class="item-card role-card student-ui" id="student-home" type="button" aria-label="児童として使う。参加したクラスで書き、先生からのおへんじを受け取ります"><span class="role-icon" aria-hidden="true">🎒</span><h2>${studentText('児童として使う')}</h2><p class="muted">${studentText('クラスで書いて、先生からのおへんじが届きます。')}</p></button>
     </div></section>`);
   document.getElementById('teacher-home').addEventListener('click', () => { rememberRole('teacher'); state.restoreLastTeacherClass = true; pushAppRoute('teacher-home'); requireSharedRead('teacher', () => renderTeacherHome()); });
-  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); pushAppRoute('student-home'); requireSharedRead('student', () => renderStudentHome()); });
+  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); state.restoreSingleStudentClass = true; pushAppRoute('student-home'); requireSharedRead('student', () => renderStudentHome()); });
 }
 
 async function renderTeacherHome(error = '') {
@@ -494,18 +499,24 @@ async function renderTeacherHome(error = '') {
     state.restoreLastTeacherClass = false;
     let last = '';
     try { last = localStorage.getItem('rj_last_teacher_class') || ''; } catch (storageError) {}
-    const match = classes.find(({ file }) => file.id === last);
+    // 最後に開いたクラスが分からなくても、1クラスしか無ければ迷う余地はない。そのまま開く。
+    const match = classes.find(({ file }) => file.id === last) || (classes.length === 1 ? classes[0] : null);
     if (match) { pushAppRoute('teacher-class', { classId: match.record.classId, tab: 'journals' }); return openTeacherClass(match); }
   }
   state.restoreLastTeacherClass = false;
+  // 毎日の用事は「担当クラスを開く」ほう。作成フォームは一覧の後ろへ置く。
   app.innerHTML = shell(`<div class="page-heading"><div><span class="badge">先生</span><h1>クラス</h1></div><button id="back" class="quiet" type="button">使い方を変える</button></div>
     ${errorNotice(error)}
-    <section class="panel"><h2>新しいクラスを作る</h2><form id="create-class">
+    ${classes.length ? `<section class="teacher-classes"><div class="compact-section-heading"><h2>作成済みのクラス</h2><span class="muted small">${classes.length}クラス</span></div><div class="grid">${classes.map(({ file, record }) => {
+      const active = (record.members || []).filter((member) => member.status === 'active').length;
+      return `<button class="item-card class-item" data-file="${escapeHtml(file.id)}" type="button" aria-label="${escapeHtml(record.className)}（クラスコード ${escapeHtml(record.classCode)}）を開く。参加中 ${active}人"><span class="badge">${escapeHtml(record.classCode)}</span><h3>${escapeHtml(record.className)}</h3><p>参加中 ${active}人</p><p class="muted small">更新: ${escapeHtml(formatDate(file.modifiedTime))}</p></button>`;
+    }).join('')}</div></section>` : ''}
+    <section class="panel create-class-panel"><h2>${classes.length ? 'クラスをもう1つ作る' : '最初のクラスを作る'}</h2>
+      <p class="muted small">${classes.length ? '学年やクラスごとに、いくつでも作れます。' : 'クラス名を入れると、招待用のクラスコードとQRコードが作られます。'}</p>
+      <form id="create-class">
       <label><span>クラス名</span><input id="class-name" maxlength="80" required placeholder="例：5年1組"></label>
       <button class="primary" type="submit">クラスを作成</button>
-    </form></section>
-    <section><h2>作成済みのクラス</h2>${classes.length ? `<div class="grid">${classes.map(({ file, record }) => `
-      <button class="item-card class-item" data-file="${escapeHtml(file.id)}" type="button"><span class="badge">${escapeHtml(record.classCode)}</span><h3>${escapeHtml(record.className)}</h3><p>${(record.members || []).filter((member) => member.status === 'active').length}人</p><p class="muted small">更新: ${escapeHtml(formatDate(file.modifiedTime))}</p></button>`).join('')}</div>` : '<div class="empty">まだクラスはありません。</div>'}</section>`);
+    </form></section>`);
   document.getElementById('back').addEventListener('click', () => appBack(() => { forgetRole(); replaceAppRoute('home'); renderHome(); }));
   document.getElementById('create-class').addEventListener('submit', createClass);
   document.querySelectorAll('.class-item').forEach((button) => button.addEventListener('click', () => {
@@ -1224,8 +1235,23 @@ async function renderStudentHome(error = '') {
     && normalizeEmail(record.student?.email) === state.user.email
     && normalizeEmail(file.owners?.[0]?.emailAddress) === state.user.email);
   state.studentPortfolios = portfolios;
+  // 参加クラスが1つだけなら、一覧を出さずにそのクラスを開く。低学年ほど「押す所を探す」ことが負担になる。
+  // 一覧へは［クラス一覧へ］と端末の戻る操作で戻れる（renderHistoryRoute がこの旗を下ろす）。
+  if (state.restoreSingleStudentClass) {
+    state.restoreSingleStudentClass = false;
+    if (portfolios.length === 1) {
+      const only = portfolios[0];
+      pushAppRoute('student-portfolio', { fileId: only.file.id, classId: only.record.class.id });
+      return openPortfolio(only);
+    }
+  }
+  const today = todayKey();
   app.innerHTML = shell(`<div class="student-ui"><div class="page-heading"><div><span class="badge">${studentText('児童')}</span><h1>${studentText('参加しているクラス')}</h1></div><button id="back" class="quiet" type="button">${studentText('使い方を変える')}</button></div>
-    ${studentErrorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button" aria-label="${escapeHtml(record.class?.name || 'クラス')}、${record.journals?.length || 0}件のふりかえり"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3 class="user-content">${studentText(record.class?.name || 'クラス')}</h3><p>${record.journals?.length || 0}${studentText('件')}のふりかえり</p></button>`).join('')}</div>` : `<div class="empty">${studentText('参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。')}</div>`}</div>`);
+    ${studentErrorNotice(error)}${portfolios.length ? `<div class="grid">${portfolios.map(({ file, record }) => {
+      const journals = record.journals || [];
+      const wroteToday = journals.some((journal) => todayKey(new Date(journal.createdAt)) === today);
+      return `<button class="item-card student-portfolio" data-file="${escapeHtml(file.id)}" type="button" aria-label="${escapeHtml(record.class?.name || 'クラス')}をひらく。ふりかえり${journals.length}件。${wroteToday ? '今日のぶんは提出ずみ' : '今日のぶんはまだ'}"><span class="badge">${escapeHtml(record.class?.code || '')}</span><h3 class="user-content">${studentText(record.class?.name || 'クラス')}</h3><p class="class-today ${wroteToday ? 'done' : 'todo'}">${wroteToday ? `✅ ${studentText('今日のふりかえりを提出しました')}` : `✏️ ${studentText('今日のふりかえりを書こう')}`}</p><p class="muted small">${journals.length}${studentText('件')}のふりかえり</p></button>`;
+    }).join('')}</div>` : `<div class="empty">${studentText('参加済みのクラスはありません。先生のQRコードまたは専用URLから参加してください。')}</div>`}</div>`);
   document.getElementById('back').addEventListener('click', () => appBack(() => { forgetRole(); replaceAppRoute('home'); renderHome(); }));
   document.querySelectorAll('.student-portfolio').forEach((button) => button.addEventListener('click', () => {
     const item = portfolios.find(({ file }) => file.id === button.dataset.file);

@@ -156,6 +156,41 @@ test('トップ画面は中央配置され、内部用語やクリックイベ�
   assert.match(app, /typeof message === 'string'/);
 });
 
+test('ログイン後の最初の画面が役割選択からクラスまで最短でつながる', () => {
+  // 役割選択カードは絵記号を持ち、児童側は低学年でも読めるようふりがなを付ける
+  assert.match(app, /class="item-card role-card"/);
+  assert.match(app, /class="role-icon" aria-hidden="true"/);
+  assert.match(app, /studentText\('児童として使う'\)/);
+  assert.match(css, /\.role-icon\s*\{/);
+
+  // 先生ホームは、作成フォームより先に担当クラスを見せる
+  const teacherHome = app.slice(app.indexOf('async function renderTeacherHome'), app.indexOf('async function createClass'));
+  assert.ok(teacherHome.includes('teacher-classes'), '先生ホームにクラス一覧の区画がありません');
+  assert.ok(teacherHome.includes('create-class-panel'), '先生ホームにクラス作成の区画がありません');
+  assert.ok(teacherHome.indexOf('teacher-classes') < teacherHome.indexOf('create-class-panel'), 'クラス作成フォームがクラス一覧より前にあります');
+  assert.match(teacherHome, /classes\.length === 1 \? classes\[0\] : null/);
+
+  // 児童のクラスカードは、その日の提出状況とこれまでの件数を示す
+  const studentHome = app.slice(app.indexOf('async function renderStudentHome'), app.indexOf('async function renderJoin'));
+  assert.match(studentHome, /class-today/);
+  assert.match(studentHome, /studentText\('今日のふりかえりを書こう'\)/);
+  assert.match(studentHome, /studentText\('今日のふりかえりを提出しました'\)/);
+  assert.match(css, /\.class-today\.done\s*\{/);
+
+  // 参加クラスが1つだけなら一覧を飛ばして開く。開く前に旗を下ろし、失敗時の往復を作らない
+  assert.match(studentHome, /portfolios\.length === 1/);
+  assert.ok(studentHome.includes('state.restoreSingleStudentClass = false;'), '自動オープンの旗を下ろしていません');
+  assert.ok(studentHome.includes('return openPortfolio(only)'), '1クラスのときの自動オープンがありません');
+  assert.ok(
+    studentHome.indexOf('state.restoreSingleStudentClass = false;') < studentHome.indexOf('return openPortfolio(only)'),
+    '自動オープンの旗を下ろす前にポートフォリオを開いています'
+  );
+
+  // 戻る操作で一覧へ帰ったときは、開き直さない
+  const studentRoute = app.slice(app.indexOf("if (route === 'student-home')"), app.indexOf("if (route === 'student-join')"));
+  assert.match(studentRoute, /state\.restoreSingleStudentClass = false;/);
+});
+
 test('ログイン画面とヘッダーはPWAと同じアプリアイコンを使う', () => {
   assert.match(app, /class="app-logo" src="\.\/icon-192\.png"/);
   assert.match(app, /class="brand-icon" src="\.\/icon-192\.png"/);
