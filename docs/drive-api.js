@@ -18,7 +18,8 @@ export class DriveClient extends KitDriveClient {
   }
 
   listClasses() {
-    return this.listByType({ type: TYPE.class });
+    // 先生が開くのは自分が作ったクラスだけ。共有された同種のファイルまで拾わないよう所有者で絞る。
+    return this.listByType({ type: TYPE.class, owner: 'me' });
   }
 
   listOwnPortfolios(classId = '') {

@@ -5,6 +5,7 @@
 ## 本番化の必須確認
 
 - Google Drive API、OAuthブランド、`drive.file` と制限付きスコープ `drive.readonly` の審査状態を確認する。
+- Google Cloudの［データアクセス］に登録するスコープを、`openid` / `userinfo.email` / `userinfo.profile` / `drive.file` / `drive.readonly` の5つに保つ。アプリが要求するのはこの5つだけで、これ以外が登録されていれば削除する。
 - Workspace管理者がOAuthクライアントを信頼済みにし、児童→先生、先生→児童のユーザー指定Drive共有が校内ポリシーに合うことを確認する。
 - `docs/config.js` の `allowedWorkspaceDomains` を学校のドメインに限定する。複数校運用は必要なドメインだけを列挙する。
 - 可能な限り専用カスタムドメインを使い、`publicEntryUrl`、`allowedOrigins`、OAuthの承認済みJavaScript生成元を同じオリジンにする。

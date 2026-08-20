@@ -35,7 +35,7 @@ const channel = {
   updatedAt: now
 };
 
-async function mockGoogle(page, role, { denyShared = false } = {}) {
+async function mockGoogle(page, role, { denyShared = false, empty = false } = {}) {
   const email = role === 'teacher' ? 'teacher@example.ed.jp' : 'student@example.ed.jp';
   await page.addInitScript(({ email, denyShared }) => {
     const baseScopes = 'openid email profile https://www.googleapis.com/auth/drive.file';
@@ -69,8 +69,8 @@ async function mockGoogle(page, role, { denyShared = false } = {}) {
     const path = url.pathname;
     const query = decodeURIComponent(url.searchParams.get('q') || '');
     if (query.includes('sharedWithMe') && route.request().headers().authorization !== 'Bearer shared-token') return route.fulfill({ json: { files: [] } });
-    if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' ? [metadataFor('class-file')] : [] } });
-    if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: [metadataFor('portfolio-file')] } });
+    if (path.endsWith('/files') && query.includes("value='class'")) return route.fulfill({ json: { files: role === 'teacher' && !empty ? [metadataFor('class-file')] : [] } });
+    if (path.endsWith('/files') && query.includes("value='portfolio'")) return route.fulfill({ json: { files: empty ? [] : [metadataFor('portfolio-file')] } });
     if (path.endsWith('/files') && query.includes("value='channel'")) return route.fulfill({ json: { files: [metadataFor('channel-file')] } });
     for (const [id, record] of Object.entries({ 'class-file': classRecord, 'portfolio-file': portfolio, 'channel-file': channel })) {
       if (!path.endsWith(`/files/${id}`)) continue;
@@ -332,6 +332,49 @@ test('教師のモバイル画面は概要を2列にし横へはみ出さない'
   expect(layout.fourthTop).toBeGreaterThan(layout.secondTop);
   expect(layout.submissionsTop).toBeLessThan(layout.sidebarTop);
   expect(layout.overflow).toBeLessThanOrEqual(1);
+});
+
+const BASE_SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
+
+test('自分のファイルしか読まない画面では、制限付きスコープを求めない', async ({ page }) => {
+  // 一覧・作成の画面は drive.file だけで足りる。クラスを開くまで drive.readonly を求めない。
+  await mockGoogle(page, 'teacher', { empty: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
+  await page.getByRole('button', { name: /先生として使う/ }).click();
+  await expect(page.getByRole('button', { name: 'クラスを作成' })).toBeVisible();
+  expect(await page.evaluate(() => window.__requestedScopes)).toEqual([BASE_SCOPES]);
+});
+
+test('参加クラスの無い児童にも、制限付きスコープを求めない', async ({ page }) => {
+  await mockGoogle(page, 'student', { empty: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
+  await page.getByRole('button', { name: /児童として使う/ }).click();
+  await expect(page.locator('.empty')).toBeVisible();
+  expect(await page.evaluate(() => window.__requestedScopes)).toEqual([BASE_SCOPES]);
+});
+
+test('クラスを開く時に、はじめて共有記録の閲覧を求める', async ({ page }) => {
+  await mockGoogle(page, 'teacher');
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
+  await page.getByRole('button', { name: /先生として使う/ }).click();
+
+  // クラスが1つなので自動で開こうとし、その時点で説明画面が出る
+  await expect(page.getByRole('button', { name: '共有された記録の同期を許可する' })).toBeVisible();
+  expect(await page.evaluate(() => window.__requestedScopes)).toEqual([BASE_SCOPES]);
+
+  // 断ればクラス一覧へ戻れる。役割選択まで戻されない
+  await page.getByRole('button', { name: 'クラス一覧へ戻る' }).click();
+  await expect(page.getByRole('button', { name: 'クラスを作成' })).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('teacher-home');
+
+  await page.locator('.class-item').click();
+  await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
+  await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
+  expect(await page.evaluate(() => window.__requestedScopes))
+    .toEqual([BASE_SCOPES, 'https://www.googleapis.com/auth/drive.readonly']);
 });
 
 test('共有記録の閲覧を許可しなかった場合は理由と再試行を表示する', async ({ page }) => {

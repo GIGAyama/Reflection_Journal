@@ -25,7 +25,7 @@ import {
   validatePortfolioForClass
 } from './drive-core.js';
 import { DriveApiError, DriveClient } from './drive-api.js';
-import { BASE_SCOPES, SHARED_READ_SCOPE } from './kit/index.js';
+import { BASE_SCOPES, DRIVE_FILE_SCOPE, SHARED_READ_SCOPE } from './kit/index.js';
 import { RecordCache } from './kit/records.js';
 import { ScopeGrant, SessionPolicy, tokenExpiryFrom } from './kit/session.js';
 
@@ -209,7 +209,7 @@ async function renderHistoryRoute(entry) {
   if (route === 'teacher-home') {
     rememberRole('teacher');
     state.restoreLastTeacherClass = false;
-    return requireSharedRead('teacher', () => renderTeacherHome());
+    return renderTeacherHome();
   }
   if (route === 'teacher-class') {
     rememberRole('teacher');
@@ -227,7 +227,7 @@ async function renderHistoryRoute(entry) {
     state.restoreSingleStudentClass = false;
     state.invite = null;
     if (/^#join=/.test(location.hash)) history.replaceState(entry, '', location.pathname + location.search);
-    return requireSharedRead('student', () => renderStudentHome());
+    return renderStudentHome();
   }
   if (route === 'student-join') return state.invite ? renderJoin() : renderStudentHome();
   if (['student-portfolio', 'student-writing-focus', 'student-journal'].includes(route)) {
@@ -354,6 +354,7 @@ async function requestAccess() {
       client_id: config.googleClientId,
       scope: INITIAL_SCOPES,
       include_granted_scopes: true,
+      enable_granular_consent: true,
       callback: handleToken
     });
     state.tokenClient.requestAccessToken({ prompt: state.forceAccountSelection ? 'select_account' : '' });
@@ -363,6 +364,11 @@ async function requestAccess() {
 async function handleToken(response) {
   if (!response?.access_token) return renderLogin(response?.error_description || 'Googleログインがキャンセルされました。');
   rememberGrantedScopes(response, INITIAL_SCOPES.split(' '));
+  // 粒度別同意ではDriveだけ外せる。外されたまま進むと、最初の保存で403になって理由が伝わらない。
+  if (!state.grantedScopes.has(DRIVE_FILE_SCOPE)) {
+    clearSession();
+    return renderLogin('Google Driveへの保存が許可されませんでした。ふりかえりを保存するには、この許可が必要です。');
+  }
   state.accessToken = response.access_token;
   state.tokenExpiresAt = tokenExpiryFrom(response);
   state.forceAccountSelection = false;
@@ -391,7 +397,7 @@ async function resolveEntryRoute() {
       if (appHistoryState()?.route === 'home') pushAppRoute('student-home');
       else if (appHistoryState()?.route !== 'student-home' && appHistoryState()?.route !== 'student-join') replaceAppRoute('student-home');
       pushAppRoute('student-join');
-      return requireSharedRead('student', () => renderJoin());
+      return renderJoin();
     }
     catch (error) { return renderHome(error.message); }
   }
@@ -400,13 +406,13 @@ async function resolveEntryRoute() {
     state.restoreLastTeacherClass = true;
     if (appHistoryState()?.route === 'home') pushAppRoute('teacher-home');
     else if (appHistoryState()?.route !== 'teacher-home') replaceAppRoute('teacher-home');
-    return requireSharedRead('teacher', () => renderTeacherHome());
+    return renderTeacherHome();
   }
   if (role === 'student') {
     state.restoreSingleStudentClass = true;
     if (appHistoryState()?.route === 'home') pushAppRoute('student-home');
     else if (appHistoryState()?.route !== 'student-home') replaceAppRoute('student-home');
-    return requireSharedRead('student', () => renderStudentHome());
+    return renderStudentHome();
   }
   replaceAppRoute('home');
   return renderHome();
@@ -470,13 +476,17 @@ function renderSharedReadPermission(role, error = '') {
     ${errorNotice(error)}
     <div class="permission-points"><p><strong>許可の範囲</strong><br><span>Googleの許可画面ではDrive全体の閲覧権限です。アプリの現在の実装は、共有済みで専用の印が付いた記録だけを検索・表示します。</span></p><p><strong>書き換えは専用ファイルだけ</strong><br><span>書込みには、アプリが作成したファイルだけを扱う権限を使います。通常の記録を運営者サーバーへ保存しません。</span></p></div>
     <button id="grant-shared-read" class="primary wide" type="button">共有された記録の同期を許可する</button>
-    <button id="permission-back" class="quiet wide" type="button">使い方の選択へ戻る</button>
+    <button id="permission-back" class="quiet wide" type="button">${isTeacher ? 'クラス一覧へ戻る' : '戻る'}</button>
   </div></section>`);
   document.getElementById('grant-shared-read').addEventListener('click', requestSharedRead);
   document.getElementById('permission-back').addEventListener('click', () => {
     state.pendingSharedAction = null;
     state.pendingSharedRole = '';
-    appBack(() => { forgetRole(); replaceAppRoute('home'); renderHome(); });
+    appBack(() => {
+      const home = isTeacher ? 'teacher-home' : 'student-home';
+      replaceAppRoute(home);
+      return isTeacher ? renderTeacherHome() : renderStudentHome();
+    });
   });
 }
 
@@ -518,8 +528,8 @@ function renderHome(error = '') {
       <button class="item-card role-card" id="teacher-home" type="button" aria-label="先生として使う。クラス作成、招待、返却、分析、名簿とテーマを管理します"><span class="role-icon" aria-hidden="true">🧑‍🏫</span><h2>先生として使う</h2><p class="muted">クラス作成、招待、返却、分析、名簿とテーマを管理します。</p></button>
       <button class="item-card role-card student-ui" id="student-home" type="button" aria-label="児童として使う。参加したクラスで書き、先生からのおへんじを受け取ります"><span class="role-icon" aria-hidden="true">🎒</span><h2>${studentText('児童として使う')}</h2><p class="muted">${studentText('クラスで書いて、先生からのおへんじが届きます。')}</p></button>
     </div></section>`);
-  document.getElementById('teacher-home').addEventListener('click', () => { rememberRole('teacher'); state.restoreLastTeacherClass = true; pushAppRoute('teacher-home'); requireSharedRead('teacher', () => renderTeacherHome()); });
-  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); state.restoreSingleStudentClass = true; pushAppRoute('student-home'); requireSharedRead('student', () => renderStudentHome()); });
+  document.getElementById('teacher-home').addEventListener('click', () => { rememberRole('teacher'); state.restoreLastTeacherClass = true; pushAppRoute('teacher-home'); renderTeacherHome(); });
+  document.getElementById('student-home').addEventListener('click', () => { rememberRole('student'); state.restoreSingleStudentClass = true; pushAppRoute('student-home'); renderStudentHome(); });
 }
 
 async function renderTeacherHome(error = '') {
@@ -613,6 +623,9 @@ async function persistTeacherChannel(email, channel) {
 }
 
 async function openTeacherClass(item, tab = 'journals', error = '', options = {}) {
+  // 児童の提出は他アカウントからの共有なので、ここで初めて drive.readonly が要る。
+  // クラス一覧までは自分のファイルだけで足りるため、要求はこの時点まで遅らせる。
+  if (!state.grantedScopes.has(SHARED_READ_SCOPE)) return requireSharedRead('teacher', () => openTeacherClass(item, tab, error, options));
   if (!options.silent) setBusy('クラスのデータを読み込んでいます…');
   const previousCount = state.teacher?.record?.classId === item.record.classId ? analyzeClass(activePortfolioItems(), state.teacher.channels).all.length : 0;
   await withError(async () => {
@@ -1353,6 +1366,8 @@ async function findStudentChannel(classId) {
 }
 
 async function openPortfolio(item, error = '') {
+  // 先生のテーマとおへんじは先生アカウントからの共有。ここで初めて drive.readonly が要る。
+  if (!state.grantedScopes.has(SHARED_READ_SCOPE)) return requireSharedRead('student', () => openPortfolio(item, error));
   setStudentBusy('ふりかえりを開いています…');
   await withError(async () => {
     if (item.record?.kind !== 'reflection-journal-portfolio'
