@@ -166,6 +166,32 @@ test('別アカウント共有と教師画面の更新を明示的に扱う', ()
   assert.match(css, /\.sync-status/);
 });
 
+test('制限付きスコープは、共有記録を読む直前にだけ求める', () => {
+  // 初回は drive.file まで。粒度別同意を有効にし、Driveを外されたまま進ませない。
+  assert.match(app, /const INITIAL_SCOPES = BASE_SCOPES/);
+  assert.match(app, /enable_granular_consent: true/);
+  assert.equal((app.match(/enable_granular_consent: true/g) || []).length, 2, '初回と追加要求の両方で粒度別同意を有効にしていません');
+  assert.match(app, /if \(!state\.grantedScopes\.has\(DRIVE_FILE_SCOPE\)\)/);
+
+  // 一覧・作成の画面からは要求しない。要求は共有記録を読む2か所だけ。
+  const gates = app.match(/requireSharedRead\(/g) || [];
+  assert.equal(gates.length, 3, `requireSharedRead の呼び出しが ${gates.length} 箇所あります（定義1 + 要求2 のはず）`);
+  for (const name of ['openTeacherClass', 'openPortfolio']) {
+    const body = app.slice(app.indexOf(`async function ${name}(`));
+    assert.match(body.slice(0, 500), /if \(!state\.grantedScopes\.has\(SHARED_READ_SCOPE\)\) return requireSharedRead\(/,
+      `${name} の冒頭で共有読み取りを求めていません`);
+  }
+  for (const name of ['renderTeacherHome', 'renderStudentHome', 'renderJoin', 'renderHome']) {
+    const start = app.indexOf(`function ${name}(`);
+    const body = app.slice(start, start + 3000);
+    assert.doesNotMatch(body, /requireSharedRead\(/, `${name} が共有読み取りを先回りして求めています`);
+  }
+
+  // 検索式も必要な範囲へ絞る（先生が開くのは自分が作ったクラスだけ）
+  assert.match(api, /listClasses\(\)\s*\{[^}]*owner: 'me'/s);
+  assert.doesNotMatch(api, /listByType\(\{ type: TYPE\.class \}\)/);
+});
+
 test('教師ダッシュボードは提出確認を主役に構造化している', () => {
   for (const marker of ['teacher-dashboard-grid', 'teacher-submissions', 'teacher-sidebar', 'today-status-panel', 'teacher-settings-grid', 'vitals-grid']) {
     assert.ok(app.includes(marker) || css.includes(marker), `教師画面に「${marker}」がありません`);
