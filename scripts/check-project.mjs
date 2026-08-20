@@ -150,10 +150,14 @@ const gsFiles = [];
 // ── E1: manifest の id / scope / start_url ──
 {
   const m = JSON.parse(read('docs/manifest.webmanifest'));
-  const repo = '/Reflection_Journal/';
-  const bad = ['id', 'start_url', 'scope'].filter((k) => m[k] !== repo);
-  bad.length ? fail('E1', `manifest の ${bad.join(', ')} がリポジトリ名の絶対パス（${repo}）でない`)
-             : pass('E1', 'manifest の id / scope / start_url はリポジトリ名の絶対パス');
+  // 独自ドメイン reflection-journal.giga-school.com の直下で配信されるので "/"。
+  // 旧構成（gigayama.github.io/Reflection_Journal/）のリポジトリ名の絶対パスに
+  // 戻すと、scope がページの URL を含まなくなって manifest ごと無視され、
+  // PWA としてインストールできなくなる。実際にその状態で残っていた。
+  const want = '/';
+  const bad = ['id', 'start_url', 'scope'].filter((k) => m[k] !== want);
+  bad.length ? fail('E1', `manifest の ${bad.join(', ')} が配信場所（${want}）と合っていない`)
+             : pass('E1', 'manifest の id / scope / start_url が配信場所と合っている');
 }
 
 // ── E2: apple-touch-icon に透明を含まない（PNG のヘッダで判定） ──

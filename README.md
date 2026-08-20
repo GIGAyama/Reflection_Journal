@@ -2,7 +2,7 @@
 
 小学校の児童が日々の学びを記録し、先生が閲覧・返却・分析できるWebアプリです。
 
-本番入口は [GitHub Pagesの共通URL](https://gigayama.github.io/Reflection_Journal/) です。先生・児童とも、このURLまたは先生が発行した招待URLを開くだけで利用できます。学校ごとの配布・デプロイ・スプレッドシート作成はありません。
+本番入口は [共通URL](https://reflection-journal.giga-school.com/) です。先生・児童とも、このURLまたは先生が発行した招待URLを開くだけで利用できます。学校ごとの配布・デプロイ・スプレッドシート作成はありません。
 
 ## 結論：現在版はGASを使いません
 
@@ -126,7 +126,8 @@ Drive上のJSONと画像は通常のDriveファイルとして所有者のアカ
 3. `drive.file` と `drive.readonly` を追加します。
 4. 外部ユーザーへ公開する場合は、ブランド確認と制限付きスコープのOAuth審査を完了します。Googleの判定によりセキュリティ評価が必要になる場合があります。
 5. OAuthクライアントを「ウェブアプリケーション」で作成します。
-6. 承認済みJavaScript生成元へ `https://gigayama.github.io` を登録します。
+6. 承認済みJavaScript生成元へ `https://reflection-journal.giga-school.com` を登録します。
+   ここが実際のオリジンと1文字でも違うと、アプリは開けるのにログインだけができません。
 7. `docs/config.js` の `googleClientId`、`publicEntryUrl`、`allowedOrigins`、必要に応じて `allowedWorkspaceDomains` を設定します。クライアントIDはブラウザ用の公開識別子であり、クライアントシークレットは配置しません。複数アプリが同居するGitHub Pagesオリジンより、学校利用では専用カスタムドメインを推奨します。
 8. GitHub Pagesの公開元を `main` ブランチの `/docs` にします。
 

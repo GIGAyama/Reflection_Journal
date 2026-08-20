@@ -45,7 +45,9 @@ Google側ですでに許可済みの場合、Google自身の同意画面は省�
    - `https://www.googleapis.com/auth/drive.readonly`
 5. 検証中は［対象］のテストユーザーへ、確認に使う先生・児童アカウントを登録します。
 6. OAuthクライアントを「ウェブアプリケーション」として作成します。
-7. 承認済みJavaScript生成元へ、実際の本番オリジン（現在は `https://gigayama.github.io`）を登録します。学校本番運用では、他アプリとWeb StorageやService Workerのオリジン境界を分ける専用カスタムドメインを推奨します。
+7. 承認済みJavaScript生成元へ、実際の本番オリジン（現在は `https://reflection-journal.giga-school.com`）を登録します。
+   独自ドメインへ移行済みで、他アプリとは Web Storage も Service Worker もオリジンが分かれています。
+   なお `docs/config.js` の `allowedOrigins` にも同じオリジンを入れる必要があります。片方だけ直すと、アプリは開けるのにログインだけができない状態になります。
 8. クライアントIDを `docs/config.js` の `googleClientId` へ設定します。
 9. `docs/config.js` の `publicEntryUrl`、`allowedOrigins`、組織限定時の `allowedWorkspaceDomains` を設定します。
 10. GitHub Pagesの公開元を `main` ブランチの `/docs` にします。

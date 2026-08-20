@@ -224,10 +224,12 @@ test('トークンは既定で保存せず、保存を選んだときだけ復�
 
 test('公開元とドメインの許可リストを判定する', () => {
   const policy = new SessionPolicy({
-    allowedOrigins: ['https://gigayama.github.io'],
+    allowedOrigins: ['https://reflection-journal.giga-school.com'],
     allowedDomains: ['school.ed.jp']
   });
-  assert.equal(policy.originAllowed('https://gigayama.github.io', 'gigayama.github.io'), true);
+  assert.equal(policy.originAllowed('https://reflection-journal.giga-school.com', 'reflection-journal.giga-school.com'), true);
+  // 旧オリジンは許可一覧から外れたので、もう通らない
+  assert.equal(policy.originAllowed('https://gigayama.github.io', 'gigayama.github.io'), false);
   assert.equal(policy.originAllowed('https://copy.example.com', 'copy.example.com'), false);
   assert.equal(policy.originAllowed('http://localhost:8080', 'localhost'), true, '手元の確認はできるようにする');
   assert.equal(policy.domainAllowed('teacher@school.ed.jp'), true);
