@@ -64,6 +64,13 @@ p { line-height: 1.75; }
 .role-choice-grid .item-card { min-height: 210px; display: grid; place-content: center; text-align: center; }
 .role-choice-grid .item-card h2 { margin: 0 0 8px; }
 .role-choice-grid .item-card p { margin: 0; }
+.role-icon { display: grid; place-items: center; width: 68px; height: 68px; margin: 0 auto 14px; border-radius: 22px; background: #fff7ed; font-size: 32px; line-height: 1; }
+.role-card:hover .role-icon { background: #ffedd5; }
+.teacher-classes { margin-bottom: 24px; }
+.teacher-classes .compact-section-heading { margin-bottom: 14px; }
+.class-today { margin: 10px 0 4px; font-weight: 800; }
+.class-today.todo { color: var(--orange-dark); }
+.class-today.done { color: var(--success); }
 
 .panel, .item-card, .journal-card { background: rgba(255,255,255,.96); border: 1px solid rgba(226,232,240,.9); border-radius: 22px; box-shadow: 0 10px 32px rgba(15,23,42,.07); }
 .panel { padding: clamp(20px, 4vw, 32px); margin-bottom: 20px; }
@@ -331,6 +338,7 @@ html.writing-focus .lined-paper { min-height: clamp(360px, calc(100dvh - 300px),
   .role-home { min-height: auto; padding-block: 28px; }
   .role-choice-grid { grid-template-columns: 1fr; }
   .role-choice-grid .item-card { min-height: 150px; }
+  .role-icon { width: 54px; height: 54px; margin-bottom: 10px; font-size: 26px; }
   .invite-layout { grid-template-columns: 1fr; }
   .qr-box { width: min(260px, 100%); margin: auto; }
   .account span { display: none; }

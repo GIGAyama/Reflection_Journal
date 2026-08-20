@@ -92,12 +92,40 @@ async function loginAs(page, role) {
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: role === 'teacher' ? /先生として使う/ : /児童として使う/ }).click();
   await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
+  // 担当クラス・参加クラスが1つだけなので、一覧を挟まずそのクラスが開く
+  await expect(page.locator(role === 'teacher' ? '.teacher-dashboard-grid' : '.notebook')).toBeVisible();
 }
+
+test('ログイン後は一覧を挟まず自分のクラスから始まり、戻ると状況つきの一覧に出る', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockGoogle(page, 'student');
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
+
+  // 役割選択は絵記号つきの2枚。児童側の文言にはふりがながある
+  await expect(page.locator('.role-icon')).toHaveCount(2);
+  expect(await page.locator('#student-home ruby').count()).toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: /児童として使う/ }).click();
+  await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
+
+  // 参加クラスが1つだけなので、一覧のカードを押さずにノートが開く
+  await expect(page.locator('.notebook')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-portfolio');
+
+  // 戻ると一覧。今日の提出状況が読め、勝手に開き直さない
+  await page.goBack();
+  await expect(page.locator('.student-portfolio')).toBeVisible();
+  await expect(page.locator('.class-today.done')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-home');
+  await page.waitForTimeout(500);
+  await expect(page.locator('.student-portfolio')).toBeVisible();
+  expect(await page.evaluate(() => history.state?.route)).toBe('student-home');
+});
 
 test('児童のモバイル画面はノートを先頭にし、横にはみ出さない', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await loginAs(page, 'student');
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.notebook')).toBeVisible();
   const order = await page.evaluate(() => ({
     notebook: document.querySelector('.notebook').getBoundingClientRect().top,
@@ -126,7 +154,6 @@ test('端末の戻る操作は児童画面を一階層だけ戻し、アプリ�
   await page.setViewportSize({ width: 390, height: 844 });
   await loginAs(page, 'student');
   const appPath = new URL(page.url()).pathname;
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.notebook')).toBeVisible();
   expect(await page.evaluate(() => history.state?.route)).toBe('student-portfolio');
 
@@ -154,7 +181,6 @@ test('端末の戻る操作は児童画面を一階層だけ戻し、アプリ�
 test('児童向け固定文言にはふりがながあり、ノートの赤い縦線はない', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await loginAs(page, 'student');
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.notebook')).toBeVisible();
   expect(await page.locator('.student-ui ruby').count()).toBeGreaterThan(20);
   const audit = await page.evaluate(() => {
@@ -181,7 +207,6 @@ test('児童向け固定文言にはふりがながあり、ノートの赤い�
 test('児童のデスクトップ画面はカレンダー・ノート・支援を3列表示する', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await loginAs(page, 'student');
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.notebook')).toBeVisible();
   const columns = await page.evaluate(() => ({
     calendar: document.querySelector('.student-calendar').getBoundingClientRect().left,
@@ -202,7 +227,6 @@ for (const device of [
   test(`${device.name}で原稿欄を十分に広く表示する`, async ({ page }) => {
     await page.setViewportSize(device.viewport);
     await loginAs(page, 'student');
-    await page.getByRole('button', { name: /5年1組/ }).click();
     await expect(page.locator('.notebook')).toBeVisible();
     const layout = await page.evaluate(() => {
       const notebook = document.querySelector('.notebook').getBoundingClientRect();
@@ -234,7 +258,6 @@ for (const device of [
 test('教師は提出率・絞り込み・クイック返却・範囲コメントを操作できる', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await loginAs(page, 'teacher');
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.submission-donut')).toContainText('100%');
   await expect(page.locator('.teacher-overview .metric')).toHaveCount(4);
   const dashboard = await page.evaluate(() => ({
@@ -267,7 +290,6 @@ test('教師は提出率・絞り込み・クイック返却・範囲コメン�
 
 test('別アカウントの共有記録は説明後の追加許可で同期する', async ({ page }) => {
   await loginAs(page, 'teacher');
-  await expect(page.getByRole('button', { name: /5年1組/ })).toBeVisible();
   const scopes = await page.evaluate(() => window.__requestedScopes);
   expect(scopes).toEqual(['openid email profile https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive.readonly']);
 });
@@ -275,7 +297,6 @@ test('別アカウントの共有記録は説明後の追加許可で同期す�
 test('再読込み時にOAuthトークンを保存領域から復元しない', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await loginAs(page, 'teacher');
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem('rj_oauth_session_v1'))).toBeNull();
   await page.reload();
@@ -286,7 +307,6 @@ test('再読込み時にOAuthトークンを保存領域から復元しない', 
 test('教師のモバイル画面は概要を2列にし横へはみ出さない', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await loginAs(page, 'teacher');
-  await page.getByRole('button', { name: /5年1組/ }).click();
   await expect(page.locator('.teacher-dashboard-grid')).toBeVisible();
   const layout = await page.evaluate(() => {
     const metrics = [...document.querySelectorAll('.teacher-overview .metric')].map((node) => node.getBoundingClientRect());
