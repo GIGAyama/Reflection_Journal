@@ -205,10 +205,13 @@ function opRegenerateCode(tenantCode) {
     withScriptLock_(function () {
       newCode = generateTenantCode_();
       putTenantRecord_(newCode, ctx.rec);
-      deleteTenantRecord_(ctx.code);
+      // 旧コードは消さずに墓標（revoked:true）を残す（townmap 方式）。
+      // 消すと同じコードがのちの発行で再利用され得て、配布済みの旧 URL が
+      // 静かに別のクラスへつながる。墓標なら TENANT_REVOKED の案内が出る。
+      updateTenantRecord_(ctx.code, { revoked: true });
+      removeOwnedCode_(ctx.email, ctx.code);
+      addOwnedCode_(ctx.email, newCode);
     });
-    removeOwnedCode_(ctx.email, ctx.code);
-    addOwnedCode_(ctx.email, newCode);
     try { writeMeta_(openTenantSs_(newCode), { tenantCode: newCode }); } catch (e) {}
     return jsonOk_({ tenantCode: newCode, memberUrl: memberUrlFor_(newCode) });
   } catch (e) {
@@ -552,8 +555,9 @@ function opTestGeminiKey(apiKey) {
     ownerEmail_();   // ポータル利用者のみ
     const key = vStr_(apiKey, 200, 'APIキー').trim();
     if (!key) throw new Error('BAD_INPUT: APIキーを入力してください');
-    const res = UrlFetchApp.fetch(API_ENDPOINT_V1 + encodeURIComponent(key), {
+    const res = UrlFetchApp.fetch(API_ENDPOINT_V1, {
       method: 'post', contentType: 'application/json',
+      headers: { 'x-goog-api-key': key },
       payload: JSON.stringify({ contents: [{ parts: [{ text: 'テスト。OKと返して' }] }] }),
       muteHttpExceptions: true
     });
@@ -570,8 +574,9 @@ function opTestGeminiKey(apiKey) {
 // ────────────────────────────────────────────────────────────────
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
-const API_ENDPOINT_V1      = 'https://generativelanguage.googleapis.com/v1/models/' + GEMINI_MODEL + ':generateContent?key=';
-const API_ENDPOINT_V1_BETA = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=';
+// API キーは URL クエリに入れない（アクセスログやプロキシに残る）。x-goog-api-key ヘッダで渡す。
+const API_ENDPOINT_V1      = 'https://generativelanguage.googleapis.com/v1/models/' + GEMINI_MODEL + ':generateContent';
+const API_ENDPOINT_V1_BETA = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
 const AI_SIMPLE_PROMPT = 'あなたは児童の小さな頑張りやユニークな視点を見つけて具体的に褒めるのが得意な、経験豊富な小学校の先生です。以下の記述を読み、児童が努力した点などを引用しつつ、自己肯定感を育む温かい賞賛のコメントを100字程度で作成してください。見出しや解説は不要です。\n\n';
 
@@ -628,7 +633,8 @@ function opAiSimple(tenantCode) {
 
     const requests = collected.targets.map(function (t) {
       return {
-        url: API_ENDPOINT_V1 + apiKey, method: 'post', contentType: 'application/json',
+        url: API_ENDPOINT_V1, method: 'post', contentType: 'application/json',
+        headers: { 'x-goog-api-key': apiKey },
         payload: JSON.stringify({ contents: [{ parts: [{ text: AI_SIMPLE_PROMPT + t.content }] }] }),
         muteHttpExceptions: true
       };
@@ -662,7 +668,8 @@ function opAiFull(tenantCode) {
 
     const requests = collected.targets.map(function (t) {
       return {
-        url: API_ENDPOINT_V1_BETA + apiKey, method: 'post', contentType: 'application/json',
+        url: API_ENDPOINT_V1_BETA, method: 'post', contentType: 'application/json',
+        headers: { 'x-goog-api-key': apiKey },
         payload: JSON.stringify({ contents: [{ parts: [{ text: AI_FULL_PROMPT + t.content }] }], generationConfig: { responseMimeType: 'application/json' } }),
         muteHttpExceptions: true
       };
