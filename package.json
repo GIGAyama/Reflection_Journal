@@ -9,7 +9,15 @@
     "build": "node tools/build.mjs",
     "check": "node scripts/check-project.mjs",
     "test": "node scripts/test-qr.mjs && node --test scripts/test-drive-kit.mjs scripts/test-drive-core.mjs scripts/test-drive-api.mjs scripts/test-drive-ui.mjs",
-    "verify": "npm run build && node scripts/check-generated.mjs && npm test && npm run check"
+    "verify": "npm run build && node scripts/check-generated.mjs && npm test && npm run check",
+    "gas:install": "npm install --no-save --no-package-lock --no-audit --no-fund @google/clasp@3.3.0",
+    "gas:login": "node scripts/gas-deploy.mjs login",
+    "gas:status": "node scripts/gas-deploy.mjs status",
+    "gas:backup": "node scripts/gas-deploy.mjs backup",
+    "gas:push": "node scripts/gas-deploy.mjs push",
+    "deploy": "node scripts/gas-deploy.mjs deploy"
   },
-  "devDependencies": { "qrcode-generator": "1.4.4" }
+  "devDependencies": {
+    "qrcode-generator": "1.4.4"
+  }
 }
