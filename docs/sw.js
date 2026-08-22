@@ -22,7 +22,12 @@
  *
  * Service Worker は localStorage を一切操作しない。 */
 const CACHE_PREFIX = 'rj-shell-';
-const APP_VERSION = 'v18';  // 共通部分をDriveネイティブ・キット（./kit/）へ切り出した版
+// ⚠️ この行は手で直さない。tools/build-sw.mjs が SHELL_ASSETS の中身から書き換える。
+//    手書きだったころは上げるのが人の仕事で、2026-08-21 に12リポジトリで同時に
+//    上げ忘れる事故が起きた。上げ忘れると古いシェルのキャッシュが掃除されず、
+//    直した画面が児童の端末に届かない。
+//    （v18 まで手書き。共通部分は Drive ネイティブ・キット ./kit/ へ切り出してある）
+const APP_VERSION = 'vfd035358'; /* __APP_VERSION__ */
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
