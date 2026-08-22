@@ -22,3 +22,8 @@ dist/
 # Playwright の実行結果（失敗時のスクリーンショットなど）
 test-results/
 playwright-report/
+
+# clasp（GASのプッシュ設定。スクリプトIDが入るので置かない）
+
+# 反映前のGASの控え（CIの成果物として持ち出すので、リポジトリには置かない）
+dist/gas-before-push/
