@@ -555,15 +555,15 @@ function opTestGeminiKey(apiKey) {
     ownerEmail_();   // ポータル利用者のみ
     const key = vStr_(apiKey, 200, 'APIキー').trim();
     if (!key) throw new Error('BAD_INPUT: APIキーを入力してください');
-    const res = UrlFetchApp.fetch(API_ENDPOINT_V1, {
-      method: 'post', contentType: 'application/json',
-      headers: { 'x-goog-api-key': key },
-      payload: JSON.stringify({ contents: [{ parts: [{ text: 'テスト。OKと返して' }] }] }),
-      muteHttpExceptions: true
+    // 正本 Gemini.gs に投げる。混み合っているだけ（429）のときは正本が
+    // 再試行し、それでも駄目なら「AIが混み合っています」と返る。
+    // 以前は HTTP 番号だけを見せていたので、混雑と「キーが無効」を
+    // 先生が区別できなかった。
+    GigaGemini.callRaw({
+      apiKey: key, prompt: 'テスト。OKと返して',
+      model: GEMINI_MODEL, apiVersion: 'v1'
     });
-    const code = res.getResponseCode();
-    if (code === 200) return jsonOk_({ message: 'APIキーは有効です！' });
-    throw new Error('BAD_INPUT: エラー (HTTP ' + code + ')');
+    return jsonOk_({ message: 'APIキーは有効です！' });
   } catch (e) {
     return jsonErr_(e);
   }
@@ -574,9 +574,9 @@ function opTestGeminiKey(apiKey) {
 // ────────────────────────────────────────────────────────────────
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
-// API キーは URL クエリに入れない（アクセスログやプロキシに残る）。x-goog-api-key ヘッダで渡す。
-const API_ENDPOINT_V1      = 'https://generativelanguage.googleapis.com/v1/models/' + GEMINI_MODEL + ':generateContent';
-const API_ENDPOINT_V1_BETA = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
+// 呼び出し先の URL は正本 Gemini.gs が model と apiVersion から組み立てる。
+// API キーは正本側で x-goog-api-key ヘッダに載る（URL クエリには入れない。
+// アクセスログやプロキシに残るため）。
 
 const AI_SIMPLE_PROMPT = 'あなたは児童の小さな頑張りやユニークな視点を見つけて具体的に褒めるのが得意な、経験豊富な小学校の先生です。以下の記述を読み、児童が努力した点などを引用しつつ、自己肯定感を育む温かい賞賛のコメントを100字程度で作成してください。見出しや解説は不要です。\n\n';
 
@@ -606,16 +606,6 @@ function collectAiTargets_(sheet) {
   return { targets: targets, idx: idx };
 }
 
-// fetchAll をチャンク実行（直列比で大幅に高速。レート制限も考慮して小分けにする）
-function fetchAllInChunks_(requests, chunkSize) {
-  const responses = [];
-  for (let i = 0; i < requests.length; i += chunkSize) {
-    const chunk = UrlFetchApp.fetchAll(requests.slice(i, i + chunkSize));
-    for (let j = 0; j < chunk.length; j++) responses.push(chunk[j]);
-  }
-  return responses;
-}
-
 function requireGeminiKey_(ss) {
   const apiKey = getTenantSetting_(ss, 'GEMINI_API_KEY');
   if (!apiKey) throw new Error('BAD_INPUT: Gemini APIキーが設定されていません。設定タブから保存してください');
@@ -631,25 +621,21 @@ function opAiSimple(tenantCode) {
     const collected = collectAiTargets_(sheet);
     if (collected.targets.length === 0) return jsonOk_({ message: '対象（未返却×本文あり）のジャーナルがありません。' });
 
-    const requests = collected.targets.map(function (t) {
+    // 正本 Gemini.gs の callAll に任せる。8件ずつの小分けは同じだが、
+    // 一時エラー（429/5xx）だったものだけを小分け単位で再試行するので、
+    // 混み合う時間帯に「40人中10人だけ失敗」が起きにくい。
+    const results = GigaGemini.callAll(collected.targets.map(function (t) {
       return {
-        url: API_ENDPOINT_V1, method: 'post', contentType: 'application/json',
-        headers: { 'x-goog-api-key': apiKey },
-        payload: JSON.stringify({ contents: [{ parts: [{ text: AI_SIMPLE_PROMPT + t.content }] }] }),
-        muteHttpExceptions: true
+        apiKey: apiKey, prompt: AI_SIMPLE_PROMPT + t.content,
+        model: GEMINI_MODEL, apiVersion: 'v1'
       };
-    });
-    const responses = fetchAllInChunks_(requests, 8);
+    }));
 
     let ok = 0, ng = 0;
-    responses.forEach(function (res, i) {
-      try {
-        if (res.getResponseCode() === 200) {
-          const comment = JSON.parse(res.getContentText()).candidates[0].content.parts[0].text.trim();
-          sheet.getRange(collected.targets[i].rowNum, collected.idx.teacherComment + 1).setValue(comment);
-          ok++;
-        } else { ng++; }
-      } catch (e) { ng++; }
+    results.forEach(function (res, i) {
+      if (!res.ok) { ng++; return; }
+      sheet.getRange(collected.targets[i].rowNum, collected.idx.teacherComment + 1).setValue(res.text);
+      ok++;
     });
     return jsonOk_({ message: 'AIコメント案を作成しました。（成功: ' + ok + '件' + (ng ? '、失敗: ' + ng + '件' : '') + '）' });
   } catch (e) {
@@ -666,23 +652,22 @@ function opAiFull(tenantCode) {
     const collected = collectAiTargets_(sheet);
     if (collected.targets.length === 0) return jsonOk_({ message: '対象（未返却×本文あり）のジャーナルがありません。' });
 
-    const requests = collected.targets.map(function (t) {
+    const results = GigaGemini.callAll(collected.targets.map(function (t) {
       return {
-        url: API_ENDPOINT_V1_BETA, method: 'post', contentType: 'application/json',
-        headers: { 'x-goog-api-key': apiKey },
-        payload: JSON.stringify({ contents: [{ parts: [{ text: AI_FULL_PROMPT + t.content }] }], generationConfig: { responseMimeType: 'application/json' } }),
-        muteHttpExceptions: true
+        apiKey: apiKey, prompt: AI_FULL_PROMPT + t.content,
+        model: GEMINI_MODEL, apiVersion: 'v1beta',
+        generationConfig: { responseMimeType: 'application/json' }
       };
-    });
-    const responses = fetchAllInChunks_(requests, 8);
+    }));
 
     let successCount = 0, errorCount = 0;
-    responses.forEach(function (res, i) {
+    results.forEach(function (res, i) {
       const target = collected.targets[i];
       try {
-        if (res.getResponseCode() !== 200) { errorCount++; return; }
-        const jsonText = JSON.parse(res.getContentText()).candidates[0].content.parts[0].text;
-        const feedback = JSON.parse(jsonText);
+        if (!res.ok) { errorCount++; return; }
+        // JSON を頼んでも前置きや ```json が混ざることがある。正本の
+        // parseJsonText がそれを剥がしてから読む。
+        const feedback = GigaGemini.parseJsonText(res.text);
         if (feedback.comment) {
           sheet.getRange(target.rowNum, collected.idx.teacherComment + 1).setValue(feedback.comment);
         }
