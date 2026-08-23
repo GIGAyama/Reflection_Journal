@@ -1,9 +1,9 @@
 # clasp が Apps Script へ送るファイルを、ここで絞り込みます。
 #
 # 送るのは「GASプロジェクトの中身そのもの」だけです。リポジトリには
-# GitHub Pages に置く法務ページ（privacy.html / terms.html）や、
-# テスト・ドキュメント・node_modules も入っていますが、それらは
-# GAS で動かすものではありません。
+# GitHub Pages に置く導入案内（docs/）や、退役した Drive ネイティブ版
+# （legacy/drive-native/）、テスト・ドキュメント・node_modules も入って
+# いますが、それらは GAS で動かすものではありません。
 #
 # 書き方は .gitignore と同じで、**まず全部を除外してから、必要なものだけ
 # 戻します**。.html は GAS が読むものだけを名指しで戻しています

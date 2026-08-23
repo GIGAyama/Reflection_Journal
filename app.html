@@ -993,7 +993,7 @@ const analyzeVitals = (journals, roster) => {
     dates: past14Days
   };
 };
-const openPrintView = (journals, tenantName) => {
+const openPrintView = (journals, className) => {
   const grouped = {};
   journals.slice().sort((a, b) => (a.studentName || '').localeCompare(b.studentName || '') || new Date(a.timestamp) - new Date(b.timestamp)).forEach(j => {
     const k = j.studentName || '不明';
@@ -1012,7 +1012,7 @@ const openPrintView = (journals, tenantName) => {
         </section>`).join('');
   const w = window.open('', '_blank');
   if (!w) return false;
-  w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(tenantName || '')}</title>
+  w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(className || '')}</title>
         <style>
           body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }
           section.student { page-break-after: always; }
@@ -1028,11 +1028,8 @@ const openPrintView = (journals, tenantName) => {
 };
 const TeacherApp = ({
   data,
-  tenants,
   server,
-  refresh,
-  onSwitchTenant,
-  onCreateNew
+  refresh
 }) => {
   const {
     owner,
@@ -1041,8 +1038,7 @@ const TeacherApp = ({
     setToast,
     showToast
   } = server;
-  const code = data.tenant.tenantCode;
-  const call = (fn, ...args) => owner(fn, code, ...args);
+  const call = (fn, ...args) => owner(fn, ...args);
   const [journals, setJournals] = useState(data.journals);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeJournal, setActiveJournal] = useState(null);
@@ -1081,11 +1077,11 @@ const TeacherApp = ({
   const pendingMembers = data.pendingMembers || [];
   const inviteQr = useMemo(() => {
     try {
-      return makeQrModel(data.tenant.memberUrl);
+      return makeQrModel(data.klass.memberUrl);
     } catch (e) {
       return null;
     }
-  }, [data.tenant.memberUrl]);
+  }, [data.klass.memberUrl]);
   const filteredJournals = useMemo(() => {
     return journals.filter(j => {
       const mStudent = filterStudent === 'all' || j.email === filterStudent;
@@ -1247,7 +1243,7 @@ const TeacherApp = ({
   const handleExport = async type => {
     if (type === 'pdf') {
       if (journals.length === 0) return showToast('データがありません', 'error');
-      if (!openPrintView(journals, data.tenant.tenantName)) showToast('ポップアップがブロックされました。許可してください', 'error');
+      if (!openPrintView(journals, data.klass.className)) showToast('ポップアップがブロックされました。許可してください', 'error');
       return;
     }
     const res = await call('opExportCsv', {
@@ -1293,9 +1289,8 @@ const TeacherApp = ({
       window.prompt(`この${label}をコピーしてください`, value);
     }
   };
-  const handleCopyUrl = () => copyInviteValue(data.tenant.memberUrl, 'url', 'URL');
-  const handleCopyCode = () => copyInviteValue(data.tenant.tenantCode, 'code', 'クラスコード');
-  const handleCopyInvitation = () => copyInviteValue(`「${data.tenant.tenantName}」のふりかえりジャーナルに参加してください。\nクラスコード: ${data.tenant.tenantCode}\n児童用URL: ${data.tenant.memberUrl}`, 'invitation', '招待文');
+  const handleCopyUrl = () => copyInviteValue(data.klass.memberUrl, 'url', 'URL');
+  const handleCopyInvitation = () => copyInviteValue(`「${data.klass.className}」のふりかえりジャーナルに参加してください。\n次のURLを開いて、学校のアカウントでログインしてください。\n${data.klass.memberUrl}`, 'invitation', '招待文');
   const handleDownloadQr = () => {
     if (!inviteQr) return showToast('QRコードを生成できませんでした', 'error');
     const quietZone = 4;
@@ -1305,31 +1300,47 @@ const TeacherApp = ({
       type: 'image/svg+xml;charset=utf-8'
     }));
     const a = document.createElement('a');
-    const safeName = String(data.tenant.tenantName || 'クラス').replace(/[\\/:*?"<>|]/g, '_');
+    const safeName = String(data.klass.className || 'クラス').replace(/[\\/:*?"<>|]/g, '_');
     a.href = url;
-    a.download = `ふりかえりジャーナル_${safeName}_${data.tenant.tenantCode}_QR.svg`;
+    a.download = `ふりかえりジャーナル_${safeName}_QR.svg`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     showToast('QR画像を保存しました');
   };
-  const handleRegenerateCode = async () => {
-    setConfirmConfig({
-      isOpen: false
-    });
-    const res = await call('opRegenerateCode');
-    if (res && res.success) {
-      showToast('クラスコードを再発行しました。旧URLは使えなくなります');
-      refresh();
-    } else showToast(failMsg(res, '再発行できませんでした'), 'error');
-  };
-  const handleJoinPolicy = async (joinOpen, requireApproval) => {
-    const res = await call('opUpdateJoinPolicy', joinOpen, requireApproval);
+  const handleJoinPolicy = async (joinOpen, autoApprove) => {
+    const res = await call('opUpdateJoinPolicy', joinOpen, autoApprove);
     if (res && res.success) {
       showToast('設定を変更しました');
       refresh();
     } else showToast(failMsg(res, '変更できませんでした'), 'error');
+  };
+  const [sheetReport, setSheetReport] = useState(null);
+  const sheetIssues = sheetReport ? sheetReport.left : data.sheetIssues || [];
+  const handleInspectSheets = async () => {
+    const res = await call('opInspectSheets');
+    if (res && res.success) {
+      setSheetReport({
+        fixed: [],
+        left: res.issues || []
+      });
+      showToast(res.issues.length ? `${res.issues.length} 件見つかりました` : 'シートの作りは想定どおりです');
+    } else showToast(failMsg(res, '点検できませんでした'), 'error');
+  };
+  const handleRepairSheets = async () => {
+    setConfirmConfig({
+      isOpen: false
+    });
+    const res = await call('opRepairSheets');
+    if (res && res.success) {
+      setSheetReport({
+        fixed: res.fixed || [],
+        left: res.left || []
+      });
+      showToast(res.message);
+      refresh();
+    } else showToast(failMsg(res, '直せませんでした'), 'error');
   };
   const pct = useMemo(() => {
     if (!data.classRoster.length) return 0;
@@ -1367,22 +1378,13 @@ const TeacherApp = ({
     className: "w-5 h-5"
   }), " \u30AF\u30E9\u30B9\u8A2D\u5B9A", pendingMembers.length > 0 && React.createElement("span", {
     className: "bg-rose-600 text-white text-xs font-black px-2 py-0.5 rounded-full"
-  }, pendingMembers.length))), React.createElement("div", {
-    className: "flex items-center gap-2 self-start lg:self-auto"
-  }, React.createElement("select", {
-    value: code,
-    onChange: e => onSwitchTenant(e.target.value),
-    className: "min-h-[44px] bg-white border border-gray-200 text-sm font-bold text-gray-700 outline-none rounded-xl px-3 py-2.5 cursor-pointer shadow-sm max-w-[220px]"
-  }, tenants.map(t => React.createElement("option", {
-    key: t.tenantCode,
-    value: t.tenantCode
-  }, t.tenantName))), React.createElement("button", {
-    onClick: onCreateNew,
-    className: "min-h-[44px] bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-700 text-gray-600 rounded-xl px-3 py-2.5 shadow-sm font-bold text-sm flex items-center gap-1 transition-colors"
+  }, pendingMembers.length))), sheetIssues.length > 0 && React.createElement("button", {
+    onClick: () => setActiveTab('admin'),
+    className: "min-h-[44px] self-start lg:self-auto bg-amber-50 border border-amber-300 text-amber-900 rounded-xl px-4 py-2.5 shadow-sm font-bold text-sm flex items-center gap-2 transition-colors hover:bg-amber-100"
   }, React.createElement(Icon, {
-    path: Icons.Plus,
+    path: Icons.Settings,
     className: "w-4 h-4"
-  }), " \u30AF\u30E9\u30B9\u8FFD\u52A0"))), activeTab === 'dashboard' && React.createElement("div", {
+  }), " \u30B7\u30FC\u30C8\u306E\u4F5C\u308A\u306B ", sheetIssues.length, " \u4EF6\u306E\u6C17\u306B\u306A\u308B\u3068\u3053\u308D\u304C\u3042\u308A\u307E\u3059")), activeTab === 'dashboard' && React.createElement("div", {
     className: "animate-fade-in flex flex-col gap-6 h-full"
   }, React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-3 gap-6"
@@ -1703,6 +1705,68 @@ const TeacherApp = ({
   })))))))))))), activeTab === 'admin' && React.createElement("div", {
     className: "flex flex-col gap-6 animate-fade-in h-full"
   }, React.createElement("div", {
+    className: `p-8 rounded-[2rem] shadow-premium border ${sheetIssues.length ? 'bg-amber-50 border-amber-300' : 'bg-white border-gray-100'}`
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 flex items-center gap-2 text-lg mb-2"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-amber-100 text-amber-700 rounded-lg"
+  }, React.createElement(Icon, {
+    path: Icons.Settings,
+    className: "w-5 h-5"
+  })), " \u30B7\u30FC\u30C8\u306E\u4F5C\u308A"), React.createElement("p", {
+    className: "text-sm text-gray-600 mb-4 leading-relaxed"
+  }, "\u8A18\u9332\u306F\u3001\u3053\u306E\u30A2\u30D7\u30EA\u304C\u675F\u306D\u3089\u308C\u3066\u3044\u308B\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u306E\u4E2D\u306B\u3042\u308A\u307E\u3059\u3002 \u5217\u306F", React.createElement("strong", null, "\u898B\u51FA\u3057\u306E\u540D\u524D"), "\u3067\u63A2\u3057\u3066\u3044\u308B\u306E\u3067\u3001\u4E26\u3079\u66FF\u3048\u3066\u3082\u52D5\u304D\u307E\u3059\u3002 \u898B\u51FA\u3057\u306E\u540D\u524D\u3092\u5909\u3048\u305F\u308A\u5217\u3092\u6D88\u3057\u305F\u308A\u3059\u308B\u3068\u3001\u305D\u3053\u306E\u8AAD\u307F\u66F8\u304D\u3060\u3051\u304C\u6B62\u307E\u308A\u307E\u3059\u3002"), sheetReport && sheetReport.fixed.length > 0 && React.createElement("ul", {
+    className: "mb-4 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-2xl p-4 list-disc pl-8 font-medium"
+  }, sheetReport.fixed.map((t, i) => React.createElement("li", {
+    key: i
+  }, t))), sheetIssues.length === 0 ? React.createElement("p", {
+    className: "text-sm font-bold text-emerald-700 mb-4"
+  }, "\u3044\u307E\u306E\u3068\u3053\u308D\u3001\u60F3\u5B9A\u3069\u304A\u308A\u3067\u3059\u3002") : React.createElement("ul", {
+    className: "mb-4 flex flex-col gap-3"
+  }, sheetIssues.map((f, i) => React.createElement("li", {
+    key: i,
+    className: "bg-white border border-amber-200 rounded-2xl p-4"
+  }, React.createElement("p", {
+    className: "font-black text-gray-800 text-sm"
+  }, "\u300C", f.sheet, "\u300D", f.kind), React.createElement("p", {
+    className: "text-sm text-gray-600 mt-1"
+  }, f.detail), React.createElement("p", {
+    className: "text-sm text-gray-500 mt-1"
+  }, "\u2192 ", f.action, React.createElement("span", {
+    className: "ml-2 text-xs font-bold"
+  }, f.fixable ? '（自動で直せます）' : '（自動では直しません）'))))), React.createElement("div", {
+    className: "flex flex-wrap gap-2"
+  }, React.createElement("button", {
+    onClick: handleInspectSheets,
+    className: "min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Refresh,
+    className: "w-4 h-4"
+  }), " \u3044\u307E\u70B9\u691C\u3059\u308B"), React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      title: "シートを直す",
+      text: "自動で直せるところだけを直します。\n既にある列は動かさず、名前も変えません。消すものはありません。",
+      confirmText: "直す",
+      onConfirm: handleRepairSheets,
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    disabled: !sheetIssues.some(f => f.fixable),
+    className: "min-h-[44px] text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+  }, React.createElement(Icon, {
+    path: Icons.Check,
+    className: "w-4 h-4"
+  }), " \u76F4\u305B\u308B\u7BC4\u56F2\u3067\u76F4\u3059"), React.createElement("a", {
+    href: data.spreadsheetUrl,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Link,
+    className: "w-4 h-4"
+  }), " \u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u958B\u304F"))), React.createElement("div", {
     className: "bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100"
   }, React.createElement("div", {
     className: "flex flex-col md:flex-row gap-6 items-start"
@@ -1717,21 +1781,7 @@ const TeacherApp = ({
     className: "w-5 h-5"
   })), " \u5150\u7AE5\u3092\u30AF\u30E9\u30B9\u306B\u62DB\u5F85"), React.createElement("p", {
     className: "text-sm text-gray-500 mb-4 leading-relaxed"
-  }, "\u30AF\u30E9\u30B9\u30B3\u30FC\u30C9\u3001\u5C02\u7528URL\u3001QR\u30B3\u30FC\u30C9\u306E\u3069\u308C\u3067\u3082\u62DB\u5F85\u3067\u304D\u307E\u3059\u3002\u5150\u7AE5\u306FGoogle\u3067\u30B5\u30A4\u30F3\u30A4\u30F3\u3059\u308B\u3060\u3051\u3067\u53C2\u52A0\u3067\u304D\u3001\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u306E\u6A29\u9650\u306F\u4ED8\u4E0E\u3055\u308C\u307E\u305B\u3093\u3002"), React.createElement("div", {
-    className: "bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4 flex flex-col sm:flex-row sm:items-center gap-3"
-  }, React.createElement("div", {
-    className: "flex-1"
-  }, React.createElement("p", {
-    className: "text-xs font-bold text-orange-700 mb-1"
-  }, "\u30AF\u30E9\u30B9\u30B3\u30FC\u30C9"), React.createElement("p", {
-    className: "font-mono text-2xl font-black tracking-[0.2em] text-gray-900"
-  }, data.tenant.tenantCode)), React.createElement("button", {
-    onClick: handleCopyCode,
-    className: `min-h-[44px] shrink-0 font-bold px-4 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copiedItem === 'code' ? 'bg-emerald-600 text-white' : 'bg-white hover:bg-orange-100 text-orange-800 border border-orange-200'}`
-  }, React.createElement(Icon, {
-    path: copiedItem === 'code' ? Icons.Check : Icons.Copy,
-    className: "w-4 h-4"
-  }), " ", copiedItem === 'code' ? 'コピーしました' : 'コードをコピー')), React.createElement("div", {
+  }, "\u914D\u308B\u3082\u306E\u306F\u3001\u3053\u306E\u753B\u9762\u306E URL 1 \u672C\u3060\u3051\u3067\u3059\u3002\u5150\u7AE5\u306F\u5B66\u6821\u306E Google \u30A2\u30AB\u30A6\u30F3\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u958B\u304D\u307E\u3059\u3002\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u306E\u6A29\u9650\u306F\u6E21\u308A\u307E\u305B\u3093\u3002"), React.createElement("div", {
     className: "flex flex-col sm:flex-row gap-2 mb-4"
   }, React.createElement("label", {
     className: "flex-1"
@@ -1740,7 +1790,7 @@ const TeacherApp = ({
   }, "\u5150\u7AE5\u7528URL"), React.createElement("input", {
     type: "text",
     readOnly: true,
-    value: data.tenant.memberUrl,
+    value: data.klass.memberUrl,
     onFocus: e => e.target.select(),
     className: "w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none focus:ring-2 focus:ring-blue-500"
   })), React.createElement("button", {
@@ -1758,7 +1808,7 @@ const TeacherApp = ({
     path: copiedItem === 'invitation' ? Icons.Check : Icons.Copy,
     className: "w-4 h-4"
   }), " ", copiedItem === 'invitation' ? 'コピーしました' : '招待文をコピー'), React.createElement("a", {
-    href: data.tenant.memberUrl,
+    href: data.klass.memberUrl,
     target: "_blank",
     rel: "noopener noreferrer",
     className: "min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
@@ -1771,32 +1821,17 @@ const TeacherApp = ({
     className: "flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
   }, React.createElement("input", {
     type: "checkbox",
-    checked: !!data.tenant.joinOpen,
-    onChange: e => handleJoinPolicy(e.target.checked, data.tenant.requireApproval),
+    checked: !!data.klass.joinOpen,
+    onChange: e => handleJoinPolicy(e.target.checked, data.klass.autoApprove),
     className: "accent-blue-600 w-5 h-5"
   }), " \u53C2\u52A0\u3092\u53D7\u3051\u4ED8\u3051\u308B"), React.createElement("label", {
     className: "flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
   }, React.createElement("input", {
     type: "checkbox",
-    checked: !!data.tenant.requireApproval,
-    onChange: e => handleJoinPolicy(data.tenant.joinOpen, e.target.checked),
+    checked: !data.klass.autoApprove,
+    onChange: e => handleJoinPolicy(data.klass.joinOpen, !e.target.checked),
     className: "accent-blue-600 w-5 h-5"
-  }), " \u53C2\u52A0\u306F\u5148\u751F\u306E\u627F\u8A8D\u5236\u306B\u3059\u308B"), React.createElement("button", {
-    onClick: () => setConfirmConfig({
-      isOpen: true,
-      title: "コードの再発行",
-      text: "クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？",
-      confirmText: "再発行する",
-      onConfirm: handleRegenerateCode,
-      onCancel: () => setConfirmConfig({
-        isOpen: false
-      })
-    }),
-    className: "min-h-[44px] text-sm font-bold text-gray-600 hover:text-red-600 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
-  }, React.createElement(Icon, {
-    path: Icons.Refresh,
-    className: "w-4 h-4"
-  }), " \u30B3\u30FC\u30C9\u518D\u767A\u884C"))), React.createElement("div", {
+  }), " \u53C2\u52A0\u306F\u5148\u751F\u306E\u627F\u8A8D\u5236\u306B\u3059\u308B"))), React.createElement("div", {
     className: "shrink-0 mx-auto md:mx-0 text-center flex flex-col items-center"
   }, React.createElement(QrCode, {
     model: inviteQr
@@ -2038,7 +2073,7 @@ const TeacherApp = ({
     });
   })()), React.createElement(LazyImage, {
     imageId: activeJournal.imageId,
-    fetcher: id => window.callOwnerApi('opGetImage', code, id),
+    fetcher: id => window.callOwnerApi('opGetImage', id),
     alt: `${activeJournal.studentName} さんがのせた画像`,
     className: "mt-4 rounded-xl border max-w-xs shadow-sm"
   })), React.createElement("div", {
@@ -2106,156 +2141,16 @@ const TeacherApp = ({
     onClose: () => setToast(null)
   }));
 };
-const CreateClassScreen = ({
-  server,
-  onCreated,
-  onCancel,
-  ownerEmail
-}) => {
-  const {
-    owner,
-    isLoading,
-    toast,
-    setToast,
-    showToast
-  } = server;
-  const [className, setClassName] = useState("");
-  const [adoptUrl, setAdoptUrl] = useState("");
-  const [done, setDone] = useState(null);
-  const handleCreate = async () => {
-    if (!className.trim()) return showToast('クラス名を入力してください', 'error');
-    const res = await owner('opCreateTenant', className.trim());
-    if (res && res.success) {
-      setDone(res);
-      setTimeout(() => onCreated(res.tenantCode), 2500);
-    } else showToast(failMsg(res, 'クラスを作成できませんでした'), 'error');
-  };
-  const handleAdopt = async () => {
-    if (!className.trim()) return showToast('クラス名を入力してください', 'error');
-    if (!adoptUrl.trim()) return showToast('スプレッドシートのURLを入力してください', 'error');
-    const res = await owner('opAdoptTenant', adoptUrl.trim(), className.trim());
-    if (res && res.success) {
-      setDone(res);
-      setTimeout(() => onCreated(res.tenantCode), 2500);
-    } else showToast(failMsg(res, '取り込みできませんでした'), 'error');
-  };
-  return React.createElement("div", {
-    className: "h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto"
-  }, isLoading && React.createElement("div", {
-    className: "fixed inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"
-  }, React.createElement("div", {
-    className: "w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"
-  })), React.createElement("div", {
-    className: "bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8"
-  }, done ? React.createElement("div", {
-    className: "text-center py-4"
-  }, React.createElement("div", {
-    className: "w-16 h-16 mx-auto rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4"
-  }, React.createElement(Icon, {
-    path: Icons.Check,
-    className: "w-8 h-8"
-  })), React.createElement("p", {
-    className: "font-black text-gray-700 text-lg mb-2"
-  }, "\u30AF\u30E9\u30B9\u300C", done.tenantName, "\u300D\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F\uFF01"), React.createElement("p", {
-    className: "text-sm text-gray-500 font-medium mb-4"
-  }, "\u30AF\u30E9\u30B9\u30B3\u30FC\u30C9: ", React.createElement("span", {
-    className: "font-mono font-black tracking-widest text-orange-600"
-  }, done.tenantCode)), React.createElement("p", {
-    className: "text-xs text-gray-500"
-  }, "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u3044\u307E\u3059\u2026")) : React.createElement(React.Fragment, null, React.createElement("div", {
-    className: "text-center mb-8"
-  }, React.createElement("div", {
-    className: "w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"
-  }, React.createElement(Icon, {
-    path: Icons.Book,
-    className: "w-10 h-10"
-  })), React.createElement("h1", {
-    className: "text-3xl font-black text-gray-800 mb-2"
-  }, "\u30AF\u30E9\u30B9\u3092\u3064\u304F\u308D\u3046"), React.createElement("p", {
-    className: "text-gray-500 font-medium leading-relaxed"
-  }, "\u30AF\u30E9\u30B9\u5C02\u7528\u306E\u30C7\u30FC\u30BF\u30D9\u30FC\u30B9\u304C", React.createElement("br", null), "\u3042\u306A\u305F\u306E Google Drive \u306B\u81EA\u52D5\u4F5C\u6210\u3055\u308C\u307E\u3059\u3002"), ownerEmail && React.createElement("p", {
-    className: "mt-3 text-xs font-bold text-gray-500 bg-gray-50 inline-block px-4 py-1.5 rounded-full"
-  }, "\u30ED\u30B0\u30A4\u30F3\u4E2D: ", ownerEmail)), React.createElement("div", {
-    className: "border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6 mb-5"
-  }, React.createElement("h2", {
-    className: "font-black text-gray-800 mb-1 flex items-center gap-2"
-  }, React.createElement(Icon, {
-    path: Icons.Sparkles,
-    className: "w-5 h-5 text-orange-500"
-  }), " \u65B0\u3057\u3044\u30AF\u30E9\u30B9\u3092\u4F5C\u6210"), React.createElement("p", {
-    className: "text-sm text-gray-500 mb-4 leading-relaxed"
-  }, "\u4F5C\u6210\u3059\u308B\u3068\u300C\u5150\u7AE5\u7528URL\u300D\u304C\u767A\u884C\u3055\u308C\u307E\u3059\u3002URL\u3092\u914D\u308B\u3060\u3051\u3067\u5150\u7AE5\u304C\u53C2\u52A0\u3067\u304D\u307E\u3059\u3002"), React.createElement("input", {
-    type: "text",
-    value: className,
-    onChange: e => setClassName(e.target.value),
-    placeholder: "\u30AF\u30E9\u30B9\u540D\uFF08\u4F8B: 6\u5E741\u7D44\uFF09",
-    className: "w-full border-2 border-orange-100 rounded-2xl p-3.5 text-sm outline-none focus:border-orange-400 bg-white font-bold mb-3 transition-colors"
-  }), React.createElement("button", {
-    onClick: handleCreate,
-    disabled: isLoading,
-    className: "w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50"
-  }, "\uD83C\uDF92 \u30AF\u30E9\u30B9\u3092\u4F5C\u6210\u3059\u308B")), React.createElement("details", {
-    className: "border-2 border-blue-100 bg-blue-50/40 rounded-3xl p-6"
-  }, React.createElement("summary", {
-    className: "font-black text-gray-800 cursor-pointer flex items-center gap-2 list-none"
-  }, React.createElement(Icon, {
-    path: Icons.Link,
-    className: "w-5 h-5 text-blue-500"
-  }), " \u4EE5\u524D\u306E\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u53D6\u308A\u8FBC\u3080\uFF08\u5F15\u3063\u8D8A\u3057\uFF09"), React.createElement("p", {
-    className: "text-sm text-gray-500 my-3 leading-relaxed"
-  }, "\u65E7\u30D0\u30FC\u30B8\u30E7\u30F3\u3067\u4F7F\u3063\u3066\u3044\u305FDB\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\uFF08\u3042\u306A\u305F\u304C\u7DE8\u96C6\u6A29\u9650\u3092\u6301\u3064\u3082\u306E\uFF09\u3092\u30AF\u30E9\u30B9\u3068\u3057\u3066\u767B\u9332\u3067\u304D\u307E\u3059\u3002"), React.createElement("input", {
-    type: "text",
-    value: adoptUrl,
-    onChange: e => setAdoptUrl(e.target.value),
-    placeholder: "https://docs.google.com/spreadsheets/d/...",
-    className: "w-full border-2 border-blue-100 rounded-2xl p-3.5 text-sm outline-none focus:border-blue-400 bg-white font-mono mb-3 transition-colors"
-  }), React.createElement("button", {
-    onClick: handleAdopt,
-    disabled: isLoading,
-    className: "w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50"
-  }, "\uD83D\uDD17 \u3053\u306E\u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u53D6\u308A\u8FBC\u3080")), onCancel && React.createElement("button", {
-    onClick: onCancel,
-    className: "w-full mt-5 py-3 rounded-2xl font-bold bg-gray-50 text-gray-500 hover:bg-gray-100 transition-colors"
-  }, "\u3082\u3069\u308B"))), toast && React.createElement(Toast, {
-    message: toast.message,
-    type: toast.type,
-    onClose: () => setToast(null)
-  }));
-};
 const OwnerRoot = () => {
   const server = useServer();
   const [phase, setPhase] = useState('loading');
-  const [tenants, setTenants] = useState([]);
-  const [ownerEmail, setOwnerEmail] = useState('');
-  const [selectedCode, setSelectedCode] = useState(null);
-  const [tenantData, setTenantData] = useState(null);
+  const [classData, setClassData] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const loadTenants = async preferCode => {
-    const res = await window.callOwnerApi('opListTenants').catch(e => ({
-      success: false,
-      error: e.message
-    }));
-    if (!res || !res.success) {
-      setErrorMsg(res && res.error || 'ポータルに接続できませんでした');
-      setPhase('error');
-      return;
-    }
-    setOwnerEmail(res.ownerEmail || '');
-    setTenants(res.tenants || []);
-    if (!res.tenants || res.tenants.length === 0) {
-      setPhase('create');
-      return;
-    }
-    let code = preferCode || localStorage.getItem('rj_selectedClass');
-    if (!res.tenants.some(t => t.tenantCode === code)) code = res.tenants[0].tenantCode;
-    if (code === selectedCode) loadTenantData(code);else setSelectedCode(code);
-  };
-  const loadTenantData = async code => {
+  const load = async () => {
     setPhase('loading');
-    const res = await server.owner('opGetTenantData', code);
+    const res = await server.owner('opGetClassData');
     if (res && res.success) {
-      setTenantData(res);
-      localStorage.setItem('rj_selectedClass', code);
+      setClassData(res);
       setPhase('app');
     } else {
       setErrorMsg(failMsg(res, 'クラスのデータを読み込めませんでした'));
@@ -2263,11 +2158,8 @@ const OwnerRoot = () => {
     }
   };
   useEffect(() => {
-    loadTenants();
+    load();
   }, []);
-  useEffect(() => {
-    if (selectedCode) loadTenantData(selectedCode);
-  }, [selectedCode]);
   if (phase === 'loading') return React.createElement(FullScreenSpinner, {
     color: "border-blue-500"
   });
@@ -2278,20 +2170,9 @@ const OwnerRoot = () => {
   }, "\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F"), React.createElement("p", {
     className: "text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap"
   }, errorMsg), React.createElement("button", {
-    onClick: () => {
-      setPhase('loading');
-      loadTenants();
-    },
+    onClick: load,
     className: "w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all"
   }, "\u3082\u3046\u4E00\u5EA6\u8AAD\u307F\u8FBC\u3080"));
-  if (phase === 'create') return React.createElement(CreateClassScreen, {
-    server: server,
-    ownerEmail: ownerEmail,
-    onCreated: code => {
-      loadTenants(code);
-    },
-    onCancel: tenants.length > 0 ? () => setSelectedCode(tenants[0].tenantCode) : null
-  });
   return React.createElement("div", {
     className: "h-screen w-full flex flex-col bg-gray-50 text-gray-800 font-sans selection:bg-orange-200"
   }, React.createElement("header", {
@@ -2310,24 +2191,21 @@ const OwnerRoot = () => {
     className: "hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"
   }), " ", React.createElement("span", {
     className: "text-gray-600 text-base md:text-xl hidden sm:inline"
-  }, tenantData.tenant.tenantName))), React.createElement("div", {
+  }, classData.klass.className))), React.createElement("div", {
     className: "flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"
   }, React.createElement(Icon, {
     path: Icons.User,
     className: "w-4 h-4 text-gray-500 shrink-0"
   }), " ", React.createElement("span", {
     className: "truncate"
-  }, ownerEmail, " \u5148\u751F"))), React.createElement("main", {
+  }, classData.klass.ownerEmail, " \u5148\u751F"))), React.createElement("main", {
     className: "flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"
   }, React.createElement("div", {
     className: "max-w-[1400px] mx-auto h-full"
   }, React.createElement(TeacherApp, {
-    data: tenantData,
-    tenants: tenants,
+    data: classData,
     server: server,
-    refresh: () => loadTenantData(selectedCode),
-    onSwitchTenant: code => setSelectedCode(code),
-    onCreateNew: () => setPhase('create')
+    refresh: load
   }))), React.createElement("footer", {
     className: "flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm"
   }, React.createElement("span", null, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
@@ -2354,7 +2232,7 @@ const MemberRoot = () => {
         user: res.me,
         todayTheme: res.todayTheme,
         journals: res.journals,
-        tenantName: res.tenantName
+        className: res.className
       });
       setPhase('app');
       return;
@@ -2411,7 +2289,7 @@ const MemberRoot = () => {
     icon: "\uD83C\uDF92"
   }, React.createElement("h1", {
     className: "text-2xl font-black text-gray-800 mb-2"
-  }, statusInfo.tenantName || 'クラス', " \u306B", React.createElement("ruby", null, "\u53C2\u52A0", React.createElement("rp", null, "("), React.createElement("rt", {
+  }, statusInfo.className || 'クラス', " \u306B", React.createElement("ruby", null, "\u53C2\u52A0", React.createElement("rp", null, "("), React.createElement("rt", {
     className: "text-[0.5em]"
   }, "\u3055\u3093\u304B"), React.createElement("rp", null, ")")), "\u3059\u308B"), React.createElement("p", {
     className: "text-sm text-gray-500 font-medium leading-relaxed mb-6"
@@ -2481,7 +2359,7 @@ const MemberRoot = () => {
     className: "hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"
   }), " ", React.createElement("span", {
     className: "text-gray-500 text-sm md:text-lg hidden sm:inline"
-  }, data.tenantName))), React.createElement("div", {
+  }, data.className))), React.createElement("div", {
     className: "flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"
   }, React.createElement(Icon, {
     path: Icons.User,
@@ -2506,10 +2384,33 @@ const MemberRoot = () => {
   }, "GIGA\u5C71"))));
 };
 const App = () => {
-  useEffect(() => {
-    if (window.notifyShellReady) window.notifyShellReady();
-  }, []);
-  return window.BOOT.mode === 'member' ? React.createElement(MemberRoot, null) : React.createElement(OwnerRoot, null);
+  const boot = window.BOOT || {};
+  if (boot.bootError) return React.createElement(CenterCard, {
+    icon: "\u26A0\uFE0F"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, "\u307E\u3060", React.createElement("ruby", null, "\u6E96\u5099", React.createElement("rp", null, "("), React.createElement("rt", null, "\u3058\u3085\u3093\u3073"), React.createElement("rp", null, ")")), "\u304C\u3067\u304D\u3066\u3044\u307E\u305B\u3093"), React.createElement("p", {
+    className: "text-sm text-gray-600 font-medium leading-relaxed whitespace-pre-wrap"
+  }, boot.bootError));
+  if (!boot.signedIn) return React.createElement(CenterCard, {
+    icon: "\uD83D\uDD11"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, "\u5B66\u6821\u306E", React.createElement("ruby", null, "Google", React.createElement("rp", null, "("), React.createElement("rt", null, "\u3050\u30FC\u3050\u308B"), React.createElement("rp", null, ")")), "\u30A2\u30AB\u30A6\u30F3\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u306D"), React.createElement("p", {
+    className: "text-sm text-gray-600 font-medium leading-relaxed mb-4"
+  }, "\u3044\u307E\u3001\u3060\u308C\u304C\u4F7F\u3063\u3066\u3044\u308B\u304B\u3092 \u305F\u3057\u304B\u3081\u3089\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002 \u5B66\u6821\u306E\u30A2\u30AB\u30A6\u30F3\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u304B\u3089\u3001\u3082\u3046\u3044\u3061\u3069 \u3053\u306EURL\u3092\u3072\u3089\u3044\u3066\u304F\u3060\u3055\u3044\u3002"), React.createElement("p", {
+    className: "text-xs text-gray-500 leading-relaxed"
+  }, "\u5148\u751F\u3078: \u30C7\u30D7\u30ED\u30A4\u306E\u300C\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u308B\u30E6\u30FC\u30B6\u30FC\u300D\u3092\u300C\u540C\u3058\u7D44\u7E54\u5185\u306E\u5168\u54E1\u300D\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002 \u300C\u5168\u54E1\uFF08\u533F\u540D\u30E6\u30FC\u30B6\u30FC\u3092\u542B\u3080\uFF09\u300D\u3067\u306F\u3001\u8AB0\u304C\u66F8\u3044\u305F\u304B\u3092\u78BA\u304B\u3081\u3089\u308C\u307E\u305B\u3093\u3002"));
+  if (!boot.setupDone) return React.createElement(CenterCard, {
+    icon: "\u23F3"
+  }, React.createElement("h1", {
+    className: "text-2xl font-black text-gray-800 mb-3"
+  }, "\u307E\u3060", React.createElement("ruby", null, "\u6E96\u5099\u4E2D", React.createElement("rp", null, "("), React.createElement("rt", null, "\u3058\u3085\u3093\u3073\u3061\u3085\u3046"), React.createElement("rp", null, ")")), "\u3067\u3059"), React.createElement("p", {
+    className: "text-sm text-gray-600 font-medium leading-relaxed mb-4"
+  }, "\u5148\u751F\u306E \u3058\u3085\u3093\u3073\u304C \u304A\u308F\u308B\u307E\u3067 \u307E\u3063\u3066\u306D\u3002"), React.createElement("p", {
+    className: "text-xs text-gray-500 leading-relaxed"
+  }, "\u5148\u751F\u3078: \u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u958B\u304D\u3001\u30E1\u30CB\u30E5\u30FC\u300C\u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB\u300D\uFF1E\u300C\u306F\u3058\u3081\u306E\u8A2D\u5B9A\u300D\u3092 1 \u56DE\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002"));
+  return boot.mode === 'member' ? React.createElement(MemberRoot, null) : React.createElement(OwnerRoot, null);
 };
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(App, null));

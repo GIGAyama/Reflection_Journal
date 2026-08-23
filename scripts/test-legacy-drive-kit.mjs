@@ -22,17 +22,17 @@ import {
   ownerEmailOf,
   tokenExpiryFrom,
   validateSharedRecord
-} from '../docs/kit/index.js';
+} from '../legacy/drive-native/kit/index.js';
 import {
   createInviteKey, createdWithinInvite, decodeInvite, encodeSignedInvite,
   inviteKeyUsable, inviteTokenFromUrl, inviteUrl, matchesIssuedKey
-} from '../docs/kit/invite.js';
-import { KitDriveClient } from '../docs/kit/drive-client.js';
+} from '../legacy/drive-native/kit/invite.js';
+import { KitDriveClient } from '../legacy/drive-native/kit/drive-client.js';
 import {
   RJ, classAppProperties, computeClassId, decodeInvite as decodeAppInvite,
   encodeSignedInvite as signAppInvite, normalizeClassCode, studentKey
-} from '../docs/drive-core.js';
-import { DriveClient } from '../docs/drive-api.js';
+} from '../legacy/drive-native/drive-core.js';
+import { DriveClient } from '../legacy/drive-native/drive-api.js';
 
 // 横展開先の例。用語・接頭辞・版だけを差し替える。
 const drill = defineAppNamespace({

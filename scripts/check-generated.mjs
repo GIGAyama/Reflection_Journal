@@ -1,5 +1,10 @@
 /**
- * 生成物（docs/qrcode.js）がnpmに固定した原本と食い違っていないかを見る。
+ * 生成物が原本と食い違っていないかを見る。
+ *
+ *   app.html    ← src/app.jsx
+ *   css.html    ← tools/extra.css / tailwind.config.js
+ *   vendor.html ← node_modules の react / react-dom / canvas-confetti
+ *   qr.html     ← node_modules の qrcode-generator
  *
  * 原本を直したのにビルドを走らせずに push すると、GAS には古い画面が出たままになる。
  * その食い違いは、動かしてみるまで誰にも見えない。CI で必ず止める。
@@ -8,7 +13,7 @@
  */
 import { execSync } from 'node:child_process';
 
-const GENERATED = ['docs/qrcode.js'];
+const GENERATED = ['app.html', 'css.html', 'vendor.html', 'qr.html'];
 
 let diff = '';
 try {

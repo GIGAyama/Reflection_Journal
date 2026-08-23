@@ -1,30 +1,20 @@
 /**
- * Tenant.gs — テナント（クラス）解決とアクセス制御
+ * Access.gs — 誰が何をしてよいかの判断
  *
  * 認可の鉄則: すべての API はサーバー側で
- *   ① トークン検証（B）/ Session（A） → ② テナント解決 → ③ 名簿照合（状態=active）
- *   → ④ 役割チェック → ⑤ 行所有者チェック
- * の順にガードする。フロントの出し分けは防御とみなさない。
+ *   ① 本人確認（Session.getActiveUser）→ ② 名簿照合（状態 = active）
+ *   → ③ 役割チェック → ④ 行の持ち主チェック
+ * の順にガードする。画面側の出し分けは防御とみなさない。
  *
- * スプレッドシート ID は児童側（URL・API レスポンス・HTML）に一切露出しない。
- * 児童向けレスポンスでは email も露出せず、匿名 ID（uid = sha256(email) 先頭12桁）に置換する。
+ * `google.script.run` は末尾 `_` の無いトップレベル関数を誰でも直接呼べる。
+ * 児童の端末のコンソールから opSaveFeedback('...') を打てば、その関数に認可が
+ * 無いかぎり通ってしまう。**新しく公開関数を作ったら、必ずここのガードを通すこと。**
+ *
+ * 児童向けのレスポンスでは、ほかの児童のメールアドレスを一切出さない。
+ * 匿名 ID（uid = sha256(email) の先頭 12 桁）に置き換える。
  */
 
-/** テナント解決: レジストリ → openById。開けない場合は復旧手順つきのエラー */
-function openTenantSs_(code) {
-  const rec = requireTenantRecord_(code);
-  try {
-    return SpreadsheetApp.openById(rec.spreadsheetId);
-  } catch (e) {
-    // 先生が共有を外した / シートを削除した場合にここへ来る
-    throw new Error('TENANT_UNAVAILABLE: データベースにアクセスできません。先生に確認してください。' +
-      '（先生へ: スプレッドシートが削除されていないか、共有設定で ' +
-      getSetting_(PROP_KEYS.APP_ACCOUNT, false) + ' が「編集者」のままかを確認し、' +
-      '外れている場合は共有し直してください）');
-  }
-}
-
-/** 児童側に email を出さないための匿名 ID */
+/** 児童側にメールアドレスを出さないための匿名 ID */
 function uidOf_(email) {
   return 'u' + sha256Hex_(String(email).toLowerCase()).slice(0, 12);
 }
@@ -35,7 +25,7 @@ function uidOf_(email) {
 // ────────────────────────────────────────────────────────────────
 
 function getMembers_(ss) {
-  return getRosterRows_(ss);   // Db.gs 側で実装
+  return getRosterRows_(ss);   // Db.gs 側で実装（列は見出しの名前で引く）
 }
 
 function getMemberRow_(ss, email) {
@@ -59,22 +49,38 @@ function assertActiveMember_(ss, email) {
 }
 
 /**
- * 児童 API 共通ガード（多段ガードの ①〜③）。
- * 戻り値 { user, rec, ss, code, member } を各 API が使う。
- * ロック外で行うこと（トークン検証・シート読み取りはロック不要）。
+ * 児童 API 共通ガード（①②）。戻り値 { email, ss, member } を各 API が使う。
+ * ロックの外で行うこと（本人確認とシート読み取りにロックは要らない）。
  */
-function guardMember_(idToken, tenantCode) {
-  const user = verifyIdToken_(idToken);                // ① トークン検証
-  const code = normalizeTenantCode_(tenantCode);
-  const rec = requireTenantRecord_(code);              // ② テナント解決
-  const ss = openTenantSs_(code);
-  const member = assertActiveMember_(ss, user.email);  // ③ 名簿照合
-  return { user: user, rec: rec, ss: ss, code: code, member: member };
+function guardMember_() {
+  const email = requireEmail_();               // ① 本人確認
+  const ss = getDb_();
+  const member = assertActiveMember_(ss, email); // ② 名簿照合
+  return { email: email, ss: ss, member: member };
 }
 
 /**
- * ⑤ 行所有者チェック。update/delete 系の API は必ずこれを通す。
- * 担任は他人の行も操作できてよい場合のみ allowOwnerRole を true にする。
+ * 先生 API 共通ガード（①③）。
+ *
+ * 先生かどうかは _meta の ownerEmail か、名簿の「担任」で決まる。どちらも
+ * スプレッドシートを開ける人しか書けない場所なので、ウェブアプリから先生になる道は無い。
+ */
+function assertOwner_() {
+  const email = requireEmail_();               // ① 本人確認
+  const ss = getDb_();
+  if (!ownerEmailOf_(ss)) {
+    throw new Error('SETUP_REQUIRED: このクラスはまだ設定されていません。' +
+      '（先生へ: スプレッドシートを開き、メニュー「' + CONFIG.APP_NAME + '」＞「はじめの設定」を 1 回押してください）');
+  }
+  if (!isOwnerEmail_(ss, email)) {             // ③ 役割チェック
+    throw new Error('FORBIDDEN: この操作ができるのは、このクラスの先生だけです');
+  }
+  return { email: email, ss: ss };
+}
+
+/**
+ * ④ 行の持ち主チェック。update / delete 系の API は必ずこれを通す。
+ * 先生が他人の行も操作してよい場合だけ allowOwnerRole を true にする。
  */
 function assertRowOwner_(rowEmail, email, member, allowOwnerRole) {
   if (allowOwnerRole && member && member.role === '担任') return;
@@ -92,13 +98,13 @@ function sanitizeJournals_(journals) {
   return journals.map(function (j) {
     const out = {};
     Object.keys(j).forEach(function (k) { out[k] = j[k]; });
-    out.email = uidOf_(j.email);   // 生 email を必ず潰す
+    out.email = uidOf_(j.email);   // 生のメールアドレスを必ず潰す
     return out;
   });
 }
 
 // ────────────────────────────────────────────────────────────────
-// 入力バリデーション（payload はホワイトリストしたキーのみ書き込む）
+// 入力の確かめ（payload は決めたキーだけ書き込む）
 // ────────────────────────────────────────────────────────────────
 
 function vStr_(v, max, label) {
@@ -114,8 +120,8 @@ function vNum_(v, min, max, label) {
 }
 
 /**
- * ジャーナル ID の検証。UUID 形式でなければ空を返し、呼び出し側で
- * NOT_FOUND 扱いにする（他人の行に当たらないことを保証する）。
+ * ジャーナル ID の確かめ。形が違えば空を返し、呼び出し側で NOT_FOUND 扱いにする
+ * （他人の行に当たらないことを保証する）。
  */
 function vJournalId_(v) {
   const s = String(v || '');

@@ -1,9 +1,16 @@
 // ============================================================
-// ふりかえりジャーナル — PWAシェル Service Worker
+// ふりかえりジャーナル — 導入案内ページの Service Worker
 // ------------------------------------------------------------
-// シェル資産（index.html / config.js / manifest / アイコン）のみをキャッシュする
-// 最小構成。Google Identity / Drive APIなどの外部通信は
-// 認証・データがあるため【絶対にキャッシュしない】。
+// このドメインが配るのは、アプリ本体ではなく「入れかたの案内」です。
+// アプリ本体は、先生ごとに公開された script.google.com のウェブアプリで動きます。
+//
+// ここでキャッシュするのは案内ページ一式（HTML / CSS / manifest / アイコン）だけ。
+// 外部への通信は一切キャッシュしません。
+//
+// ⚠️ 以前このドメインは Drive ネイティブ版のアプリ本体を配っていました。
+//    その版を「アプリを入れる」でホーム画面に置いた端末は、次に開いたときに
+//    この Service Worker へ入れ替わり、下の activate が古いキャッシュ
+//    （rj-shell- で始まるもの）を消して、この案内ページに切り替わります。
 // ============================================================
 
 /* 【重要】キャッシュの掃除は、かならず自アプリのぶんだけに限る。
@@ -26,28 +33,16 @@ const CACHE_PREFIX = 'rj-shell-';
 //    手書きだったころは上げるのが人の仕事で、2026-08-21 に12リポジトリで同時に
 //    上げ忘れる事故が起きた。上げ忘れると古いシェルのキャッシュが掃除されず、
 //    直した画面が児童の端末に届かない。
-//    （v18 まで手書き。共通部分は Drive ネイティブ・キット ./kit/ へ切り出してある）
-const APP_VERSION = 'vfd035358'; /* __APP_VERSION__ */
+const APP_VERSION = 'vff0267ae'; /* __APP_VERSION__ */
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',
-  './diag.html',
-  './drive.css',
-  './kit/namespace.js',
-  './kit/invite.js',
-  './kit/drive-client.js',
-  './kit/records.js',
-  './kit/session.js',
-  './kit/index.js',
-  './drive-core.js',
-  './drive-api.js',
-  './drive-app.js',
-  './shell-init.js',
-  './qrcode.js',
-  './config.js',
-  './manifest.webmanifest',
+  './style.css',
   './offline.html',
+  './privacy.html',
+  './terms.html',
+  './manifest.webmanifest',
   './icon-180.png',
   './icon-192.png',
   './icon-512.png',

@@ -2,13 +2,13 @@
   "name": "reflection-journal",
   "version": "2.0.0",
   "private": true,
-  "description": "GitHub PagesとGoogle Drive APIで動く学校向けふりかえりジャーナル",
+  "description": "学校向けふりかえりジャーナル（スプレッドシートにコンテナバインドする Google Apps Script）",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
     "check": "node tools/check-secrets.mjs && node scripts/check-project.mjs",
-    "test": "node scripts/test-qr.mjs && node --test scripts/test-drive-kit.mjs scripts/test-drive-core.mjs scripts/test-drive-api.mjs scripts/test-drive-ui.mjs",
+    "test": "node scripts/test-qr.mjs && node --test scripts/test-gas.mjs scripts/test-legacy-drive-kit.mjs scripts/test-legacy-drive-core.mjs scripts/test-legacy-drive-api.mjs scripts/test-legacy-drive-ui.mjs",
     "verify": "npm run build && node scripts/check-generated.mjs && node tools/build-sw.mjs --check && npm test && npm run check",
     "gas:install": "npm install --no-save --no-package-lock --no-audit --no-fund @google/clasp@3.3.0",
     "gas:login": "node scripts/gas-deploy.mjs login",
@@ -20,6 +20,12 @@
     "check:secrets": "node tools/check-secrets.mjs"
   },
   "devDependencies": {
-    "qrcode-generator": "1.4.4"
+    "@babel/core": "7.28.4",
+    "@babel/preset-react": "7.27.1",
+    "canvas-confetti": "1.6.0",
+    "qrcode-generator": "1.4.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwindcss": "3.4.17"
   }
 }
