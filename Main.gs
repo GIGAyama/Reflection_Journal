@@ -1,90 +1,241 @@
 /**
  * ============================================================
  * ふりかえりジャーナル — Main.gs
- * 設定・doGet ルーティング・共通ユーティリティ・診断 API
+ * 設定・スプレッドシートの取得・メニュー・doGet ルーティング・共通ユーティリティ
  * ============================================================
  *
- * ── アーキテクチャ概要（マルチテナント 3 層構成） ──────────────────
- * 同一プロジェクトから 2 本の Web アプリデプロイを発行して運用する。
+ * ── 配り方（コンテナバインド・先生ごとにデプロイ） ──────────────────
+ * スプレッドシートのコピーを配り、そのファイルにこのスクリプトが束ねられている。
+ * 1 ファイル = 1 クラスで、先生ご自身の Google ドライブに置かれる。
+ * 中央のレジストリもクラスコードも運営者のアカウントも無い。
  *
- *   デプロイ A（先生ポータル）: 実行 = ウェブアプリケーションにアクセスしているユーザー
- *     → クラス（テナント）作成が先生本人の権限で走り、DB シートは最初から先生所有になる。
- *       同じ実行内で addEditor(アプリアカウント) を呼び、共有まで自動化する。
- *   デプロイ B（児童アプリ）: 実行 = 自分（アプリアカウント）/ アクセス = 全員（匿名可）
- *     → すべての読み書きがアプリアカウント権限で走る。児童はシートへの権限を一切持たない。
- *       Session.getActiveUser() が使えないため、本人確認は ID トークン検証（Auth.gs）で行う。
+ *   先生: コピー → メニュー「ふりかえりジャーナル」＞「はじめの設定」→ デプロイ → URL を配る
+ *   児童: 配られた URL を開く。学校の Google アカウントでログインしていれば、それが本人確認になる
  *
- * 入口は GitHub Pages のシェル（共通 URL 1 つ）。シェルが Google サインイン（GIS）を担当し、
- * ID トークンを iframe 内の本アプリへ postMessage で渡す。
+ * ── 本人確認 ────────────────────────────────────────────────────
+ * デプロイは「実行するユーザー: 自分」「アクセスできるユーザー: 同じ組織内の全員」を前提にする。
+ * この形なら、児童が開いたときに Session.getActiveUser().getEmail() が本人のアドレスを返す。
+ * 「全員（匿名ユーザーを含む）」を選ぶと空になるので、そのときは画面で理由を出して止める
+ * （名前を騙れる状態で学習記録を書かせない）。
  *
- * ⚠️ appsscript.json の webapp は A 用の値。B は必ずデプロイ画面（UI）で
- *    「自分として実行 / 全員」に設定すること（clasp で作ると A の値で作られてしまう）。
+ * ── 誰が先生か ──────────────────────────────────────────────────
+ * **ウェブアプリからは、誰も先生になれない。** 先生の登録は、スプレッドシートを開ける人
+ * （＝ファイルの持ち主）がメニューから 1 回行う（setupAsTeacher）。児童にはスプレッドシート
+ * 自体を渡さないので、この経路には入れない。
+ * 「未設定のときは最初に開いた人を先生にする」形にすると、先生が開く前に URL を配った学級で
+ * 最初の児童が恒久的に先生になる。その事故は取り消しがきかないので、初回でも通さない。
  */
 
 const CONFIG = {
   APP_NAME: 'ふりかえりジャーナル',
-  SCHEMA_VERSION: 2,
-  LOCK_TIMEOUT_MS: 10000,
-  REGISTRY_CACHE_SEC: 600,            // ScriptProperties の日次上限対策
-  TOKEN_CACHE_SEC: 300,               // UrlFetch の日次上限対策
-  CODE_ALPHABET: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', // 紛らわしい I,1,O,0 を除外
-  CODE_LENGTH: 8
+  SCHEMA_VERSION: 3,
+  LOCK_TIMEOUT_MS: 10000
 };
 
-/**
- * 配布元設定（ScriptProperties）。レジストリ(tn_/own_)とこの sp_* 以外を
- * ScriptProperties に置いてはならない（1値9KB/全体500KB制限のため）。
- */
-const PROP_KEYS = {
-  APP_ACCOUNT: 'sp_appAccountEmail',  // 必須: アプリ運営用アカウント
-  CLIENT_ID:   'sp_googleClientId',   // 必須: GIS 用クライアント ID（aud 検証に使用）
-  SHELL_URL:   'sp_shellUrl',         // 必須: GitHub Pages シェルの URL
-  TEMPLATE:    'sp_dbTemplateId'      // 任意: DB テンプレートのスプレッドシート ID
+/** _meta シートに置く鍵。ScriptProperties は使わない（コピーには付いてこないため） */
+const META_KEYS = {
+  OWNER_EMAIL: 'ownerEmail',      // このクラスの先生
+  CLASS_NAME: 'className',
+  SCHEMA: 'schemaVersion',
+  SETUP_AT: 'setupAt'
 };
 
+// ────────────────────────────────────────────────────────────────
+// スプレッドシート（このスクリプトが束ねられているファイル）
+// ────────────────────────────────────────────────────────────────
+
 /**
- * 承認トリガー（GAS エディタから手動実行する）。
+ * このクラスの記録が入っているスプレッドシート。
  *
- * デプロイ B は「自分として実行」のため、実行時の権限は「アプリアカウントが事前に
- * このスクリプトへ与えた承認」で決まる。oauthScopes を変更した場合や初回承認を
- * 飛ばした場合、児童側で「UrlFetchApp.fetch を呼び出す権限がありません」になる。
+ * コンテナバインドなので、開いているそのファイルがそのまま本体である。
+ * ID の設定も、自動生成も、探しに行く処理も要らない。
  *
- * 対処: アプリアカウントで GAS エディタを開き、この関数を選択して「実行」→ すべて許可。
- * 再デプロイは不要（既存デプロイに即反映される）。
+ * ⚠️ 独立スクリプトとして貼り付けた場合はここが null になる。そのときは
+ *    「作り直して探しに行く」ことをしない。児童一人ひとりの権限で走る構成に
+ *    なっていると、権限の無い子が 1 回開くだけで、学級全員の記録が入ったファイルから
+ *    その子の空ファイルへ静かに差し替わる。エラーは出ず「記録が消えた」ようにしか見えない。
  */
-function authorizeApp() {
-  const results = [];
-  results.push('実行者: ' + Session.getEffectiveUser().getEmail());          // userinfo.email
-  const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=check',
-    { muteHttpExceptions: true });                                            // script.external_request
-  results.push('UrlFetch(トークン検証): OK (HTTP ' + res.getResponseCode() + ' は正常です)');
-  results.push('spreadsheets スコープ: ' + (ScriptApp.getOAuthToken() ? '承認済み' : '不明'));
-  const summary = results.join(' / ');
-  Logger.log(summary);
-  return summary;
-}
-
-// ────────────────────────────────────────────────────────────────
-// 設定アクセス
-// ────────────────────────────────────────────────────────────────
-
-function getSetting_(key, required) {
-  const v = PropertiesService.getScriptProperties().getProperty(key);
-  if (!v && required) {
-    throw new Error('SERVER_ERROR: アプリの初期設定（' + key + '）がまだ行われていません。配布元（運営者）に連絡してください。');
+function getDb_() {
+  let ss = null;
+  try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { ss = null; }
+  if (!ss) {
+    throw new Error('NOT_BOUND: このスクリプトはスプレッドシートに束ねられていません。' +
+      '配布用のスプレッドシートをコピーして、そのコピーの「拡張機能 ＞ Apps Script」から開いてください');
   }
-  return v || '';
+  return ensureSheets_(ss);
 }
 
-function getShellUrl_() {
-  let url = getSetting_(PROP_KEYS.SHELL_URL, false);
-  if (url && url.slice(-1) !== '/') url += '/';
-  return url;
+// ────────────────────────────────────────────────────────────────
+// 本人確認
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * いま画面を開いている人のメールアドレス。取れなければ空文字。
+ *
+ * 取れないのは、デプロイの「アクセスできるユーザー」が「全員（匿名ユーザーを含む）」に
+ * なっているか、児童が学校とは別のドメインのアカウントで開いている場合。
+ */
+function activeEmail_() {
+  try { return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase(); }
+  catch (e) { return ''; }
 }
 
-function getShellOrigin_() {
-  const m = getShellUrl_().match(/^(https?:\/\/[^\/]+)/);
-  return m ? m[1] : '';
+/** 本人が取れなければ、次に何をすればよいかまで書いて止める */
+function requireEmail_() {
+  const email = activeEmail_();
+  if (!email) {
+    throw new Error('NO_IDENTITY: 誰が使っているかを確かめられませんでした。' +
+      '学校の Google アカウントでログインしてから開いてください。' +
+      '（先生へ: デプロイの「アクセスできるユーザー」を「同じ組織内の全員」にしてください。' +
+      '「全員（匿名ユーザーを含む）」だと、誰が書いたかを確かめられません）');
+  }
+  return email;
+}
+
+/** このクラスの先生のアドレス（_meta）。未設定なら空文字 */
+function ownerEmailOf_(ss) {
+  return String(readMeta_(ss, META_KEYS.OWNER_EMAIL) || '').trim().toLowerCase();
+}
+
+/**
+ * 先生かどうか。_meta の先生本人か、名簿で役割が「担任」かつ状態が active の人。
+ * どちらも、スプレッドシートを開ける人しか書き込めない場所である。
+ */
+function isOwnerEmail_(ss, email) {
+  if (!email) return false;
+  const owner = ownerEmailOf_(ss);
+  if (owner && owner === email) return true;
+  const m = getMemberRow_(ss, email);
+  return !!(m && m.role === '担任' && m.status === 'active');
+}
+
+// ────────────────────────────────────────────────────────────────
+// スプレッドシートのメニュー（先生だけが通れる経路）
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * スプレッドシートを開いたときのメニュー。
+ * ウェブアプリとして動いているときは画面が無いので、何も起きない。
+ */
+function onOpen(e) {
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu(CONFIG.APP_NAME)
+      .addItem('はじめの設定（最初に1回）', 'setupAsTeacher')
+      .addSeparator()
+      .addItem('シートを点検する', 'showSheetCheck')
+      .addItem('シートを直せる範囲で直す', 'showSheetRepair')
+      .addToUi();
+  } catch (err) {
+    // ウェブアプリ文脈では画面が無い。ここで止まってよい。
+  }
+}
+
+/**
+ * 「はじめの設定」。シートを作り、押した人をこのクラスの先生として控える。
+ *
+ * ⚠️ google.script.run は末尾 `_` の無い関数を誰でも呼べるので、この関数も児童から
+ *    呼べてしまう。**先に getUi() を取る**のはそのため。画面が無い文脈（ウェブアプリ）では
+ *    ここで例外になり、1 セルも書かずに終わる。
+ *    加えて、すでに先生が決まっている場合は、たとえ画面があっても上書きしない。
+ */
+function setupAsTeacher() {
+  const ui = SpreadsheetApp.getUi();          // 画面が無ければ、ここで止まる
+  const ss = getDb_();
+  const me = activeEmail_();
+  if (!me) {
+    ui.alert(CONFIG.APP_NAME, 'Google アカウントを確かめられませんでした。'
+      + 'スプレッドシートを開き直してからもう一度お試しください。', ui.ButtonSet.OK);
+    return;
+  }
+
+  const current = ownerEmailOf_(ss);
+  if (current && current !== me) {
+    ui.alert(CONFIG.APP_NAME,
+      'このクラスの先生はすでに ' + current + ' で登録されています。\n\n'
+      + '付け替えるときは「_meta」シートの ' + META_KEYS.OWNER_EMAIL + ' の行を書き直してください。',
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  const answer = ui.prompt(CONFIG.APP_NAME,
+    'クラスの名前を入れてください（例: 3年2組）。\nあとから「_meta」シートで変えられます。',
+    ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  const className = String(answer.getResponseText() || '').trim().slice(0, 50) || 'わたしたちのクラス';
+
+  writeMeta_(ss, {
+    ownerEmail: me,
+    className: className,
+    schemaVersion: CONFIG.SCHEMA_VERSION,
+    setupAt: new Date().toISOString()
+  });
+  upsertMember_(ss, { email: me, name: '先生', role: '担任', status: 'active' });
+
+  ui.alert(CONFIG.APP_NAME,
+    '「' + className + '」として設定しました。\n\n'
+    + '次に「拡張機能 ＞ Apps Script」を開き、右上の「デプロイ ＞ 新しいデプロイ」から\n'
+    + '　種類: ウェブアプリ\n'
+    + '　実行するユーザー: 自分\n'
+    + '　アクセスできるユーザー: 同じ組織内の全員\n'
+    + 'で公開し、出てきた URL を児童に配ってください。',
+    ui.ButtonSet.OK);
+}
+
+/** 点検の結果を見せるだけ。1 セルも書き換えない */
+function showSheetCheck() {
+  const ui = SpreadsheetApp.getUi();          // 画面が無ければ、ここで止まる
+  const found = inspectSheets_(getDb_());
+  ui.alert('シートの点検', sheetReportText_(found), ui.ButtonSet.OK);
+}
+
+/** 直せる範囲だけ直す。何をするかを先に見せて、押してもらってから動く */
+function showSheetRepair() {
+  const ui = SpreadsheetApp.getUi();          // 画面が無ければ、ここで止まる
+  const ss = getDb_();
+  const found = inspectSheets_(ss);
+  const fixable = found.filter(function (f) { return f.fixable; });
+
+  if (!fixable.length) {
+    ui.alert('シートを直す',
+      found.length
+        ? '自動で直せるものはありませんでした。\n\n' + sheetReportText_(found)
+        : 'シートの作りは想定どおりです。直すところはありません。',
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  const plan = fixable.map(function (f) {
+    return '・「' + f.sheet + '」' + f.kind + '\n　→ ' + f.action;
+  }).join('\n');
+  const answer = ui.alert('シートを直す',
+    '次のことをします。既にある列は動かさず、名前も変えません。消すものはありません。\n\n'
+    + plan + '\n\n実行してよろしいですか。', ui.ButtonSet.OK_CANCEL);
+  if (answer !== ui.Button.OK) return;
+
+  const result = repairSheets_(ss);
+  let text = result.fixed.length
+    ? '直しました。\n\n' + result.fixed.map(function (s) { return '・' + s; }).join('\n')
+    : '直せるものはありませんでした。';
+  if (result.left.length) {
+    text += '\n\n── 人が見ないと直せないもの ──\n'
+      + result.left.map(function (f) {
+          return '・「' + f.sheet + '」' + f.kind + '：' + f.detail + '\n　→ ' + f.action;
+        }).join('\n');
+  }
+  ui.alert('シートを直す', text, ui.ButtonSet.OK);
+}
+
+/** 点検の所見を、そのまま読める日本語にする（メニューと先生画面の両方で使う） */
+function sheetReportText_(found) {
+  if (!found.length) return 'シートの作りは想定どおりです。';
+  return '次のところが、アプリの想定と違います。\n\n'
+    + found.map(function (f) {
+        return '・「' + f.sheet + '」' + f.kind + '：' + f.detail
+          + '\n　→ ' + f.action + (f.fixable ? '（自動で直せます）' : '（自動では直しません）');
+      }).join('\n')
+    + '\n\n列は見出しの名前で探しているので、並べ替えは害になりません。'
+    + '見出しの名前を変えたり列を消したりすると、その列の読み書きが止まります。';
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -128,29 +279,41 @@ function jsonErr_(e) {
 // ────────────────────────────────────────────────────────────────
 
 /**
- * デプロイの判別は exec URL の照合ではなく URL パラメータで行う:
- *   - 先生ポータル(A) はシェルが必ず ?portal=1 を付けて開く
- *   - 児童アプリ(B) はシェルが素の exec URL で開き、クラスコードは
- *     postMessage で渡す（パラメータ付き URL の iframe 読み込みを
- *     拒否する環境が存在するため）。旧方式の ?t= も受ける。
+ * 入口は 1 つ。誰が開いたかで先生画面と児童画面を切り替える。
+ *
+ * URL パラメータでは切り替えない。?portal=1 のような形にすると、児童が
+ * その 1 文字を足すだけで先生画面の見た目に入れてしまう（サーバー側の認可は
+ * 別に効くが、押せないボタンが並ぶ画面を児童に見せる意味は無い）。
  */
 function doGet(e) {
-  const p = (e && e.parameter) || {};
-  if (p.diag === '1') return doGetDiag_();
-
-  const mode = p.portal === '1' ? 'owner' : 'member';
+  let boot;
+  try {
+    const ss = getDb_();
+    const email = activeEmail_();
+    const owner = ownerEmailOf_(ss);
+    boot = {
+      mode: isOwnerEmail_(ss, email) ? 'owner' : 'member',
+      className: String(readMeta_(ss, META_KEYS.CLASS_NAME) || CONFIG.APP_NAME),
+      // 空なら「ログインが確かめられない」ことが確定する。画面で理由を出す
+      signedIn: !!email,
+      // 先生がまだ「はじめの設定」を押していない
+      setupDone: !!owner,
+      webAppUrl: ScriptApp.getService().getUrl() || ''
+    };
+  } catch (err) {
+    boot = {
+      mode: 'member', className: CONFIG.APP_NAME, signedIn: false, setupDone: false,
+      webAppUrl: '', bootError: (err && err.message) ? err.message : String(err)
+    };
+  }
 
   const t = HtmlService.createTemplateFromFile('index');
-  t.bootMode = mode;
-  t.bootTenantCode = String(p.t || '').replace(/[^A-Z2-9]/gi, '').toUpperCase().slice(0, 16);
-  t.bootShellUrl = getShellUrl_();
-  t.bootShellOrigin = getShellOrigin_();
+  // <?!= ?> は素通しなので、閉じタグに化ける < を必ず潰してから渡す
+  t.bootJson = JSON.stringify(boot).replace(/</g, '\\u003c');
+  t.bootMode = boot.mode;
   return t.evaluate()
     .setTitle(CONFIG.APP_NAME)
-    // GitHub Pages シェルが iframe 埋め込みするため必須。
-    // GAS は frame-ancestors の限定ができないため ALLOWALL 一択。その代償として
-    // ID トークン検証（Auth.gs）とシェル側 origin 検証を必須の防御線とする。
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.SAMEORIGIN)
     // ⚠️ viewport は index.html の <meta> にもある。addMetaTag はサーバー側の処理なので、
     //    index.html だけ直しても反映されない。必ず両方を同じ値にすること。
     //    拡大は禁止しない（誤ズーム防止より、見えづらい子が拡大できない害のほうが大きい）。
@@ -167,33 +330,4 @@ function doGet(e) {
  */
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
-/**
- * 接続診断エンドポイント（?diag=1）。docs/diag.html が credentials:'omit' で fetch する。
- * 秘密情報（メールアドレス・ID・トークン）は一切返さない。
- *
- * この JSON が Cookie なしの fetch で読めた時点で「アクセスできるユーザー: 全員
- * （匿名アクセス可）」が確定する。ログイン必須設定だと Google が accounts.google.com へ
- * リダイレクトするため fetch 自体が失敗する。
- */
-function doGetDiag_() {
-  let effective = '', active = '';
-  try { effective = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
-  try { active = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
-  const appAccount = String(getSetting_(PROP_KEYS.APP_ACCOUNT, false) || '').toLowerCase();
-  return ContentService.createTextOutput(JSON.stringify({
-    ok: true,
-    app: CONFIG.APP_NAME,
-    schemaVersion: CONFIG.SCHEMA_VERSION,
-    // 実効ユーザーがアプリアカウントなら B（自分として実行）、それ以外なら A。
-    // 注: アプリアカウント本人のブラウザから A を開いた場合も 'B' と出る
-    deployKind: !effective ? 'unknown' : (appAccount && effective === appAccount) ? 'B' : 'A',
-    anonymousAccess: !active,
-    config: {
-      appAccount: !!appAccount,
-      clientId: !!getSetting_(PROP_KEYS.CLIENT_ID, false),
-      shellUrl: getShellUrl_()   // 児童用 URL に含まれる公開情報のため露出可
-    }
-  })).setMimeType(ContentService.MimeType.JSON);
 }

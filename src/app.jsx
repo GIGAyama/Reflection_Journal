@@ -577,7 +577,7 @@ const { useState, useEffect, useRef, useMemo } = React;
     };
 
     // 学期末の記録用: ブラウザの印刷ダイアログから PDF 保存できる帳票を開く
-    const openPrintView = (journals, tenantName) => {
+    const openPrintView = (journals, className) => {
       const grouped = {};
       journals.slice().sort((a,b) => (a.studentName||'').localeCompare(b.studentName||'') || new Date(a.timestamp) - new Date(b.timestamp))
         .forEach(j => { const k = j.studentName || '不明'; (grouped[k] = grouped[k] || []).push(j); });
@@ -594,7 +594,7 @@ const { useState, useEffect, useRef, useMemo } = React;
         </section>`).join('');
       const w = window.open('', '_blank');
       if (!w) return false;
-      w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(tenantName || '')}</title>
+      w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(className || '')}</title>
         <style>
           body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }
           section.student { page-break-after: always; }
@@ -612,10 +612,10 @@ const { useState, useEffect, useRef, useMemo } = React;
     // ==========================================
     // 👩‍🏫 教員用画面 (Teacher App)
     // ==========================================
-    const TeacherApp = ({ data, tenants, server, refresh, onSwitchTenant, onCreateNew }) => {
+    const TeacherApp = ({ data, server, refresh }) => {
       const { owner, isLoading, toast, setToast, showToast } = server;
-      const code = data.tenant.tenantCode;
-      const call = (fn, ...args) => owner(fn, code, ...args);
+      // 1 ファイル = 1 クラスなので、どのクラスかをサーバーへ渡す引数は無い
+      const call = (fn, ...args) => owner(fn, ...args);
 
       const [journals, setJournals] = useState(data.journals);
       const [activeTab, setActiveTab] = useState('dashboard');
@@ -646,9 +646,9 @@ const { useState, useEffect, useRef, useMemo } = React;
       const vitalData = useMemo(() => analyzeVitals(journals, data.classRoster), [journals, data.classRoster]);
       const pendingMembers = (data.pendingMembers || []);
       const inviteQr = useMemo(() => {
-        try { return makeQrModel(data.tenant.memberUrl); }
+        try { return makeQrModel(data.klass.memberUrl); }
         catch (e) { return null; }
-      }, [data.tenant.memberUrl]);
+      }, [data.klass.memberUrl]);
 
       const filteredJournals = useMemo(() => {
         return journals.filter(j => {
@@ -771,7 +771,7 @@ const { useState, useEffect, useRef, useMemo } = React;
       const handleExport = async (type) => {
          if (type === 'pdf') {
             if (journals.length === 0) return showToast('データがありません', 'error');
-            if (!openPrintView(journals, data.tenant.tenantName)) showToast('ポップアップがブロックされました。許可してください', 'error');
+            if (!openPrintView(journals, data.klass.className)) showToast('ポップアップがブロックされました。許可してください', 'error');
             return;
          }
          const res = await call('opExportCsv', { startDate: null, endDate: null, email: 'all' });
@@ -807,10 +807,9 @@ const { useState, useEffect, useRef, useMemo } = React;
         }
       };
 
-      const handleCopyUrl = () => copyInviteValue(data.tenant.memberUrl, 'url', 'URL');
-      const handleCopyCode = () => copyInviteValue(data.tenant.tenantCode, 'code', 'クラスコード');
+      const handleCopyUrl = () => copyInviteValue(data.klass.memberUrl, 'url', 'URL');
       const handleCopyInvitation = () => copyInviteValue(
-        `「${data.tenant.tenantName}」のふりかえりジャーナルに参加してください。\nクラスコード: ${data.tenant.tenantCode}\n児童用URL: ${data.tenant.memberUrl}`,
+        `「${data.klass.className}」のふりかえりジャーナルに参加してください。\n次のURLを開いて、学校のアカウントでログインしてください。\n${data.klass.memberUrl}`,
         'invitation',
         '招待文'
       );
@@ -822,25 +821,40 @@ const { useState, useEffect, useRef, useMemo } = React;
         const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
         const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
         const a = document.createElement('a');
-        const safeName = String(data.tenant.tenantName || 'クラス').replace(/[\\/:*?"<>|]/g, '_');
+        const safeName = String(data.klass.className || 'クラス').replace(/[\\/:*?"<>|]/g, '_');
         a.href = url;
-        a.download = `ふりかえりジャーナル_${safeName}_${data.tenant.tenantCode}_QR.svg`;
+        a.download = `ふりかえりジャーナル_${safeName}_QR.svg`;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 5000);
         showToast('QR画像を保存しました');
       };
 
-      const handleRegenerateCode = async () => {
-        setConfirmConfig({ isOpen: false });
-        const res = await call('opRegenerateCode');
-        if (res && res.success) { showToast('クラスコードを再発行しました。旧URLは使えなくなります'); refresh(); }
-        else showToast(failMsg(res, '再発行できませんでした'), 'error');
-      };
-
-      const handleJoinPolicy = async (joinOpen, requireApproval) => {
-        const res = await call('opUpdateJoinPolicy', joinOpen, requireApproval);
+      const handleJoinPolicy = async (joinOpen, autoApprove) => {
+        const res = await call('opUpdateJoinPolicy', joinOpen, autoApprove);
         if (res && res.success) { showToast('設定を変更しました'); refresh(); }
         else showToast(failMsg(res, '変更できませんでした'), 'error');
+      };
+
+      // シートの点検・修整。直せなかったものは必ず画面に出す（黙って握りつぶさない）
+      const [sheetReport, setSheetReport] = useState(null);
+      const sheetIssues = sheetReport ? sheetReport.left : (data.sheetIssues || []);
+
+      const handleInspectSheets = async () => {
+        const res = await call('opInspectSheets');
+        if (res && res.success) {
+          setSheetReport({ fixed: [], left: res.issues || [] });
+          showToast(res.issues.length ? `${res.issues.length} 件見つかりました` : 'シートの作りは想定どおりです');
+        } else showToast(failMsg(res, '点検できませんでした'), 'error');
+      };
+
+      const handleRepairSheets = async () => {
+        setConfirmConfig({ isOpen: false });
+        const res = await call('opRepairSheets');
+        if (res && res.success) {
+          setSheetReport({ fixed: res.fixed || [], left: res.left || [] });
+          showToast(res.message);
+          refresh();
+        } else showToast(failMsg(res, '直せませんでした'), 'error');
       };
 
       // 同じ児童が複数回提出しても100%を超えないよう、ユニークな児童数でカウントする
@@ -866,13 +880,12 @@ const { useState, useEffect, useRef, useMemo } = React;
                </button>
             </div>
 
-            {/* クラス切り替え */}
-            <div className="flex items-center gap-2 self-start lg:self-auto">
-              <select value={code} onChange={e => onSwitchTenant(e.target.value)} className="min-h-[44px] bg-white border border-gray-200 text-sm font-bold text-gray-700 outline-none rounded-xl px-3 py-2.5 cursor-pointer shadow-sm max-w-[220px]">
-                {tenants.map(t => <option key={t.tenantCode} value={t.tenantCode}>{t.tenantName}</option>)}
-              </select>
-              <button onClick={onCreateNew} className="min-h-[44px] bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-700 text-gray-600 rounded-xl px-3 py-2.5 shadow-sm font-bold text-sm flex items-center gap-1 transition-colors"><Icon path={Icons.Plus} className="w-4 h-4"/> クラス追加</button>
-            </div>
+            {/* シートの作りがずれていたら、どのタブにいても目に入るようにする */}
+            {sheetIssues.length > 0 && (
+              <button onClick={()=>setActiveTab('admin')} className="min-h-[44px] self-start lg:self-auto bg-amber-50 border border-amber-300 text-amber-900 rounded-xl px-4 py-2.5 shadow-sm font-bold text-sm flex items-center gap-2 transition-colors hover:bg-amber-100">
+                <Icon path={Icons.Settings} className="w-4 h-4"/> シートの作りに {sheetIssues.length} 件の気になるところがあります
+              </button>
+            )}
           </div>
 
           {activeTab === 'dashboard' && (
@@ -1046,6 +1059,50 @@ const { useState, useEffect, useRef, useMemo } = React;
           {activeTab === 'admin' && (
              <div className="flex flex-col gap-6 animate-fade-in h-full">
 
+                {/* 🧰 シートの作り。列は見出しの名前で探しているので、並べ替えは害にならない。
+                    無くなった列と、名前を変えられた列だけが問題になる。 */}
+                <div className={`p-8 rounded-[2rem] shadow-premium border ${sheetIssues.length ? 'bg-amber-50 border-amber-300' : 'bg-white border-gray-100'}`}>
+                  <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg mb-2">
+                    <div className="p-1.5 bg-amber-100 text-amber-700 rounded-lg"><Icon path={Icons.Settings} className="w-5 h-5"/></div> シートの作り
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+                    記録は、このアプリが束ねられているスプレッドシートの中にあります。
+                    列は<strong>見出しの名前</strong>で探しているので、並べ替えても動きます。
+                    見出しの名前を変えたり列を消したりすると、そこの読み書きだけが止まります。
+                  </p>
+
+                  {sheetReport && sheetReport.fixed.length > 0 && (
+                    <ul className="mb-4 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-2xl p-4 list-disc pl-8 font-medium">
+                      {sheetReport.fixed.map((t, i) => <li key={i}>{t}</li>)}
+                    </ul>
+                  )}
+
+                  {sheetIssues.length === 0 ? (
+                    <p className="text-sm font-bold text-emerald-700 mb-4">いまのところ、想定どおりです。</p>
+                  ) : (
+                    <ul className="mb-4 flex flex-col gap-3">
+                      {sheetIssues.map((f, i) => (
+                        <li key={i} className="bg-white border border-amber-200 rounded-2xl p-4">
+                          <p className="font-black text-gray-800 text-sm">「{f.sheet}」{f.kind}</p>
+                          <p className="text-sm text-gray-600 mt-1">{f.detail}</p>
+                          <p className="text-sm text-gray-500 mt-1">→ {f.action}
+                            <span className="ml-2 text-xs font-bold">{f.fixable ? '（自動で直せます）' : '（自動では直しません）'}</span>
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={handleInspectSheets} className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> いま点検する</button>
+                    <button
+                      onClick={()=>setConfirmConfig({isOpen:true, title:"シートを直す", text:"自動で直せるところだけを直します。\n既にある列は動かさず、名前も変えません。消すものはありません。", confirmText:"直す", onConfirm: handleRepairSheets, onCancel: ()=>setConfirmConfig({isOpen:false})})}
+                      disabled={!sheetIssues.some(f => f.fixable)}
+                      className="min-h-[44px] text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"><Icon path={Icons.Check} className="w-4 h-4"/> 直せる範囲で直す</button>
+                    <a href={data.spreadsheetUrl} target="_blank" rel="noopener noreferrer" className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Link} className="w-4 h-4"/> スプレッドシートを開く</a>
+                  </div>
+                </div>
+
                 {/* 🎫 児童の招待 */}
                 <div className="bg-white p-8 rounded-[2rem] shadow-premium border border-gray-100">
                   <div className="flex flex-col md:flex-row gap-6 items-start">
@@ -1053,30 +1110,22 @@ const { useState, useEffect, useRef, useMemo } = React;
                       <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg mb-2">
                         <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg"><Icon path={Icons.Link} className="w-5 h-5"/></div> 児童をクラスに招待
                       </h3>
-                      <p className="text-sm text-gray-500 mb-4 leading-relaxed">クラスコード、専用URL、QRコードのどれでも招待できます。児童はGoogleでサインインするだけで参加でき、スプレッドシートの権限は付与されません。</p>
-                      <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                        <div className="flex-1">
-                          <p className="text-xs font-bold text-orange-700 mb-1">クラスコード</p>
-                          <p className="font-mono text-2xl font-black tracking-[0.2em] text-gray-900">{data.tenant.tenantCode}</p>
-                        </div>
-                        <button onClick={handleCopyCode} className={`min-h-[44px] shrink-0 font-bold px-4 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copiedItem === 'code' ? 'bg-emerald-600 text-white' : 'bg-white hover:bg-orange-100 text-orange-800 border border-orange-200'}`}><Icon path={copiedItem === 'code' ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copiedItem === 'code' ? 'コピーしました' : 'コードをコピー'}</button>
-                      </div>
+                      <p className="text-sm text-gray-500 mb-4 leading-relaxed">配るものは、この画面の URL 1 本だけです。児童は学校の Google アカウントでログインして開きます。スプレッドシートの権限は渡りません。</p>
                       <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                        <label className="flex-1"><span className="sr-only">児童用URL</span><input type="text" readOnly value={data.tenant.memberUrl} onFocus={e=>e.target.select()} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none focus:ring-2 focus:ring-blue-500"/></label>
+                        <label className="flex-1"><span className="sr-only">児童用URL</span><input type="text" readOnly value={data.klass.memberUrl} onFocus={e=>e.target.select()} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono text-gray-600 outline-none focus:ring-2 focus:ring-blue-500"/></label>
                         <button onClick={handleCopyUrl} className={`shrink-0 font-bold px-6 py-3 rounded-xl shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${copiedItem === 'url' ? 'bg-emerald-600 text-white' : 'bg-gray-800 hover:bg-black text-white'}`}><Icon path={copiedItem === 'url' ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copiedItem === 'url' ? 'コピーしました' : 'URLをコピー'}</button>
                       </div>
                       <div className="flex flex-wrap gap-2 mb-4">
                         <button onClick={handleCopyInvitation} className={`min-h-[44px] text-sm font-bold rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2 ${copiedItem === 'invitation' ? 'bg-emerald-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200'}`}><Icon path={copiedItem === 'invitation' ? Icons.Check : Icons.Copy} className="w-4 h-4"/> {copiedItem === 'invitation' ? 'コピーしました' : '招待文をコピー'}</button>
-                        <a href={data.tenant.memberUrl} target="_blank" rel="noopener noreferrer" className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Link} className="w-4 h-4"/> 児童画面を確認</a>
+                        <a href={data.klass.memberUrl} target="_blank" rel="noopener noreferrer" className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Link} className="w-4 h-4"/> 児童画面を確認</a>
                       </div>
                       <div className="flex flex-wrap gap-3 items-center">
                         <label className="flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
-                          <input type="checkbox" checked={!!data.tenant.joinOpen} onChange={e=>handleJoinPolicy(e.target.checked, data.tenant.requireApproval)} className="accent-blue-600 w-5 h-5"/> 参加を受け付ける
+                          <input type="checkbox" checked={!!data.klass.joinOpen} onChange={e=>handleJoinPolicy(e.target.checked, data.klass.autoApprove)} className="accent-blue-600 w-5 h-5"/> 参加を受け付ける
                         </label>
                         <label className="flex items-center gap-2 min-h-[44px] text-sm font-bold text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
-                          <input type="checkbox" checked={!!data.tenant.requireApproval} onChange={e=>handleJoinPolicy(data.tenant.joinOpen, e.target.checked)} className="accent-blue-600 w-5 h-5"/> 参加は先生の承認制にする
+                          <input type="checkbox" checked={!data.klass.autoApprove} onChange={e=>handleJoinPolicy(data.klass.joinOpen, !e.target.checked)} className="accent-blue-600 w-5 h-5"/> 参加は先生の承認制にする
                         </label>
-                        <button onClick={()=>setConfirmConfig({isOpen:true, title:"コードの再発行", text:"クラスコードを作り直します。\n今までのURLは使えなくなります。よろしいですか？", confirmText:"再発行する", onConfirm: handleRegenerateCode, onCancel: ()=>setConfirmConfig({isOpen:false})})} className="min-h-[44px] text-sm font-bold text-gray-600 hover:text-red-600 bg-gray-50 hover:bg-red-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> コード再発行</button>
                       </div>
                     </div>
                     <div className="shrink-0 mx-auto md:mx-0 text-center flex flex-col items-center">
@@ -1222,7 +1271,7 @@ const { useState, useEffect, useRef, useMemo } = React;
                         return <div dangerouslySetInnerHTML={{__html: html}} />;
                      })()}
                   </div>
-                  <LazyImage imageId={activeJournal.imageId} fetcher={(id) => window.callOwnerApi('opGetImage', code, id)} alt={`${activeJournal.studentName} さんがのせた画像`} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
+                  <LazyImage imageId={activeJournal.imageId} fetcher={(id) => window.callOwnerApi('opGetImage', id)} alt={`${activeJournal.studentName} さんがのせた画像`} className="mt-4 rounded-xl border max-w-xs shadow-sm"/>
                 </div>
                 <div className="w-full md:w-[420px] shrink-0 max-h-[55%] md:max-h-none p-5 md:p-8 bg-white flex flex-col relative overflow-y-auto">
                   <button onClick={() => setActiveJournal(null)} aria-label="閉じる" className="tap-44 absolute top-6 right-6 p-2 text-gray-500 hover:text-gray-700 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"><Icon path={Icons.Close} /></button>
@@ -1255,107 +1304,22 @@ const { useState, useEffect, useRef, useMemo } = React;
     };
 
     // ==========================================
-    // 🏫 クラス作成（先生の初回オンボーディング / クラス追加）
-    // ==========================================
-    const CreateClassScreen = ({ server, onCreated, onCancel, ownerEmail }) => {
-      const { owner, isLoading, toast, setToast, showToast } = server;
-      const [className, setClassName] = useState("");
-      const [adoptUrl, setAdoptUrl] = useState("");
-      const [done, setDone] = useState(null);
-
-      const handleCreate = async () => {
-        if (!className.trim()) return showToast('クラス名を入力してください', 'error');
-        const res = await owner('opCreateTenant', className.trim());
-        if (res && res.success) { setDone(res); setTimeout(() => onCreated(res.tenantCode), 2500); }
-        else showToast(failMsg(res, 'クラスを作成できませんでした'), 'error');
-      };
-
-      const handleAdopt = async () => {
-        if (!className.trim()) return showToast('クラス名を入力してください', 'error');
-        if (!adoptUrl.trim()) return showToast('スプレッドシートのURLを入力してください', 'error');
-        const res = await owner('opAdoptTenant', adoptUrl.trim(), className.trim());
-        if (res && res.success) { setDone(res); setTimeout(() => onCreated(res.tenantCode), 2500); }
-        else showToast(failMsg(res, '取り込みできませんでした'), 'error');
-      };
-
-      return (
-        <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-blue-50 p-4 overflow-y-auto">
-          {isLoading && <div className="fixed inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin shadow-lg"></div></div>}
-          <div className="bg-white rounded-[2rem] shadow-premium border border-gray-100 p-8 md:p-10 max-w-xl w-full animate-fade-in my-8">
-            {done ? (
-              <div className="text-center py-4">
-                <div className="w-16 h-16 mx-auto rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4"><Icon path={Icons.Check} className="w-8 h-8"/></div>
-                <p className="font-black text-gray-700 text-lg mb-2">クラス「{done.tenantName}」を作成しました！</p>
-                <p className="text-sm text-gray-500 font-medium mb-4">クラスコード: <span className="font-mono font-black tracking-widest text-orange-600">{done.tenantCode}</span></p>
-                <p className="text-xs text-gray-500">ダッシュボードを読み込んでいます…</p>
-              </div>
-            ) : (
-              <>
-                <div className="text-center mb-8">
-                  <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-orange-400 to-orange-500 text-white flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30"><Icon path={Icons.Book} className="w-10 h-10"/></div>
-                  <h1 className="text-3xl font-black text-gray-800 mb-2">クラスをつくろう</h1>
-                  <p className="text-gray-500 font-medium leading-relaxed">クラス専用のデータベースが<br/>あなたの Google Drive に自動作成されます。</p>
-                  {ownerEmail && <p className="mt-3 text-xs font-bold text-gray-500 bg-gray-50 inline-block px-4 py-1.5 rounded-full">ログイン中: {ownerEmail}</p>}
-                </div>
-
-                <div className="border-2 border-orange-100 bg-orange-50/40 rounded-3xl p-6 mb-5">
-                  <h2 className="font-black text-gray-800 mb-1 flex items-center gap-2"><Icon path={Icons.Sparkles} className="w-5 h-5 text-orange-500"/> 新しいクラスを作成</h2>
-                  <p className="text-sm text-gray-500 mb-4 leading-relaxed">作成すると「児童用URL」が発行されます。URLを配るだけで児童が参加できます。</p>
-                  <input type="text" value={className} onChange={e=>setClassName(e.target.value)} placeholder="クラス名（例: 6年1組）" className="w-full border-2 border-orange-100 rounded-2xl p-3.5 text-sm outline-none focus:border-orange-400 bg-white font-bold mb-3 transition-colors"/>
-                  <button onClick={handleCreate} disabled={isLoading} className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-orange-500/30 active:scale-95 transition-all text-lg disabled:opacity-50">🎒 クラスを作成する</button>
-                </div>
-
-                <details className="border-2 border-blue-100 bg-blue-50/40 rounded-3xl p-6">
-                  <summary className="font-black text-gray-800 cursor-pointer flex items-center gap-2 list-none"><Icon path={Icons.Link} className="w-5 h-5 text-blue-500"/> 以前のスプレッドシートを取り込む（引っ越し）</summary>
-                  <p className="text-sm text-gray-500 my-3 leading-relaxed">旧バージョンで使っていたDBスプレッドシート（あなたが編集権限を持つもの）をクラスとして登録できます。</p>
-                  <input type="text" value={adoptUrl} onChange={e=>setAdoptUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." className="w-full border-2 border-blue-100 rounded-2xl p-3.5 text-sm outline-none focus:border-blue-400 bg-white font-mono mb-3 transition-colors"/>
-                  <button onClick={handleAdopt} disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all disabled:opacity-50">🔗 このスプレッドシートを取り込む</button>
-                </details>
-
-                {onCancel && <button onClick={onCancel} className="w-full mt-5 py-3 rounded-2xl font-bold bg-gray-50 text-gray-500 hover:bg-gray-100 transition-colors">もどる</button>}
-              </>
-            )}
-          </div>
-          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-        </div>
-      );
-    };
-
-    // ==========================================
-    // 🧑‍🏫 先生ポータルのルート（デプロイ A）
+    // 🧑‍🏫 先生の画面のルート
+    //
+    // 1 ファイル = 1 クラス。クラスの作成も切り替えも無い。
+    // 先生かどうかはサーバーが決める（_meta の ownerEmail か、名簿の「担任」）。
     // ==========================================
     const OwnerRoot = () => {
       const server = useServer();
-      const [phase, setPhase] = useState('loading');   // loading | create | app | error
-      const [tenants, setTenants] = useState([]);
-      const [ownerEmail, setOwnerEmail] = useState('');
-      const [selectedCode, setSelectedCode] = useState(null);
-      const [tenantData, setTenantData] = useState(null);
+      const [phase, setPhase] = useState('loading');   // loading | app | error
+      const [classData, setClassData] = useState(null);
       const [errorMsg, setErrorMsg] = useState('');
 
-      const loadTenants = async (preferCode) => {
-        const res = await window.callOwnerApi('opListTenants').catch(e => ({ success: false, error: e.message }));
-        if (!res || !res.success) {
-          setErrorMsg(res && res.error || 'ポータルに接続できませんでした');
-          setPhase('error');
-          return;
-        }
-        setOwnerEmail(res.ownerEmail || '');
-        setTenants(res.tenants || []);
-        if (!res.tenants || res.tenants.length === 0) { setPhase('create'); return; }
-        let code = preferCode || localStorage.getItem('rj_selectedClass');
-        if (!res.tenants.some(t => t.tenantCode === code)) code = res.tenants[0].tenantCode;
-        // 同じクラスを選び直した場合は useEffect が発火しないため直接読み込む
-        if (code === selectedCode) loadTenantData(code);
-        else setSelectedCode(code);
-      };
-
-      const loadTenantData = async (code) => {
+      const load = async () => {
         setPhase('loading');
-        const res = await server.owner('opGetTenantData', code);
+        const res = await server.owner('opGetClassData');
         if (res && res.success) {
-          setTenantData(res);
-          localStorage.setItem('rj_selectedClass', code);
+          setClassData(res);
           setPhase('app');
         } else {
           setErrorMsg(failMsg(res, 'クラスのデータを読み込めませんでした'));
@@ -1363,8 +1327,7 @@ const { useState, useEffect, useRef, useMemo } = React;
         }
       };
 
-      useEffect(() => { loadTenants(); }, []);
-      useEffect(() => { if (selectedCode) loadTenantData(selectedCode); }, [selectedCode]);
+      useEffect(() => { load(); }, []);
 
       if (phase === 'loading') return <FullScreenSpinner color="border-blue-500" />;
 
@@ -1372,17 +1335,8 @@ const { useState, useEffect, useRef, useMemo } = React;
         <CenterCard icon="⚠️">
           <h1 className="text-2xl font-black text-gray-800 mb-3">読み込めませんでした</h1>
           <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6 whitespace-pre-wrap">{errorMsg}</p>
-          <button onClick={()=>{ setPhase('loading'); loadTenants(); }} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう一度読み込む</button>
+          <button onClick={load} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all">もう一度読み込む</button>
         </CenterCard>
-      );
-
-      if (phase === 'create') return (
-        <CreateClassScreen
-          server={server}
-          ownerEmail={ownerEmail}
-          onCreated={(code) => { loadTenants(code); }}
-          onCancel={tenants.length > 0 ? () => setSelectedCode(tenants[0].tenantCode) : null}
-        />
       );
 
       return (
@@ -1390,19 +1344,12 @@ const { useState, useEffect, useRef, useMemo } = React;
           <header className="flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-blue-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
             <div className="flex items-center gap-2 md:gap-3 min-w-0">
               <div className="p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-blue-500 to-blue-600"><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
-              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-blue-600">教員ダッシュボード <span aria-hidden="true" className="hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"></span> <span className="text-gray-600 text-base md:text-xl hidden sm:inline">{tenantData.tenant.tenantName}</span></h1>
+              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-blue-600">教員ダッシュボード <span aria-hidden="true" className="hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"></span> <span className="text-gray-600 text-base md:text-xl hidden sm:inline">{classData.klass.className}</span></h1>
             </div>
-            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-500 shrink-0" /> <span className="truncate">{ownerEmail} 先生</span></div>
+            <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-500 shrink-0" /> <span className="truncate">{classData.klass.ownerEmail} 先生</span></div>
           </header>
           <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
-            <TeacherApp
-              data={tenantData}
-              tenants={tenants}
-              server={server}
-              refresh={() => loadTenantData(selectedCode)}
-              onSwitchTenant={(code) => setSelectedCode(code)}
-              onCreateNew={() => setPhase('create')}
-            />
+            <TeacherApp data={classData} server={server} refresh={load} />
           </div></main>
           <footer className="flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm">
             <span>© 2026 ふりかえりジャーナル <a href="https://giga-school.com" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
@@ -1411,10 +1358,11 @@ const { useState, useEffect, useRef, useMemo } = React;
       );
     };
 
+
     // ==========================================
-    // 🎒 児童アプリのルート（デプロイ B）
-    //    シェルから ID トークン + クラスコードを受け取り、
-    //    参加状態に応じて 参加申請 / 承認待ち / 本体 を出し分ける
+    // 🎒 児童の画面のルート
+    //    開いているアカウントがそのまま本人。参加状態に応じて
+    //    参加申請 / 承認待ち / 本体 を出し分ける
     // ==========================================
     const MemberRoot = () => {
       const server = useServer();
@@ -1427,7 +1375,7 @@ const { useState, useEffect, useRef, useMemo } = React;
       const sync = async () => {
         const res = await window.callMemberApi('mbSync').catch(e => ({ success: false, error: e.message }));
         if (res && res.success) {
-          setData({ user: res.me, todayTheme: res.todayTheme, journals: res.journals, tenantName: res.tenantName });
+          setData({ user: res.me, todayTheme: res.todayTheme, journals: res.journals, className: res.className });
           setPhase('app');
           return;
         }
@@ -1472,7 +1420,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 
       if (phase === 'join') return (
         <CenterCard icon="🎒">
-          <h1 className="text-2xl font-black text-gray-800 mb-2">{statusInfo.tenantName || 'クラス'} に<ruby>参加<rp>(</rp><rt className="text-[0.5em]">さんか</rt><rp>)</rp></ruby>する</h1>
+          <h1 className="text-2xl font-black text-gray-800 mb-2">{statusInfo.className || 'クラス'} に<ruby>参加<rp>(</rp><rt className="text-[0.5em]">さんか</rt><rp>)</rp></ruby>する</h1>
           <p className="text-sm text-gray-500 font-medium leading-relaxed mb-6"><ruby>名前<rp>(</rp><rt className="text-[0.6em]">なまえ</rt><rp>)</rp></ruby>を<ruby>入力<rp>(</rp><rt className="text-[0.6em]">にゅうりょく</rt><rp>)</rp></ruby>して、<ruby>参加<rp>(</rp><rt className="text-[0.6em]">さんか</rt><rp>)</rp></ruby>ボタンをおしてね。</p>
           {statusInfo.joinOpen ? (
             <>
@@ -1499,7 +1447,7 @@ const { useState, useEffect, useRef, useMemo } = React;
           <header className="flex-none bg-white/80 backdrop-blur-md z-30 px-3 py-2.5 md:p-4 md:px-6 flex justify-between items-center gap-2 border-b border-orange-500 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
             <div className="flex items-center gap-2 md:gap-3 min-w-0">
               <div className="p-2 md:p-2.5 rounded-2xl text-white shadow-sm shrink-0 bg-gradient-to-br from-orange-400 to-orange-500"><Icon path={Icons.Book} className="w-5 h-5 md:w-6 md:h-6"/></div>
-              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-orange-700">ふりかえりジャーナル <span aria-hidden="true" className="hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"></span> <span className="text-gray-500 text-sm md:text-lg hidden sm:inline">{data.tenantName}</span></h1>
+              <h1 className="text-lg md:text-2xl font-black tracking-tight truncate text-orange-700">ふりかえりジャーナル <span aria-hidden="true" className="hidden sm:inline-block w-px h-5 bg-gray-300 align-middle"></span> <span className="text-gray-500 text-sm md:text-lg hidden sm:inline">{data.className}</span></h1>
             </div>
             <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100/80 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl font-bold text-xs md:text-sm text-gray-600 shrink-0 max-w-[45%]"><Icon path={Icons.User} className="w-4 h-4 text-gray-500 shrink-0" /> <span className="truncate">{data.user.name} さん</span></div>
           </header>
@@ -1514,9 +1462,46 @@ const { useState, useEffect, useRef, useMemo } = React;
     };
 
     const App = () => {
-      // 描画完了をPWAシェルへ通知（シェル外では無害）
-      useEffect(() => { if (window.notifyShellReady) window.notifyShellReady(); }, []);
-      return window.BOOT.mode === 'member' ? <MemberRoot /> : <OwnerRoot />;
+      const boot = window.BOOT || {};
+
+      // 束ねられたスプレッドシートが取れない等、サーバー側で先に分かる不調は
+      // 画面を作る前に理由ごと出す。ここを黙って通すと、児童には「真っ白」に見える。
+      if (boot.bootError) return (
+        <CenterCard icon="⚠️">
+          <h1 className="text-2xl font-black text-gray-800 mb-3">まだ<ruby>準備<rp>(</rp><rt>じゅんび</rt><rp>)</rp></ruby>ができていません</h1>
+          <p className="text-sm text-gray-600 font-medium leading-relaxed whitespace-pre-wrap">{boot.bootError}</p>
+        </CenterCard>
+      );
+
+      // 「アクセスできるユーザー」が「全員（匿名ユーザーを含む）」だと、誰が書いたかを
+      // 確かめられない。名前を騙れる状態で学習記録を書かせないため、ここで止める。
+      if (!boot.signedIn) return (
+        <CenterCard icon="🔑">
+          <h1 className="text-2xl font-black text-gray-800 mb-3">学校の<ruby>Google<rp>(</rp><rt>ぐーぐる</rt><rp>)</rp></ruby>アカウントでログインしてね</h1>
+          <p className="text-sm text-gray-600 font-medium leading-relaxed mb-4">
+            いま、だれが使っているかを たしかめられませんでした。
+            学校のアカウントでログインしてから、もういちど このURLをひらいてください。
+          </p>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            先生へ: デプロイの「アクセスできるユーザー」を「同じ組織内の全員」にしてください。
+            「全員（匿名ユーザーを含む）」では、誰が書いたかを確かめられません。
+          </p>
+        </CenterCard>
+      );
+
+      // 先生が「はじめの設定」を押していない。ここで誰かを先生にしてしまうと、
+      // 先生より先に開いた児童が恒久的に先生になる。だから待つ。
+      if (!boot.setupDone) return (
+        <CenterCard icon="⏳">
+          <h1 className="text-2xl font-black text-gray-800 mb-3">まだ<ruby>準備中<rp>(</rp><rt>じゅんびちゅう</rt><rp>)</rp></ruby>です</h1>
+          <p className="text-sm text-gray-600 font-medium leading-relaxed mb-4">先生の じゅんびが おわるまで まってね。</p>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            先生へ: スプレッドシートを開き、メニュー「ふりかえりジャーナル」＞「はじめの設定」を 1 回押してください。
+          </p>
+        </CenterCard>
+      );
+
+      return boot.mode === 'member' ? <MemberRoot /> : <OwnerRoot />;
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));

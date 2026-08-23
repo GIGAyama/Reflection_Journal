@@ -1,27 +1,35 @@
+/**
+ * 退役した Drive ネイティブ版（legacy/drive-native/）の回帰テスト。
+ *
+ * この版は 2026-08-23 に配信から外した（本番はコンテナバインドの GAS）。
+ * それでも残して回しているのは、legacy/drive-native/kit/ が
+ * 「他アプリを Drive ネイティブ方式へ移す」ための部品として公開されているため。
+ * ここが赤くなったら、その持ち出し先が壊れる。
+ *
+ * ⚠️ 本番（README / MANUAL / docs/）についての検査はここに書かないこと。
+ *    現在の本番の検査は scripts/test-gas.mjs と scripts/check-project.mjs にある。
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const index = readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../docs/drive-app.js', import.meta.url), 'utf8');
-const css = readFileSync(new URL('../docs/drive.css', import.meta.url), 'utf8');
-const config = readFileSync(new URL('../docs/config.js', import.meta.url), 'utf8');
-const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-const manual = readFileSync(new URL('../MANUAL.md', import.meta.url), 'utf8');
-const architecture = readFileSync(new URL('../docs/DRIVE_NATIVE_ARCHITECTURE.md', import.meta.url), 'utf8');
-const oauthGuide = readFileSync(new URL('../docs/OAUTH_SHARED_RECORDS_SETUP.md', import.meta.url), 'utf8');
+const index = readFileSync(new URL('../legacy/drive-native/index.html', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../legacy/drive-native/drive-app.js', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../legacy/drive-native/drive.css', import.meta.url), 'utf8');
+const config = readFileSync(new URL('../legacy/drive-native/config.js', import.meta.url), 'utf8');
+const architecture = readFileSync(new URL('../legacy/drive-native/DRIVE_NATIVE_ARCHITECTURE.md', import.meta.url), 'utf8');
+const oauthGuide = readFileSync(new URL('../legacy/drive-native/OAUTH_SHARED_RECORDS_SETUP.md', import.meta.url), 'utf8');
 // 共通部分（分散ポートフォリオのキット）。本体と同じく初期表示で読み込まれる。
 const kitSources = Object.fromEntries(
   ['namespace.js', 'invite.js', 'drive-client.js', 'records.js', 'session.js', 'index.js']
-    .map((name) => [name, readFileSync(new URL(`../docs/kit/${name}`, import.meta.url), 'utf8')])
+    .map((name) => [name, readFileSync(new URL(`../legacy/drive-native/kit/${name}`, import.meta.url), 'utf8')])
 );
 const kitSession = kitSources['session.js'];
 const kitIndex = kitSources['index.js'];
-const core = readFileSync(new URL('../docs/drive-core.js', import.meta.url), 'utf8');
-const api = readFileSync(new URL('../docs/drive-api.js', import.meta.url), 'utf8');
-const sw = readFileSync(new URL('../docs/sw.js', import.meta.url), 'utf8');
-const portingGuide = readFileSync(new URL('../docs/PORTING_FROM_GAS.md', import.meta.url), 'utf8');
-const kitReadme = readFileSync(new URL('../docs/kit/README.md', import.meta.url), 'utf8');
+const core = readFileSync(new URL('../legacy/drive-native/drive-core.js', import.meta.url), 'utf8');
+const api = readFileSync(new URL('../legacy/drive-native/drive-api.js', import.meta.url), 'utf8');
+const portingGuide = readFileSync(new URL('../legacy/drive-native/PORTING_FROM_GAS.md', import.meta.url), 'utf8');
+const kitReadme = readFileSync(new URL('../legacy/drive-native/kit/README.md', import.meta.url), 'utf8');
 
 test('GitHub Pages共通URLがDrive版を直接起動する', () => {
   assert.match(index, /drive-app\.js/);
@@ -250,30 +258,15 @@ test('ログイン画面とヘッダーはPWAと同じアプリアイコンを�
   assert.doesNotMatch(app, /📔/);
 });
 
-test('READMEとMANUALが現在のDriveネイティブ実装を説明している', () => {
-  const userDocs = `${readme}\n${manual}`;
+test('退役した版の技術文書が、権限の段階要求を説明したまま残っている', () => {
   const technicalDocs = `${architecture}\n${oauthGuide}`;
-
-  assert.match(readme, /現在版はGASを使いません/);
-  assert.match(readme, /本番入口 `docs\/index\.html`/);
-  assert.match(readme, /ブラウザがGoogle Drive REST APIへ直接通信/);
-  assert.match(readme, /ルート直下の `\*\.gs`.*移行前のGAS版/s);
-  assert.doesNotMatch(manual, /GAS.*デプロイ.*必要です/);
-
   assert.match(app, /const INITIAL_SCOPES = BASE_SCOPES/);
   assert.match(app, /requireSharedRead/);
-  for (const document of [readme, manual, architecture, oauthGuide]) {
+  for (const document of [architecture, oauthGuide]) {
     assert.match(document, /初回|最初/);
     assert.match(document, /drive\.readonly|Drive閲覧権限|Driveの閲覧権限/);
   }
   assert.match(technicalDocs, /drive\.readonly[^\n]*段階的|段階的[^\n]*drive\.readonly/);
-
-  assert.match(manual, /先生へもう一度届ける/);
-  assert.doesNotMatch(manual, /先生へ再共有/);
-  assert.match(userDocs, /児童.*参加済みクラス一覧/s);
-  assert.doesNotMatch(userDocs, /前回の画面へ戻/);
-  assert.match(manual, /端末の戻るジェスチャー／ボタン、ブラウザの戻るボタン/);
-  assert.match(userDocs, /利用者が入力した文章.*自動.*ふりがな/s);
 });
 
 test('本体は共通部分をキットから読み、キットは本体に依存しない', () => {
@@ -289,11 +282,13 @@ test('本体は共通部分をキットから読み、キットは本体に依�
   }
 });
 
-test('オフラインでもキットを含むシェル一式が配信される', () => {
-  for (const asset of ['namespace.js', 'invite.js', 'drive-client.js', 'records.js', 'session.js', 'index.js']) {
-    assert.ok(sw.includes(`./kit/${asset}`), `Service Workerのキャッシュ対象に kit/${asset} がありません`);
-  }
-  assert.match(sw, /const CACHE_PREFIX = 'rj-shell-'/);
+test('退役した版の offline.html は JavaScript に頼っていない', () => {
+  const offline = readFileSync(new URL('../legacy/drive-native/offline.html', import.meta.url), 'utf8')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  assert.doesNotMatch(offline, /<script/i);
+  // 「アプリへ戻るリンク」は、この退役した版には最後まで無かった。
+  // 配信から外したので直さない。いま配信している docs/offline.html には入っている
+  // （check-project.mjs の E8 が見ている）。
 });
 
 test('横展開の手順書が、移し替えの前提と落とし穴を説明している', () => {
@@ -305,5 +300,4 @@ test('横展開の手順書が、移し替えの前提と落とし穴を説明�
   assert.match(portingGuide, /Registry\.gs/);
   assert.match(portingGuide, /version/);
   assert.match(kitReadme, /createDriveNativeApp/);
-  assert.match(readme, /PORTING_FROM_GAS\.md/);
 });

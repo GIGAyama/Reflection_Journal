@@ -1,6 +1,11 @@
 # 🔍 GIGA Standard v5 監査：ふりかえりジャーナル
 
-> **履歴資料:** この文書のGAS計測値は旧構成の記録です。現在の本番構成はGitHub Pages + Google Drive APIへ完全移行しています。現行の検査結果は `npm run verify`、設計は `docs/DRIVE_NATIVE_ARCHITECTURE.md` を参照してください。
+> **履歴資料（2026-08-23 追記）:** この文書は 2 世代前（GitHub Pages シェル + GAS 2デプロイ）の監査記録です。
+> その後 Drive ネイティブ版へ移り、さらに **スプレッドシートにコンテナバインドした GAS を先生ごとに配る形**へ変えました。
+> 現行の検査結果は `npm run verify`、配布の形は `README.md` と `docs/copy-distribution.md`、
+> 退役した Drive ネイティブ版の設計は `legacy/drive-native/DRIVE_NATIVE_ARCHITECTURE.md` を参照してください。
+>
+> **この文書の実測値を、現在の状態の根拠に使わないこと。**
 
 - **監査日**: 2026-08-08
 - **監査時のコミット**: `b781dbd`（`main`）

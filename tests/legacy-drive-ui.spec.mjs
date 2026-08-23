@@ -1,3 +1,10 @@
+/**
+ * 退役した Drive ネイティブ版（legacy/drive-native/）のブラウザ回帰テスト。
+ *
+ * この版は 2026-08-23 に配信から外した。それでも回しているのは、
+ * legacy/drive-native/kit/ が他アプリへの持ち出し部品として公開されているため。
+ * いま配信しているもの（導入案内ページ）は tests/site.spec.mjs で見る。
+ */
 import { test, expect } from '@playwright/test';
 
 const now = new Date().toISOString();
@@ -88,7 +95,7 @@ async function mockGoogle(page, role, { denyShared = false, empty = false } = {}
 
 async function loginAs(page, role) {
   await mockGoogle(page, role);
-  await page.goto('/');
+  await page.goto('/legacy/drive-native/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: role === 'teacher' ? /先生として使う/ : /児童として使う/ }).click();
   await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();
@@ -99,7 +106,7 @@ async function loginAs(page, role) {
 test('ログイン後は一覧を挟まず自分のクラスから始まり、戻ると状況つきの一覧に出る', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockGoogle(page, 'student');
-  await page.goto('/');
+  await page.goto('/legacy/drive-native/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
 
   // 役割選択は絵記号つきの2枚。児童側の文言にはふりがながある
@@ -339,7 +346,7 @@ const BASE_SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.
 test('自分のファイルしか読まない画面では、制限付きスコープを求めない', async ({ page }) => {
   // 一覧・作成の画面は drive.file だけで足りる。クラスを開くまで drive.readonly を求めない。
   await mockGoogle(page, 'teacher', { empty: true });
-  await page.goto('/');
+  await page.goto('/legacy/drive-native/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: /先生として使う/ }).click();
   await expect(page.getByRole('button', { name: 'クラスを作成' })).toBeVisible();
@@ -348,7 +355,7 @@ test('自分のファイルしか読まない画面では、制限付きスコ�
 
 test('参加クラスの無い児童にも、制限付きスコープを求めない', async ({ page }) => {
   await mockGoogle(page, 'student', { empty: true });
-  await page.goto('/');
+  await page.goto('/legacy/drive-native/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: /児童として使う/ }).click();
   await expect(page.locator('.empty')).toBeVisible();
@@ -357,7 +364,7 @@ test('参加クラスの無い児童にも、制限付きスコープを求め�
 
 test('クラスを開く時に、はじめて共有記録の閲覧を求める', async ({ page }) => {
   await mockGoogle(page, 'teacher');
-  await page.goto('/');
+  await page.goto('/legacy/drive-native/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: /先生として使う/ }).click();
 
@@ -379,7 +386,7 @@ test('クラスを開く時に、はじめて共有記録の閲覧を求める',
 
 test('共有記録の閲覧を許可しなかった場合は理由と再試行を表示する', async ({ page }) => {
   await mockGoogle(page, 'student', { denyShared: true });
-  await page.goto('/');
+  await page.goto('/legacy/drive-native/');
   await page.getByRole('button', { name: 'Googleアカウントで続ける' }).click();
   await page.getByRole('button', { name: /児童として使う/ }).click();
   await page.getByRole('button', { name: '共有された記録の同期を許可する' }).click();

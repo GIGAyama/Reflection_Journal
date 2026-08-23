@@ -1,17 +1,16 @@
 {
   "name": "ふりかえりジャーナル",
-  "short_name": "ジャーナル",
-  "description": "毎日の5分間で児童のメタ認知を育み、先生との深い信頼関係を築くふりかえりジャーナル",
+  "short_name": "ジャーナル案内",
+  "description": "ふりかえりジャーナルの導入案内。スプレッドシートをコピーして、先生ご自身のアカウントで公開する手順を載せています。",
   "lang": "ja",
   "dir": "ltr",
   "id": "/",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "minimal-ui",
   "display_override": [
-    "standalone",
-    "fullscreen",
-    "minimal-ui"
+    "minimal-ui",
+    "browser"
   ],
   "launch_handler": {
     "client_mode": [
@@ -20,8 +19,8 @@
     ]
   },
   "orientation": "any",
-  "background_color": "#fff7ed",
-  "theme_color": "#f97316",
+  "background_color": "#ffffff",
+  "theme_color": "#a5410a",
   "categories": [
     "education",
     "kids"

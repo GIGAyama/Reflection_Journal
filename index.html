@@ -11,34 +11,21 @@
 
   <script>
     // GAS テンプレートが評価する行。doGet(Main.gs) が渡すブート情報。
-    // GAS 外で開いた場合はこのブロックだけが構文エラーになるが、
-    // 次の <script> ブロックでフォールバックが働く
-    window.BOOT = {
-      mode: '<?= bootMode ?>',              // 'owner' | 'member'
-      tenantCode: '<?= bootTenantCode ?>',
-      shellUrl: '<?= bootShellUrl ?>',
-      shellOrigin: '<?= bootShellOrigin ?>'
-    };
+    // GAS の外（手元のプレビュー）で開いた場合はこの行が構文エラーになるので、
+    // 次の <script> でフォールバックを入れている。
+    window.BOOT = <?!= bootJson ?>;
   </script>
   <script>
-    // ローカルプレビュー用フォールバック
-    if (!window.BOOT) window.BOOT = { mode: 'owner', tenantCode: '', shellUrl: '', shellOrigin: '' };
-  </script>
-  <script>
-    // ── 起動ビーコン（何かの理由で本編が動かなくても到達をシェルへ通知するため、素の JS で先頭に置く） ──
-    (function () {
-      try {
-        var target = window.BOOT.shellOrigin || '*';
-        window.parent.postMessage({ type: 'app:loaded', libs: { react: !!window.React } }, target);
-      } catch (e) {}
-    })();
+    if (!window.BOOT || typeof window.BOOT !== 'object') {
+      window.BOOT = { mode: 'owner', className: 'ふりかえりジャーナル', signedIn: true, setupDone: true, webAppUrl: '' };
+    }
   </script>
 
   <!-- 実行コード（React / ReactDOM / canvas-confetti）は自分側に持つ。
        学校のネットワークが unpkg / jsDelivr / cdn.tailwindcss.com を塞いでいても画面が出るようにするため。
        生成物なので手で編集しない（npm run build で作り直す）。 -->
   <?!= include('vendor'); ?>
-  <!-- QR生成は先生ポータル専用。児童端末の初回JSには含めない。 -->
+  <!-- QR生成は先生の画面だけ。児童端末の初回JSには含めない。 -->
   <? if (bootMode === 'owner') { ?><?!= include('qr'); ?><? } ?>
   <?!= include('css'); ?>
 
@@ -50,150 +37,60 @@
 
   <script>
     // ==========================================
-    // 🤝 PWAシェル（GitHub Pages）とのブリッジ
-    //    - 児童モード: ID トークン + クラスコードを postMessage ハンドシェイクで受領
-    //    - 先生モード: Session で本人特定するためトークン不要（描画完了通知のみ）
+    // サーバー呼び出し
+    //
+    // 以前はこの画面を GitHub Pages のシェルが iframe で包み、Google ログインの
+    // ID トークンを postMessage で渡していた。いまはコンテナバインドで
+    // 先生ごとにデプロイするため、開いているアカウントがそのまま本人になる。
+    // ハンドシェイクもクラスコードも要らない（Main.gs の見出しを参照）。
     // ==========================================
     (function () {
-      window.__shellAcked = false;
-
-      function post(msg) {
-        var target = window.BOOT.shellOrigin || '*';
-        try { window.parent.postMessage(msg, target); } catch (e) {}
-        try { if (window.top && window.top !== window.parent) window.top.postMessage(msg, target); } catch (e) {}
-        // 「べつのタブでひらく」動線: シェルが window.open で開いた場合は opener がシェル
-        try { if (window.opener) window.opener.postMessage(msg, target); } catch (e) {}
-      }
-
-      // ── シェル連携ブリッジ（児童モード） ──
-      // 受信は shellOrigin が設定されていればそのオリジンのみ許可。
-      // ID トークンの真正性はサーバー側検証（Auth.gs）が最終防衛線。
-      var Bridge = {
-        token: null,
-        tenantCode: window.BOOT.tenantCode || '',
-        waiters: [],
-
-        init: function () {
-          if (this._inited) return;
-          this._inited = true;
-          var self = this;
-          window.addEventListener('message', function (ev) {
-            if (window.BOOT.shellOrigin && ev.origin !== window.BOOT.shellOrigin) return;   // ★ origin 検証
-            var d = ev.data || {};
-            if (d.type === 'app:shellAck') window.__shellAcked = true;
-            if (d.type === 'app:idToken' && typeof d.idToken === 'string' && d.idToken) {
-              // クラスコードは URL パラメータではなくハンドシェイクで受け取る
-              if (typeof d.tenantCode === 'string' && d.tenantCode) {
-                self.tenantCode = d.tenantCode.replace(/[^A-Z2-9]/gi, '').toUpperCase().slice(0, 16);
-              }
-              self.token = d.idToken;
-              self.waiters.splice(0).forEach(function (w) { w.done(d.idToken); });
-            }
-          });
-        },
-
-        // announce を 700ms 間隔で再送する。iframe の準備完了とシェルの listener 登録に
-        // 競合があるため、1 回だけ送る実装だと取りこぼす
-        _wait: function (announce, timeoutMs) {
-          var self = this;
-          return new Promise(function (resolve, reject) {
-            var iv = setInterval(announce, 700);
-            var w = {};
-            var tm = setTimeout(function () { finish(false); }, timeoutMs);
-            function finish(ok, v) {
-              clearInterval(iv); clearTimeout(tm);
-              self.waiters = self.waiters.filter(function (x) { return x !== w; });
-              ok ? resolve(v) : reject(new Error('シェルに接続できません。共通URL（先生から配られたURL）から開いてください'));
-            }
-            w.done = function (t) { finish(true, t); };
-            self.waiters.push(w);
-            announce();
-          });
-        },
-
-        getToken: function (timeoutMs) {
-          if (this.token) return Promise.resolve(this.token);
-          return this._wait(function () { post({ type: 'app:ready' }); }, timeoutMs || 20000);
-        },
-
-        refresh: function (timeoutMs) {
-          this.token = null;
-          return this._wait(function () { post({ type: 'app:needToken' }); }, timeoutMs || 25000);
-        }
-      };
-      window.Bridge = Bridge;
-      if (window.BOOT.mode === 'member') { Bridge.init(); post({ type: 'app:ready' }); }
-      else {
-        window.addEventListener('message', function (ev) {
-          if (window.BOOT.shellOrigin && ev.origin !== window.BOOT.shellOrigin) return;
-          if (ev.data && ev.data.type === 'app:shellAck') window.__shellAcked = true;
+      /** サーバーは必ず JSON 文字列を返す */
+      window.runGas = function (fn) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return new Promise(function (resolve, reject) {
+          if (typeof google === 'undefined' || !google.script) { reject(new Error('サーバーに接続できません')); return; }
+          google.script.run
+            .withSuccessHandler(function (res) {
+              try { resolve(JSON.parse(res)); } catch (e) { resolve(res); }
+            })
+            .withFailureHandler(reject)[fn].apply(google.script.run, args);
         });
-      }
+      };
 
-      // 描画完了をシェルへ通知
-      window.notifyShellReady = function () { post({ type: 'app:ready' }); };
+      window.callOwnerApi = function () {
+        return window.runGas.apply(null, arguments);
+      };
 
-      // 再読み込みヘルパー: シェル内なら親に app:reload を送って iframe を貼り直してもらう。
-      // 単体表示なら自分でリロードする。（別オリジンの top への location アクセスは
-      // SecurityError になるため、必ずこのヘルパーを経由すること）
-      window.appReload = function () {
-        post({ type: 'app:reload' });
-        if (!window.__shellAcked) {
-          try { window.top.location.reload(); } catch (e) { window.location.reload(); }
+      window.callMemberApi = function () {
+        return window.runGas.apply(null, arguments);
+      };
+
+      /**
+       * 40 人が同時に提出すると LockService の取り合いになる。
+       * LOCK_BUSY だけを指数バックオフでやり直す（児童は何もしなくてよい）。
+       */
+      window.callMemberApiWithBackoff = async function () {
+        var args = Array.prototype.slice.call(arguments);
+        var delay = 300;
+        for (var i = 0; ; i++) {
+          var res = await window.callMemberApi.apply(null, args);
+          if (res && !res.success && res.code === 'LOCK_BUSY' && i < 3) {
+            await new Promise(function (r) { setTimeout(r, delay); });
+            delay *= 2;
+            continue;
+          }
+          return res;
         }
       };
 
-      window.addEventListener('load', function () { setTimeout(window.notifyShellReady, 0); });
+      // 再読み込み。GAS は画面を iframe で包むので、自分の location を触ると
+      // 外枠だけが残る。google.script.host.setWidth のような外枠 API は
+      // ここでは使えないため、同一オリジンの自分自身を読み直す。
+      window.appReload = function () {
+        try { window.location.reload(); } catch (e) {}
+      };
     })();
-
-    // ── GAS 呼び出しラッパ（サーバーは必ず JSON 文字列を返す） ──
-    window.runGas = function (fn) {
-      var args = Array.prototype.slice.call(arguments, 1);
-      return new Promise(function (resolve, reject) {
-        if (typeof google === 'undefined' || !google.script) { reject(new Error('サーバーに接続できません')); return; }
-        google.script.run
-          .withSuccessHandler(function (res) {
-            try { resolve(JSON.parse(res)); } catch (e) { resolve(res); }
-          })
-          .withFailureHandler(reject)[fn].apply(google.script.run, args);
-      });
-    };
-
-    /** 先生 API 呼び出し（デプロイ A。Session で本人特定するのでトークン不要） */
-    window.callOwnerApi = function (fn) {
-      var args = Array.prototype.slice.call(arguments, 1);
-      return window.runGas.apply(null, [fn].concat(args));
-    };
-
-    /**
-     * 児童 API 呼び出し。第 1 引数の idToken と第 2 引数の tenantCode を自動で付ける。
-     * TOKEN_EXPIRED が返ったらシェルにトークン再取得を要求し、一度だけ自動リトライする
-     * （児童は何も操作しなくてよい）。LOCK_BUSY は指数バックオフでリトライする。
-     */
-    window.callMemberApi = async function (fn) {
-      var args = Array.prototype.slice.call(arguments, 1);
-      var token = await window.Bridge.getToken();
-      var res = await window.runGas.apply(null, [fn, token, window.Bridge.tenantCode].concat(args));
-      if (res && !res.success && res.code === 'TOKEN_EXPIRED') {
-        token = await window.Bridge.refresh();
-        res = await window.runGas.apply(null, [fn, token, window.Bridge.tenantCode].concat(args));
-      }
-      return res;
-    };
-
-    window.callMemberApiWithBackoff = async function () {
-      var args = Array.prototype.slice.call(arguments);
-      var delay = 300;
-      for (var i = 0; ; i++) {
-        var res = await window.callMemberApi.apply(null, args);
-        if (res && !res.success && res.code === 'LOCK_BUSY' && i < 3) {
-          await new Promise(function (r) { setTimeout(r, delay); });
-          delay *= 2;
-          continue;
-        }
-        return res;
-      }
-    };
   </script>
 </head>
 <body>

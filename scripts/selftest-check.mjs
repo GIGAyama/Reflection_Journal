@@ -17,16 +17,42 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** 壊し方と、そのとき落ちてほしい検査 ID */
 const CASES = [
   ['B6',  'docs/index.html',      (s) => s.replace('</head>', '<script src="https://cdn.tailwindcss.com"></script></head>')],
-  ['B8',  'docs/drive-app.js',    (s) => s.replace('function ensureQr()', "const externalQr = 'https://api.qrserver.com';\nfunction ensureQr()")],
-  ['D14', 'docs/index.html',      (s) => s.replace('initial-scale=1, viewport-fit=cover', 'initial-scale=1, maximum-scale=1, user-scalable=no')],
+  ['B8',  'index.html',           (s) => s.replace("<? if (bootMode === 'owner') { ?><?!= include('qr'); ?><? } ?>", "<?!= include('qr'); ?>")],
+  ['D14', 'docs/index.html',      (s) => s.replace('initial-scale=1.0, viewport-fit=cover', 'initial-scale=1.0, maximum-scale=1, user-scalable=no')],
   ['D1',  'docs/index.html',      (s) => s.replace(', viewport-fit=cover', '')],
-  ['F4',  'docs/drive.css',       (s) => s.replace(/rt \{ color: #5f6368; font-weight: 500; \}/, 'rt { color: #666; }')
-                                     .replace(/, \[class\*="text-white"\] rt/, '')],
-  ['E6',  'docs/sw.js',      (s) => s.replace("self.clients.claim();", "localStorage.removeItem('x'); self.clients.claim();")],
-  ['E5',  'docs/sw.js',      (s) => s.replace(".filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)", ".filter((k) => k !== CACHE_NAME)")],
-  ['D10', 'docs/drive.css', (s) => s.replace('animation-duration: .01ms !important;', 'animation-duration: 0 !important;')],
+  ['D2',  'tools/extra.css',      (s) => s.replace('@supports (height: 100dvh) {', '@supports (height: 1px) {')
+                                     .replace('.h-screen { height: 100dvh !important; }', '.h-screen { height: 100vh !important; }')],
+  ['F4',  'tools/extra.css',      (s) => s.replace('rt { color: #5f6368; font-weight: 500; }', 'rt { color: #666; }')
+                                     .replace('[class*="text-white"] rt,\n', '')],
+  ['E6',  'docs/sw.js',           (s) => s.replace('self.clients.claim();', "localStorage.removeItem('x'); self.clients.claim();")],
+  ['E5',  'docs/sw.js',           (s) => s.replace('.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)', '.filter((k) => k !== CACHE_NAME)')],
+  ['E7',  'docs/sw.js',           (s) => s.replace('    // ここでは skipWaiting しない。', '    self.skipWaiting();\n    // ここでは skipWaiting しない。')],
+  ['E8',  'docs/offline.html',    (s) => s.replace('<a class="btn btn--primary" href="./">案内ページをひらく</a>', '<button onclick="location.reload()">もういちど ためす</button>')],
+  ['D10', 'tools/extra.css',      (s) => s.replace('animation-duration: .01ms !important;', 'animation-duration: 0 !important;')],
+  ['D11', 'docs/style.css',       (s) => s.replace('@media (forced-colors: active) {', '@media (min-width: 1px) {')],
   ['E1',  'docs/manifest.webmanifest', (s) => s.replace('"id": "/"', '"id": "/Reflection_Journal/"')],
-  ['C5',  'docs/drive-app.js', (s) => s.replace('localStorage.removeItem(draftKey());', 'localStorage.clear();')]
+  ['C5',  'src/app.jsx',          (s) => s.replace("localStorage.removeItem(storeKey('draft'));", 'localStorage.clear();')],
+
+  // ── GAS（正本ゲートに 1 つも無い領域。ここが働かないと .gs は誰にも見られない） ──
+  // 認可を 1 つ外す。google.script.run は末尾 `_` の無い関数を誰でも呼べる
+  ['G1',  'OwnerApi.gs',          (s) => s.replace('function opResetData() {\n  try {\n    const ctx = assertOwner_();',
+                                                   'function opResetData() {\n  try {\n    const ctx = { ss: getDb_() };')],
+  // 児童の書き込みからロックを外す
+  ['G2',  'MemberApi.gs',         (s) => s.replace('    withScriptLock_(function () {                         // 保持区間は最小に',
+                                                   '    (function () {')],
+  // 画面から「誰の記録か」を受け取る形に戻す
+  ['G3',  'MemberApi.gs',         (s) => s.replace('function mbSync() {', 'function mbSync(email) {')],
+  // ほかの児童のメールアドレスを素通しにする
+  ['G4',  'MemberApi.gs',         (s) => s.replace('sanitizeJournals_(getJournalsForEmail_(g.ss, g.email))',
+                                                   'getJournalsForEmail_(g.ss, g.email)')],
+  // スコープを広げる
+  ['G5',  'appsscript.json',      (s) => s.replace('"https://www.googleapis.com/auth/spreadsheets.currentonly"',
+                                                   '"https://www.googleapis.com/auth/drive"')],
+  // 列を番号で引く形に戻す
+  ['G6',  'Db.gs',                (s) => s.replace('function headerMap_(sheet) {', 'function headerMapDisabled_(sheet) {')],
+  // 点検が書き換えを始める
+  ['G7',  'Db.gs',                (s) => s.replace("      found.push({\n        sheet: spec.name, kind: '見出しが無い',",
+                                                   "      sheet.getRange(1, 1).setValue('こわした');\n      found.push({\n        sheet: spec.name, kind: '見出しが無い',")]
 ];
 
 let bad = 0;

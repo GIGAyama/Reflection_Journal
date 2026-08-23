@@ -21,7 +21,7 @@ import {
   syncChannel,
   validateChannelForStudent,
   validatePortfolioForClass
-} from '../docs/drive-core.js';
+} from '../legacy/drive-native/drive-core.js';
 
 test('クラスIDは先生メールと正規化済みコードから決定的に作られる', async () => {
   const a = await computeClassId('Teacher@Example.ED.JP ', 'ab01-cd23');

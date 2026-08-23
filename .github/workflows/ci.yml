@@ -27,10 +27,15 @@ jobs:
       - name: 生成物が原本と一致しているか
         run: node scripts/check-generated.mjs
 
-      - name: QRコード・Drive版完全移行テスト
+      # 配信物を変えたのに版が据え置きだと、古いシェルのキャッシュが掃除されず、
+      # 直した画面が端末に一度も届かない。2026-08-21 に12リポジトリで同時に起きた事故。
+      - name: Service Worker の版が先読み一覧と一致しているか
+        run: node tools/build-sw.mjs --check
+
+      - name: QR・GASの認可とシートの点検・退役版の回帰テスト
         run: npm test
 
-      - name: 品質ゲート（GIGA Standard v5 Part I）
+      - name: 品質ゲート（GIGA Standard v5 Part I ＋ GAS の G1〜G8）
         run: npm run check
 
       - name: 品質ゲート自体が動いているか（わざと壊して落ちることを見る）
@@ -50,7 +55,7 @@ jobs:
         run: |
           npm install --no-save --package-lock=false @playwright/test@1.55.0
           npx playwright install --with-deps chromium
-      - name: 児童・教師UIのE2Eと配置回帰テスト
+      - name: 導入案内ページと退役版UIのE2E
         run: npx playwright test
 
   # 正本（GIGAyama.github.io/standards/）からコピーしたファイルが、

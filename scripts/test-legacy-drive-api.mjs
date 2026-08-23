@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DriveApiError, DriveClient } from '../docs/drive-api.js';
+import { DriveApiError, DriveClient } from '../legacy/drive-native/drive-api.js';
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });

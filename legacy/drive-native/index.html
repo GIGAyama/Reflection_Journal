@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://openidconnect.googleapis.com https://generativelanguage.googleapis.com; frame-src https://accounts.google.com; font-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; upgrade-insecure-requests">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <script src="./pwa-install-hook.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ふりかえりジャーナル</title>
+  <meta name="description" content="児童のGoogle Driveと先生のGoogle Driveを安全につなぐ、学校向けふりかえりジャーナル">
+  <meta name="theme-color" content="#f97316">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ジャーナル">
+  <link rel="stylesheet" href="./drive.css">
+  <script src="./config.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#app">本文へ移動</a>
+  <main id="app" tabindex="-1" aria-live="polite">
+    <section class="center-screen"><div class="loader" aria-hidden="true"></div><p>アプリを準備しています…</p></section>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="pwa-controls" class="pwa-controls" aria-live="polite">
+    <button id="pwa-install" class="pwa-action" type="button" hidden>📲 アプリを入れる</button>
+    <div id="pwa-update" class="pwa-update" hidden><span>新しいバージョンがあります</span><button id="pwa-refresh" class="pwa-action" type="button">さいしんにする</button><button id="pwa-later" class="pwa-later" type="button">あとで</button></div>
+  </div>
+  <script type="module" src="./drive-app.js"></script>
+  <script src="./shell-init.js" defer></script>
+</body>
+</html>

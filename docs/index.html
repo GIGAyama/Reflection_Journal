@@ -1,35 +1,222 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
+
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://openidconnect.googleapis.com https://generativelanguage.googleapis.com; frame-src https://accounts.google.com; font-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; upgrade-insecure-requests">
+  <meta charset="UTF-8">
+  <!-- このページは案内文だけで、実行するコードを持たない。
+       だから script-src は 'none' で足りる。外から取るものも 0 本。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'self'; img-src 'self'; style-src 'self'; manifest-src 'self'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <script src="./pwa-install-hook.js"></script>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>ふりかえりジャーナル</title>
-  <meta name="description" content="児童のGoogle Driveと先生のGoogle Driveを安全につなぐ、学校向けふりかえりジャーナル">
-  <meta name="theme-color" content="#f97316">
+  <!-- 拡大を禁止しない。誤ズーム防止より「見えづらい人が拡大できない」害のほうが大きい。 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>ふりかえりジャーナル｜クラスの1日を5分でふり返るアプリ</title>
+  <meta name="description" content="児童が今日の学びを書き、先生がその日のうちに返せる無償のアプリです。スプレッドシートをコピーして公開するだけで、先生ご自身の Google ドライブの中だけで動きます。">
+  <meta name="theme-color" content="#a5410a">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://reflection-journal.giga-school.com/">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="./icon-180.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="ジャーナル">
-  <link rel="stylesheet" href="./drive.css">
-  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./style.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ふりかえりジャーナル｜クラスの1日を5分でふり返るアプリ">
+  <meta property="og:description" content="児童が今日の学びを書き、先生がその日のうちに返せる無償のアプリ。スプレッドシートをコピーして公開するだけで使えます。">
+  <meta property="og:url" content="https://reflection-journal.giga-school.com/">
+  <meta property="og:image" content="https://reflection-journal.giga-school.com/note/images/04-teacher-detail.png">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary_large_image">
 </head>
+
 <body>
-  <a class="skip-link" href="#app">本文へ移動</a>
-  <main id="app" tabindex="-1" aria-live="polite">
-    <section class="center-screen"><div class="loader" aria-hidden="true"></div><p>アプリを準備しています…</p></section>
+  <main>
+    <h1>ふりかえりジャーナル</h1>
+    <p class="lead">児童が今日の学びを書き、先生がその日のうちに返せるようにした無償のアプリです。
+      小学校の教員が作りました。</p>
+    <p class="meta">Google アカウントが1つあれば動きます。サーバーの費用も、外部サービスの契約もありません。</p>
+
+    <div class="callout callout--warn">
+      <h2>このページからは、ジャーナルを開けません</h2>
+      <p>このアプリは、<strong>先生おひとりずつが、ご自分の Google アカウントで公開して使う</strong>形です。
+        共通の入口はありません。</p>
+      <ul>
+        <li><strong>児童のみなさん</strong>は、先生から配られた URL を開いてください。このページではありません。</li>
+        <li><strong>先生方</strong>は、下の「入れかた」の手順で、ご自分のクラスの URL を作ってください。10 分ほどで終わります。</li>
+      </ul>
+      <p>記録の置き場所は、コピーしたスプレッドシート 1 つだけです。
+        制作者を含め、ほかの誰のところにもデータは行きません。</p>
+    </div>
+
+    <div class="actions">
+      <a class="btn btn--primary" href="https://giga-school.com/apps/reflection-journal/">くわしい紹介を読む</a>
+      <a class="btn btn--ghost" href="https://github.com/GIGAyama/Reflection_Journal" rel="noopener">コードを見る（GitHub）</a>
+    </div>
+
+    <h2>どんなアプリか</h2>
+    <p>ふり返りを書かせるところまでは、ノートでも進みます。難しいのはそのあとです。
+      40 冊を集めて、その日のうちに全部へひとこと返して、明日の朝までに返却する。
+      これが続かないので、ふり返りは「書かせただけ」で終わりがちになります。</p>
+    <p>集めるところと並べるところを画面にまかせれば、その時間はひとこと返すほうに戻せます。
+      スタンプ1つなら 1 人 3 秒、本文の一部を選んでコメントを付けるのも数十秒です。</p>
+
+    <div class="shots">
+      <figure>
+        <img src="./note/images/18-student-writing.png" width="780" height="3000"
+             alt="児童の記入画面。今日のテーマの下に本文の入力欄があり、気持ちを選ぶボタンが並んでいる" decoding="async">
+        <figcaption>今日のテーマを見ながら書きます。書く場所を広げる［広く書く］もあります。</figcaption>
+      </figure>
+      <figure>
+        <img src="./note/images/14-student-reply.png" width="780" height="1880"
+             alt="児童の画面に先生からのおへんじが届いている様子。本文の一部に色が付き、その箇所へのコメントが出ている" loading="lazy" decoding="async">
+        <figcaption>先生のおへんじは、本文のどこについてのものかが分かる形で届きます。</figcaption>
+      </figure>
+    </div>
+
+    <figure class="shot--wide">
+      <img src="./note/images/04-teacher-detail.png" width="2880" height="2200"
+           alt="先生の返却画面。左に児童の本文、右に全体コメント欄と抽出したハイライトが並んでいる" loading="lazy" decoding="async">
+      <figcaption>返却の画面。左の本文でほめたい範囲を選ぶと、右にコメントとスタンプを付けられます。
+        時間がない日はスタンプ 1 つでも返却になります。</figcaption>
+    </figure>
+
+    <h3>使うときの流れ</h3>
+    <ol class="steps">
+      <li>先生が今日のテーマを決めます（曜日ごとに決めておくこともできます）。</li>
+      <li>児童が URL を開き、本文と気持ちを書いて提出します。写真も 1 枚つけられます。</li>
+      <li>先生が一覧で読み、スタンプ・全体コメント・本文の一部へのコメントで返します。</li>
+      <li>児童の画面に「新しいおへんじ」が出ます。カレンダーから過去の記録もたどれます。</li>
+      <li>学期末は CSV か PDF で書き出せます。1 か月以上前の自分の文章へメッセージも書けます。</li>
+    </ol>
+
+    <h2>入れかた</h2>
+    <p>スプレッドシートをコピーして、公開の設定をするだけです。
+      準備するものは Google アカウント1つ。ふだんお使いの学校のアカウントで構いません。
+      10 分ほどで終わります。</p>
+
+    <div class="callout callout--warn">
+      <p><strong>配布用スプレッドシートは準備中です。</strong>
+        下のボタンのリンクは、テンプレートを作ったあとに使えるようになります。
+        いますぐ試すときは、
+        <a href="https://github.com/GIGAyama/Reflection_Journal#readme" rel="noopener">README の「手順B：ファイルを貼り付ける」</a>
+        をご覧ください。入るものは同じです。</p>
+    </div>
+
+    <div class="actions">
+      <a class="btn btn--primary" href="https://docs.google.com/spreadsheets/d/PUT-TEMPLATE-FILE-ID-HERE/copy" rel="noopener">スプレッドシートをコピーして始める</a>
+    </div>
+
+    <ol class="steps">
+      <li>上のボタンを押し、「コピーを作成」を選びます。ご自分のドライブにファイルができます。</li>
+      <li>できたファイルを開き、上のメニュー「ふりかえりジャーナル」＞「はじめの設定」を 1 回押します。
+        承認をたずねられたら許可してください。クラス名を入れると、必要なシートが作られ、
+        <strong>押したご本人がこのクラスの先生として登録されます。</strong></li>
+      <li>「拡張機能」＞「Apps Script」を開き、右上の「デプロイ」＞「新しいデプロイ」＞種類は「ウェブアプリ」。
+        <strong>実行するユーザーは「自分」、アクセスできるユーザーは「同じ組織内の全員」</strong>にします。</li>
+      <li>表示された URL を児童に配れば準備完了です。先生ご自身が同じ URL を開くと、先生の画面が出ます。</li>
+    </ol>
+
+    <div class="callout">
+      <p><strong>コードは、コピーしたファイルの中に入っています。</strong>
+        貼り付ける作業はありません。記録もそのファイルの中に入るので、
+        どこにできたのかを探す必要もありません。</p>
+      <p><strong>「はじめの設定」は、児童に URL を配る前に押してください。</strong>
+        押すまでは誰の画面にも「まだ準備中です」としか出ません。
+        先生が押すまで誰も先生になれない形にしてあるので、児童が先に開いても
+        その子が先生になることはありません。</p>
+    </div>
+
+    <div class="callout callout--warn">
+      <p><strong>アクセスできるユーザーに「全員（匿名ユーザーを含む）」を選ばないでください。</strong>
+        この設定だと、アプリは誰が書いたのかを確かめられません。
+        学習の記録を名前つきで残すアプリなので、その状態では画面を出さずに止めます。
+        学校のアカウントを児童が持っていない場合は、このアプリは使えません。</p>
+    </div>
+
+    <p>2 通りの入れかたの全文は
+      <a href="https://github.com/GIGAyama/Reflection_Journal#readme" rel="noopener">README</a>、
+      毎日の進め方は
+      <a href="https://github.com/GIGAyama/Reflection_Journal/blob/main/MANUAL.md" rel="noopener">操作マニュアル</a>
+      にあります。作った理由と画面ごとの説明は
+      <a href="https://giga-school.com/apps/reflection-journal/">紹介記事</a>にまとめました。</p>
+
+    <h2>情報担当の先生へ</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>項目</th><th>このアプリの場合</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>フィルタリングで通すもの</th>
+            <td data-label="このアプリの場合">アプリ本体が置かれる <code>script.google.com</code> だけです。
+              見た目のために丸い書体（Google Fonts）を読みますが、届かなくても動きます。</td>
+          </tr>
+          <tr>
+            <th>画面を作る部品</th>
+            <td data-label="このアプリの場合">外から読み込みません。必要なものは全部アプリの中に持っています。
+              校内のフィルタリングで配信元が塞がれても画面は出ます。</td>
+          </tr>
+          <tr>
+            <th>データの置き場所</th>
+            <td data-label="このアプリの場合">公開した先生がコピーしたスプレッドシート 1 つだけ。
+              画像もそのファイルの中に入ります。外部のサービスへは何も送りません。制作者もデータを見られません。</td>
+          </tr>
+          <tr>
+            <th>要求する権限</th>
+            <td data-label="このアプリの場合">このスプレッドシート 1 つ（<code>spreadsheets.currentonly</code>）、
+              メニューの表示、メールアドレスの確認、そして Gemini を使うときだけ外部への通信。
+              <strong>ドライブ全体を読む権限は要求しません。</strong></td>
+          </tr>
+          <tr>
+            <th>児童が入れる情報</th>
+            <td data-label="このアプリの場合">学校の Google アカウントでログインした状態で開きます。
+              誰の記録かはサーバー側で確かめ、名前を画面から受け取りません。</td>
+          </tr>
+          <tr>
+            <th>先生用の操作</th>
+            <td data-label="このアプリの場合">テーマの配信・返却・名簿・書き出しは、このクラスの先生として
+              登録されたアカウントだけ。画面のボタンを隠すのではなく、サーバー側で確かめています。</td>
+          </tr>
+          <tr>
+            <th>AI（Gemini）</th>
+            <td data-label="このアプリの場合">使うかどうかは先生が決めます。API キーを入れたときだけ動き、
+              作られた文章は先生が確認してから返却されます。児童へ直接は届きません。</td>
+          </tr>
+          <tr>
+            <th>費用・アカウント登録</th>
+            <td data-label="このアプリの場合">どちらもありません。MIT ライセンスで公開しています。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>シートを点検する・直す</h3>
+    <p>コピーしたスプレッドシートを開くと、上のメニューに「ふりかえりジャーナル」が出ます。
+      「シートを点検する」で中の作りがアプリの想定どおりかを確かめられ、
+      「シートを直せる範囲で直す」で足りないシートや列を足せます。先生の画面の「クラス設定」からも同じことができます。</p>
+    <p>アプリは<strong>見出しの名前</strong>で列を探します。列を並べ替えても動きますし、
+      メモ用の列を右に足していただいても構いません。
+      <strong>見出しの名前を変える・列を消す</strong>と、その列の読み書きだけが止まります。
+      点検はそれを名指しで教えます。中身がずれている疑いがあるときは、勝手に直さずに人へ回します。</p>
+
+    <h3>できないこと</h3>
+    <p>正直に書いておきます。1 つのファイルが 1 つのクラスなので、
+      2 クラス受け持つ先生はコピーを 2 つ作ってください（URL も 2 本になります）。
+      画面は自動では更新されず、最新の状態はボタンで読み直します。オフラインでは使えません。
+      学校のアカウントを持っていない児童は参加できません。
+      心のバイタルの変化検知は診断ではありません。必ず対面の様子と合わせてお使いください。</p>
   </main>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <div id="pwa-controls" class="pwa-controls" aria-live="polite">
-    <button id="pwa-install" class="pwa-action" type="button" hidden>📲 アプリを入れる</button>
-    <div id="pwa-update" class="pwa-update" hidden><span>新しいバージョンがあります</span><button id="pwa-refresh" class="pwa-action" type="button">さいしんにする</button><button id="pwa-later" class="pwa-later" type="button">あとで</button></div>
-  </div>
-  <script type="module" src="./drive-app.js"></script>
-  <script src="./shell-init.js" defer></script>
+
+  <footer>
+    <p>
+      <a href="https://giga-school.com/">GIGA school トップ</a>　/
+      <a href="https://giga-school.com/apps/reflection-journal/">紹介記事</a>　/
+      <a href="https://github.com/GIGAyama/Reflection_Journal" rel="noopener">GitHub</a>　/
+      <a href="./privacy.html">プライバシーポリシー</a>　/
+      <a href="./terms.html">利用規約</a>
+    </p>
+    <p>ふりかえりジャーナル（reflection-journal.giga-school.com）／ GIGAyama</p>
+  </footer>
 </body>
+
 </html>

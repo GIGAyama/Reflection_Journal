@@ -1,21 +1,25 @@
 /**
- * 品質ゲート — GIGA Standard v5 Part I のうち、静的に確かめられるものを機械で見る。
+ * 品質ゲート（GIGA Standard v5 Part I）+ このリポジトリ固有の GAS 検査。
  *
- * 「0件でした」だけでは、検査が動いているのか何も見ていないのか区別できない。
- * わざと壊して落ちることを確かめてから使うこと（scripts/selftest-check.mjs）。
+ * ── 何が本番なのかが変わった ────────────────────────────────────
+ * 以前は docs/ の Drive ネイティブ版が本番で、ルート直下の .gs は履歴資料だった。
+ * いまは逆で、**本番はスプレッドシートにコンテナバインドした .gs とその画面**、
+ * docs/ は導入案内のページだけである。だから検査の対象もそちらへ移した。
  *
- * 既知の誤検知に対処してある:
- *   - localStorage は「注意書きのコメント」に反応しやすい → 判定前にコメントを落とす
- *   - 100vh は @supports not (height: 100dvh) の中に書くのが正しい → 前方も見る
- *   - キャッシュ削除は「消す式」ではなく「startsWith で絞る式があるか」を見る
+ * 正本ゲートの 38 項目に GAS 関連は 1 つも無い（standards/docs/app-hardening.md §5）。
+ * .gs は CI に一切守られていない領域なので、ここで自前の G* を持つ。
+ *
+ * ⚠️ 検査を足したら、同じ PR で scripts/selftest-check.mjs の「こわしかた」も足すこと。
+ *    反応しない検査は、緑を返すだけの飾りになる。
  */
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, statSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const size = (p) => statSync(join(ROOT, p)).size;
+const has = (p) => existsSync(join(ROOT, p));
 const problems = [];
 const notes = [];
 const fail = (id, msg) => problems.push(`${id}: ${msg}`);
@@ -26,23 +30,26 @@ const pass = (id, msg) => ok.push(`${id}: ${msg}`);
 const stripComments = (s) =>
   s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
-const htmlFiles = ['docs/index.html', 'docs/diag.html', 'docs/offline.html'];
-// 初期表示で読み込むJS。キットも同じ予算に入れる（切り出したぶんを見落とさないため）。
-const kitFiles = ['namespace.js', 'invite.js', 'drive-client.js', 'records.js', 'session.js', 'index.js']
-  .map((name) => `docs/kit/${name}`);
-const appJsFiles = ['docs/drive-app.js', 'docs/drive-api.js', 'docs/drive-core.js', ...kitFiles];
-// GitHub Pages + Drive API が本番実装。ルート直下の旧GAS資産は品質判定に含めない。
-const gsFiles = [];
+// GitHub Pages が配る導入案内のページ
+const siteHtml = ['docs/index.html', 'docs/offline.html', 'docs/privacy.html', 'docs/terms.html'];
+// GAS が配る画面（外枠は原本、app/css/vendor/qr は生成物）
+const gasHtml = ['index.html'];
+const gasGenerated = ['app.html', 'css.html', 'vendor.html', 'qr.html'];
+// 児童の端末が最初に読み込む JS（GAS 側）。qr.html は先生の画面だけなので含めない
+const memberJs = ['vendor.html', 'app.html'];
+// サーバー側（.gs）。ここが CI に守られていない領域
+const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs')).sort();
 
 // ── B6: CDN から取る実行コードが 0 バイト ──
 {
   const bad = [];
-  for (const f of htmlFiles) {
+  for (const f of [...siteHtml, ...gasHtml]) {
     const html = read(f);
     for (const m of html.matchAll(/<script[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) bad.push(`${f} → ${m[1]}`);
     // ブラウザ内で CSS を生成する Tailwind CDN も実行コード扱い
-    if (/cdn\.tailwindcss\.com/.test(html.replace(/<!--[\s\S]*?-->/g, ''))) bad.push(`${f} → cdn.tailwindcss.com`);
-    if (/@babel\/standalone/.test(html.replace(/<!--[\s\S]*?-->/g, ''))) bad.push(`${f} → @babel/standalone`);
+    const noComments = html.replace(/<!--[\s\S]*?-->/g, '');
+    if (/cdn\.tailwindcss\.com/.test(noComments)) bad.push(`${f} → cdn.tailwindcss.com`);
+    if (/@babel\/standalone/.test(noComments)) bad.push(`${f} → @babel/standalone`);
   }
   bad.length ? fail('B6', `CDN から実行コードを読んでいる: ${bad.join(' / ')}`)
              : pass('B6', 'CDN から取る実行コード 0 件');
@@ -50,20 +57,22 @@ const gsFiles = [];
 
 // ── B8: QRコードはローカル生成し、児童用URLを第三者へ送らない ──
 {
-  const source = read('docs/drive-app.js');
-  const index = read('docs/index.html');
-  if (/api\.qrserver\.com|chart\.googleapis\.com.*cht=qr/i.test(source + index)) {
+  const source = read('src/app.jsx') + read('index.html') + read('app.html');
+  const shell = read('index.html');
+  if (/api\.qrserver\.com|chart\.googleapis\.com[^"']*cht=qr/i.test(source)) {
     fail('B8', 'QR生成のため児童用URLを外部サービスへ送っている');
-  } else if (!existsSync(join(ROOT, 'docs/qrcode.js')) || /<script[^>]+qrcode\.js/.test(index) || !/ensureQr\s*\(\)/.test(source)) {
-    fail('B8', 'ローカルQR生成コードがクラス設定画面からの遅延読込になっていない');
+  } else if (!has('qr.html')) {
+    fail('B8', 'ローカルQR生成の生成物 qr.html が無い（npm run build を実行）');
+  } else if (!/bootMode\s*===\s*'owner'[\s\S]{0,120}include\('qr'\)/.test(shell)) {
+    fail('B8', 'QR生成コードが先生の画面だけの読み込みになっていない（児童の初回JSに混ざる）');
   } else {
-    pass('B8', 'QRはブラウザ内で生成し、生成コードは教師ポータルだけに配信');
+    pass('B8', 'QRはブラウザ内で生成し、生成コードは先生の画面だけに配信');
   }
 }
 
-// ── D14 / D1: 拡大禁止と viewport-fit（GAS は .gs 側の addMetaTag も見る） ──
+// ── D14 / D1: 拡大禁止と viewport-fit（.gs 側の addMetaTag も見る） ──
 {
-  const targets = htmlFiles;
+  const targets = [...siteHtml, ...gasHtml, 'Main.gs'];
   const zoomBlocked = targets.filter((f) => /user-scalable\s*=\s*no|maximum-scale\s*=\s*1/.test(read(f)));
   zoomBlocked.length ? fail('D14', `拡大を禁止している: ${zoomBlocked.join(', ')}`)
                      : pass('D14', '拡大を禁止していない');
@@ -83,8 +92,8 @@ const gsFiles = [];
 // ── D2: 100vh の単独使用（@supports のフォールバックは正しい書き方なので見逃す） ──
 {
   const bad = [];
-  for (const f of [...htmlFiles, 'docs/drive.css']) {
-    if (!existsSync(join(ROOT, f))) continue;
+  for (const f of [...siteHtml, 'docs/style.css', 'tools/extra.css', 'css.html']) {
+    if (!has(f)) continue;
     const s = stripComments(read(f));
     for (const m of s.matchAll(/100vh/g)) {
       const before = s.slice(Math.max(0, m.index - 400), m.index);
@@ -100,8 +109,8 @@ const gsFiles = [];
 
 // ── F4: rt（ふりがな）の色の決め打ち ──
 {
-  const css = read('docs/drive.css');
-  const jsx = read('docs/drive-app.js');
+  const css = read('tools/extra.css');
+  const jsx = read('src/app.jsx');
   const flat = css.replace(/\s+/g, ' ');
   const hardCodedInJsx = /<rt[^>]*className="[^"]*text-(gray|slate|zinc|neutral)-\d/.test(jsx);
 
@@ -118,21 +127,23 @@ const gsFiles = [];
   else pass('F4', 'rt の色は決め打ちしていない（色のついた面ではまとめて継がせている）');
 }
 
-// ── D10 / D11: 動きの配慮とハイコントラスト ──
+// ── D10 / D11: 動きの配慮とハイコントラスト（案内ページと GAS 本体の両方） ──
 {
-  const css = [read('docs/drive.css'), read('docs/index.html')].join('\n');
-  /prefers-reduced-motion/.test(css) ? pass('D10', 'prefers-reduced-motion あり')
-                                     : fail('D10', 'prefers-reduced-motion が無い');
-  if (/animation-duration:\s*0\s*(!important)?\s*;/.test(css)) {
-    fail('D10', 'animation-duration: 0 になっている（.01ms にしないと fill-mode: forwards が壊れて中身が消える）');
+  for (const [label, files] of [['案内ページ', ['docs/style.css']], ['GAS 本体', ['tools/extra.css']]]) {
+    const css = files.map(read).join('\n');
+    if (!/prefers-reduced-motion/.test(css)) fail('D10', `${label} に prefers-reduced-motion が無い`);
+    if (/animation-duration:\s*0\s*(!important)?\s*;/.test(css)) {
+      fail('D10', `${label} の animation-duration が 0（.01ms にしないと fill-mode: forwards が壊れて中身が消える）`);
+    }
+    if (!/forced-colors/.test(css)) fail('D11', `${label} に forced-colors が無い`);
   }
-  /forced-colors/.test(css) ? pass('D11', 'forced-colors あり') : fail('D11', 'forced-colors が無い');
+  if (!problems.some((p) => p.startsWith('D10'))) pass('D10', 'prefers-reduced-motion あり（案内ページ・GAS 本体とも）');
+  if (!problems.some((p) => p.startsWith('D11'))) pass('D11', 'forced-colors あり（案内ページ・GAS 本体とも）');
 }
 
-// ── E5 / E6 / sw.js ──
+// ── E5 / E6 / E7: sw.js ──
 {
-  const swPath = 'docs/sw.js';
-  const swRaw = read(swPath);
+  const swRaw = read('docs/sw.js');
   const sw = stripComments(swRaw);
   // 「消す式」ではなく「startsWith で絞る式があるか」を見る
   if (/caches\.keys\(\)/.test(sw) && !/startsWith\s*\(/.test(sw)) {
@@ -143,7 +154,7 @@ const gsFiles = [];
 
   const installBlock = sw.slice(sw.indexOf("addEventListener('install'"), sw.indexOf("addEventListener('activate'"));
   /skipWaiting\s*\(/.test(installBlock)
-    ? fail('E7', 'install の中で skipWaiting している（書いている最中に画面が入れ替わる）')
+    ? fail('E7', 'install の中で skipWaiting している（読んでいる最中に画面が入れ替わる）')
     : pass('E7', 'install では skipWaiting していない');
 }
 
@@ -176,38 +187,50 @@ const gsFiles = [];
   }
 }
 
+// ── E8: offline.html は JavaScript に頼らず、必ず戻るリンクを持つ ──
+{
+  const f = 'docs/offline.html';
+  const html = read(f).replace(/<!--[\s\S]*?-->/g, '');   // 「使わない理由」のコメント本文は除く
+  const bad = [];
+  if (/<script/i.test(html)) bad.push('<script> がある');
+  if (/\son[a-z]+\s*=/i.test(html)) bad.push('onclick= 等がある');
+  if (!/href="\.\/"/.test(html)) bad.push('<a href="./"> の戻るリンクが無い');
+  bad.length
+    ? fail('E8', `offline.html: ${bad.join(' / ')}（本体が読めていない状況で JS に頼ると、その JS も読めない）`)
+    : pass('E8', 'offline.html は JS を使わず、戻るリンクがある');
+}
+
 // ── C5: localStorage.clear() ──
 {
-  const files = [...htmlFiles, ...appJsFiles].filter((f) => existsSync(join(ROOT, f)));
+  const files = [...siteHtml, 'src/app.jsx'].filter(has);
   const bad = files.filter((f) => /localStorage\.clear\s*\(/.test(stripComments(read(f))));
-  bad.length ? fail('C5', `localStorage.clear() を使っている: ${bad.join(', ')}`)
+  bad.length ? fail('C5', `localStorage.clear() を使っている: ${bad.join(', ')}（同一オリジンの他アプリの保存も消える）`)
              : pass('C5', 'localStorage.clear() を使っていない');
 }
 
-// ── F5: 初回 JS 300KB 以下 ──
+// ── F5: 児童の初回 JS 300KB 以下（vendor + app。qr は先生の画面だけなので含めない） ──
 {
-  const js = appJsFiles.reduce((s, f) => s + size(f), 0);
-  const kb = js / 1024;
-  kb <= 300 ? pass('F5', `初回 JS ${kb.toFixed(1)} KB（300KB 以下）`)
-            : fail('F5', `初回 JS が ${kb.toFixed(1)} KB（300KB を超えている）`);
+  const kb = memberJs.reduce((s, f) => s + size(f), 0) / 1024;
+  kb <= 300 ? pass('F5', `児童の初回 JS ${kb.toFixed(1)} KB（300KB 以下）`)
+            : fail('F5', `児童の初回 JS が ${kb.toFixed(1)} KB（300KB を超えている）`);
 }
 
-// ── F6: 1ファイル 5,000行 / 400KB ──
+// ── F6: 1ファイル 5,000行 / 400KB（生成物は除く） ──
 {
   const bad = [];
-  for (const f of [...htmlFiles, 'docs/qrcode.js', ...appJsFiles]) {
-    if (!existsSync(join(ROOT, f))) continue;
+  for (const f of [...siteHtml, ...gasHtml, 'src/app.jsx', 'docs/style.css', 'tools/extra.css', ...gsFiles]) {
+    if (!has(f)) continue;
     const s = read(f);
     if (s.split('\n').length > 5000 || size(f) > 400 * 1024) bad.push(f);
   }
   bad.length ? fail('F6', `5,000行 / 400KB を超えるファイル: ${bad.join(', ')}`)
-             : pass('F6', '5,000行 / 400KB を超えるファイルなし');
+             : pass('F6', '5,000行 / 400KB を超えるファイルなし（生成物を除く）');
 }
 
 // ── B4: postMessage の宛先 ──
 {
   const bad = [];
-  for (const f of htmlFiles) {
+  for (const f of [...siteHtml, ...gasHtml, 'src/app.jsx']) {
     const s = stripComments(read(f));
     for (const m of s.matchAll(/postMessage\([^)]*,\s*['"]\*['"]\s*\)/g)) bad.push(`${f}: ${m[0].slice(0, 50)}`);
     // 変数経由でも、設定が空のときに '*' へ落ちる書き方は同じ危うさがある
@@ -219,7 +242,7 @@ const gsFiles = [];
              : pass('B4', "postMessage の宛先に '*' の直書きなし");
 }
 
-// ── 画像 ──
+// ── D7: 画像 ──
 {
   const bad = [];
   for (const f of readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.png'))) {
@@ -228,6 +251,133 @@ const gsFiles = [];
     if (kb > limit) bad.push(`${f} ${kb.toFixed(1)}KB > ${limit}KB`);
   }
   bad.length ? fail('D7', `画像が上限を超えている: ${bad.join(', ')}`) : pass('D7', '画像はすべて上限内');
+}
+
+// ════════════════════════════════════════════════════════════════
+// G*: GAS（.gs）— 正本ゲートの 38 項目に 1 つも無い領域
+// ════════════════════════════════════════════════════════════════
+
+/** .gs を「トップレベル関数の名前 → 本文」に割る */
+function gasFunctions() {
+  const out = [];
+  for (const f of gsFiles) {
+    const src = read(f);
+    const re = /^function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/gm;
+    const hits = [...src.matchAll(re)];
+    hits.forEach((m, i) => {
+      const start = m.index;
+      const end = i + 1 < hits.length ? hits[i + 1].index : src.length;
+      out.push({ file: f, name: m[1], args: m[2], body: src.slice(start, end) });
+    });
+  }
+  return out;
+}
+
+// ── G1: 公開エンドポイント（末尾 `_` 無し）はすべて認可を通る ──
+// google.script.run は末尾 `_` の無い関数を誰でも直接呼べる。1 つの抜けで境界が破れる。
+{
+  // doGet / onOpen / include は入口。メニュー用の関数は先に getUi() を取ることで
+  // 「画面が無い文脈（ウェブアプリ）では 1 行も進まない」ことを保証している。
+  const ENTRY = new Set(['doGet', 'onOpen', 'include']);
+  const GUARDS = ['assertOwner_(', 'guardMember_(', 'requireEmail_(', 'SpreadsheetApp.getUi()'];
+  const bad = [];
+  for (const fn of gasFunctions()) {
+    if (fn.name.endsWith('_') || ENTRY.has(fn.name)) continue;
+    if (!GUARDS.some((g) => fn.body.includes(g))) bad.push(`${fn.file}:${fn.name}`);
+  }
+  bad.length
+    ? fail('G1', `認可の無い公開関数がある（google.script.run から誰でも呼べる）: ${bad.join(', ')}`)
+    : pass('G1', `公開関数はすべて認可を通っている（${gasFunctions().filter((f) => !f.name.endsWith('_')).length} 本）`);
+}
+
+// ── G2: 児童の書き込みはロックの中（40台が一斉に叩く前提） ──
+{
+  const WRITE_APIS = ['mbSaveJournal', 'mbAddPastComment', 'mbRequestJoin'];
+  const fns = gasFunctions();
+  const bad = WRITE_APIS.filter((name) => {
+    const fn = fns.find((f) => f.name === name);
+    return !fn || !fn.body.includes('withScriptLock_(');
+  });
+  bad.length
+    ? fail('G2', `児童の書き込みが LockService で囲まれていない: ${bad.join(', ')}（同じ児童の行が2つ入り、誰も気づかない）`)
+    : pass('G2', `児童の書き込みはすべてロックの中（${WRITE_APIS.length} 本）`);
+}
+
+// ── G3: 児童 API は画面から「誰か」を受け取らない ──
+// 引数で受け取ると、児童がコンソールから他人のアドレスを渡すだけで成りすませる。
+{
+  const bad = gasFunctions()
+    .filter((f) => f.file === 'MemberApi.gs' && !f.name.endsWith('_'))
+    .filter((f) => /\bemail\b/i.test(f.args))
+    .map((f) => `${f.name}(${f.args})`);
+  bad.length
+    ? fail('G3', `児童 API が画面からメールアドレスを受け取っている: ${bad.join(', ')}`)
+    : pass('G3', '児童 API は画面から「誰か」を受け取っていない');
+}
+
+// ── G4: 児童へ返す一覧は必ずサニタイズを通る（ほかの児童のアドレスを出さない） ──
+{
+  const fn = gasFunctions().find((f) => f.name === 'mbSync');
+  (fn && fn.body.includes('sanitizeJournals_('))
+    ? pass('G4', '児童へ返す一覧はサニタイズを通している')
+    : fail('G4', 'mbSync が sanitizeJournals_ を通していない（ほかの児童のメールアドレスが出る）');
+}
+
+// ── G5: appsscript.json のスコープ ──
+{
+  if (!has('appsscript.json')) {
+    // clasp push は GAS 側のマニフェストを丸ごと上書きする。無いまま送ると入口が消える。
+    fail('G5', 'appsscript.json が無い（clasp push でウェブアプリの入口が消える）');
+  } else {
+    const m = JSON.parse(read('appsscript.json'));
+    const scopes = m.oauthScopes || [];
+    const bad = [];
+    // フル Drive は「子どものドライブ全部を読めます」と保護者に説明せざるを得なくなる
+    if (scopes.some((s) => /auth\/drive$|auth\/drive\.readonly$/.test(s))) bad.push('ドライブ全体のスコープを要求している');
+    // コンテナバインドなら、束ねられた 1 ファイルだけで足りる
+    if (scopes.some((s) => /auth\/spreadsheets$/.test(s))) bad.push('spreadsheets（全スプレッドシート）を要求している。currentonly で足りる');
+    if (!scopes.includes('https://www.googleapis.com/auth/spreadsheets.currentonly')) bad.push('spreadsheets.currentonly が無い');
+    if (!m.webapp || !m.webapp.executeAs || !m.webapp.access) bad.push('webapp の executeAs / access が無い');
+    if (m.webapp && m.webapp.access === 'ANYONE_ANONYMOUS') bad.push('access が ANYONE_ANONYMOUS（誰が書いたかを確かめられない）');
+    bad.length ? fail('G5', `appsscript.json: ${bad.join(' / ')}`)
+               : pass('G5', `oauthScopes は ${scopes.length} 本で、ドライブ全体を要求していない`);
+  }
+}
+
+// ── G6: シートの列は見出しの名前で引く ──
+// 列番号の直書きに戻すと、先生が誤字を直すついでに 1 列挿しただけで
+// 「返却が別の列に入る」「自分の記録が出ない」が、画面に何も出ないまま起きる。
+{
+  const db = stripComments(read('Db.gs'));
+  const bad = [];
+  if (!/function headerMap_\(/.test(db)) bad.push('headerMap_ が無い');
+  if (!/function colOf_\(/.test(db)) bad.push('colOf_ が無い');
+  // getRosterRows_ が固定の列番号（r[0], r[1]…）に戻っていないか
+  const roster = gasFunctions().find((f) => f.name === 'getRosterRows_');
+  if (roster && /\br\[\d+\]/.test(stripComments(roster.body))) bad.push('getRosterRows_ が列番号の直書きに戻っている');
+  bad.length ? fail('G6', `列の引き方: ${bad.join(' / ')}`)
+             : pass('G6', 'シートの列は見出しの名前で引いている');
+}
+
+// ── G7: 点検（読むだけ）と修整（人が押したときだけ）が両方ある ──
+{
+  const names = new Set(gasFunctions().map((f) => f.name));
+  const bad = ['inspectSheets_', 'repairSheets_', 'ensureSheets_'].filter((n) => !names.has(n));
+  const inspect = gasFunctions().find((f) => f.name === 'inspectSheets_');
+  if (bad.length) fail('G7', `シートの点検・修整が足りない: ${bad.join(', ')}`);
+  // 点検は読むだけ。ここで書き換えると、ずれている列に正しいラベルが付いて事故が見えなくなる
+  else if (inspect && /\.setValue\(|\.setValues\(|insertSheet\(|deleteRow/.test(stripComments(inspect.body))) {
+    fail('G7', 'inspectSheets_ がシートを書き換えている（点検は読むだけにする）');
+  } else pass('G7', '点検は読むだけ、修整は人が押したときだけ');
+}
+
+// ── G8: 配布テンプレートの ID（落とさない。埋めるまで案内ページのボタンが効かない） ──
+{
+  if (read('docs/index.html').includes('PUT-TEMPLATE-FILE-ID-HERE')) {
+    notes.push('G8: 案内ページの「コピーして始める」がテンプレート未設定のままです（docs/copy-distribution.md の手順で ID を差し替えてください）');
+  } else {
+    pass('G8', '案内ページのコピーリンクにテンプレートの ID が入っている');
+  }
 }
 
 // ── 出力 ──
