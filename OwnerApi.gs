@@ -28,7 +28,7 @@ function opGetClassData() {
     const apiKey = getTenantSetting_(ss, 'GEMINI_API_KEY');
     return jsonOk_({
       klass: {
-        className: String(readMeta_(ss, META_KEYS.CLASS_NAME) || CONFIG.APP_NAME),
+        className: classNameOf_(ss),
         // 児童に配る URL。このデプロイの /exec そのもの
         memberUrl: ScriptApp.getService().getUrl() || '',
         joinOpen: getTenantSetting_(ss, 'JOIN_CLOSED') !== '1',
@@ -51,6 +51,45 @@ function opGetClassData() {
           : (apiKey ? '設定済み' : '')
       },
       spreadsheetUrl: ss.getUrl()
+    });
+  } catch (e) {
+    return jsonErr_(e);
+  }
+}
+
+/**
+ * 「準備の状態」。何がまだ済んでいないかを 1 か所で返す。
+ *
+ * 設定作業そのものは要らなくなったが、**要らなくなったことが分かる**必要がある。
+ * 「押すものが無い」と「押し忘れている」は、先生から見ると区別がつかないためである。
+ */
+function opGetSetupStatus() {
+  try {
+    const ctx = assertOwner_();
+    return jsonOk_({ status: buildSetupStatus_(ctx.ss) });
+  } catch (e) {
+    return jsonErr_(e);
+  }
+}
+
+/**
+ * コピー元から引き継がれた名簿・提出・画像を消す。
+ *
+ * **自動では消さない。** コピーには「前の学級のものを片づけたい」場合と
+ * 「去年の記録を持ち越したい」場合があり、取り違えると取り返しがつかない。
+ * だから先生が「準備の状態」で押したときだけ動く。
+ * 設定とテーマには触らない（テーマの案は使い回せる）。
+ */
+function opClearInheritedData() {
+  try {
+    const ctx = assertOwner_();
+    return withScriptLock_(function () {
+      const cleared = clearInheritedRows_(ctx.ss);
+      writeMeta_(ctx.ss, { copiedAt: '' });
+      return jsonOk_({
+        cleared: cleared,
+        message: 'コピー元から引き継がれた記録を消しました。'
+      });
     });
   } catch (e) {
     return jsonErr_(e);

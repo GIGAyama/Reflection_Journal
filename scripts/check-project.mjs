@@ -465,6 +465,48 @@ function gasFunctions() {
     : pass('G9', `GAS の列挙子 ${checked} か所はすべて実在する名前`);
 }
 
+// ── G12: 先生を「開いた本人」から導いていないこと ──
+//
+// resolveOwner_ が Session.getActiveUser を根拠にすると、先生より先に URL を開いた
+// 児童が恒久的に先生になる。根拠は必ず getEffectiveUser（＝デプロイした人）である。
+// 併せて、マニフェストの executeAs が USER_DEPLOYING であることも見る。
+// そこが USER_ACCESSING だと getEffectiveUser は開いた本人を返し、前提ごと崩れる。
+{
+  const main = read('Main.gs');
+  const body = main.slice(main.indexOf('function resolveOwner_'), main.indexOf('function classNameOf_'));
+  const problems = [];
+  if (!body.includes('effectiveEmail_()')) {
+    problems.push('resolveOwner_ が getEffectiveUser を根拠にしていない');
+  }
+  if (/=\s*activeEmail_\(\)/.test(body)) {
+    problems.push('resolveOwner_ が activeEmail_（開いた本人）を根拠にしている');
+  }
+  let manifest = {};
+  try { manifest = JSON.parse(read('appsscript.json')); } catch (e) { problems.push('appsscript.json が読めない'); }
+  const executeAs = manifest.webapp && manifest.webapp.executeAs;
+  if (executeAs !== 'USER_DEPLOYING') {
+    problems.push(`executeAs が USER_DEPLOYING でない（${executeAs}）。getEffectiveUser が開いた本人を返すようになる`);
+  }
+  problems.length
+    ? fail('G12', `先生の導き方が危うい: ${problems.join(' / ')}`)
+    : pass('G12', '先生はデプロイした本人から導いている（executeAs は USER_DEPLOYING）');
+}
+
+// ── G13: 設定作業をスプレッドシート側に残していないこと ──
+//
+// 「コピーしてデプロイするだけ」が売りなので、メニューに書き込み系の入口を戻さない。
+// 点検（読むだけ）と修整（先生が押したときだけ）以外を足すと、案内と実物がずれる。
+{
+  const main = read('Main.gs');
+  const menu = main.slice(main.indexOf('function onOpen'), main.indexOf('function showSetupStatus'));
+  const items = [...menu.matchAll(/addItem\(\s*'([^']+)'\s*,\s*'([^']+)'/g)].map((m) => m[2]);
+  const allowed = new Set(['showSetupStatus', 'showSheetCheck', 'showSheetRepair']);
+  const extra = items.filter((fn) => !allowed.has(fn));
+  extra.length
+    ? fail('G13', `スプレッドシートのメニューに、想定外の入口がある: ${extra.join(' / ')}（設定作業はアプリ側に置くこと）`)
+    : pass('G13', `メニューは ${items.length} 項目で、設定作業は 1 つも無い`);
+}
+
 // ── G8: 配布テンプレートのコピーリンクが、どこも同じ 1 つを指している ──
 //
 // コピーリンクは案内ページ・README（2 か所）・紹介記事の 4 か所にある。

@@ -1341,6 +1341,25 @@ const TeacherApp = ({
       refresh();
     } else showToast(failMsg(res, '変更できませんでした'), 'error');
   };
+  const [setupStatus, setSetupStatus] = useState(null);
+  const loadSetupStatus = async () => {
+    const res = await call('opGetSetupStatus');
+    if (res && res.success) setSetupStatus(res.status);else showToast(failMsg(res, '準備の状態を読めませんでした'), 'error');
+  };
+  useEffect(() => {
+    loadSetupStatus();
+  }, []);
+  const handleClearInherited = async () => {
+    setConfirmConfig({
+      isOpen: false
+    });
+    const res = await call('opClearInheritedData');
+    if (res && res.success) {
+      showToast(res.message);
+      loadSetupStatus();
+      refresh();
+    } else showToast(failMsg(res, '消せませんでした'), 'error');
+  };
   const [sheetReport, setSheetReport] = useState(null);
   const sheetIssues = sheetReport ? sheetReport.left : data.sheetIssues || [];
   const handleInspectSheets = async () => {
@@ -1364,6 +1383,7 @@ const TeacherApp = ({
         left: res.left || []
       });
       showToast(res.message);
+      loadSetupStatus();
       refresh();
     } else showToast(failMsg(res, '直せませんでした'), 'error');
   };
@@ -1730,6 +1750,53 @@ const TeacherApp = ({
   })))))))))))), activeTab === 'admin' && React.createElement("div", {
     className: "flex flex-col gap-6 animate-fade-in h-full"
   }, React.createElement("div", {
+    className: `p-8 rounded-[2rem] shadow-premium border ${setupStatus && !setupStatus.ok ? 'bg-rose-50 border-rose-300' : 'bg-white border-gray-100'}`
+  }, React.createElement("h3", {
+    className: "font-black text-gray-800 flex items-center gap-2 text-lg mb-2"
+  }, React.createElement("div", {
+    className: "p-1.5 bg-emerald-100 text-emerald-700 rounded-lg"
+  }, React.createElement(Icon, {
+    path: Icons.Check,
+    className: "w-5 h-5"
+  })), " \u6E96\u5099\u306E\u72B6\u614B"), React.createElement("p", {
+    className: "text-sm text-gray-600 mb-4 leading-relaxed"
+  }, "\u3053\u306E\u30A2\u30D7\u30EA\u306B", React.createElement("strong", null, "\u521D\u671F\u8A2D\u5B9A\u306F\u3042\u308A\u307E\u305B\u3093"), "\u3002\u30B3\u30D4\u30FC\u3057\u3066\u516C\u958B\u3057\u305F\u6642\u70B9\u3067\u4F7F\u3048\u307E\u3059\u3002 \u3053\u3053\u306F\u300C\u672C\u5F53\u306B\u5168\u90E8\u305D\u308D\u3063\u3066\u3044\u308B\u304B\u300D\u3092\u78BA\u304B\u3081\u308B\u305F\u3081\u306E\u4E00\u89A7\u3067\u3059\u3002"), !setupStatus ? React.createElement("p", {
+    className: "text-sm text-gray-500 font-medium"
+  }, "\u8AAD\u307F\u8FBC\u3093\u3067\u3044\u307E\u3059\u2026") : React.createElement(React.Fragment, null, React.createElement("ul", {
+    className: "mb-4 flex flex-col gap-2"
+  }, setupStatus.items.map((it, i) => React.createElement("li", {
+    key: i,
+    className: `rounded-2xl p-4 border ${it.level === 'ng' ? 'bg-white border-rose-300' : it.level === 'warn' ? 'bg-white border-amber-300' : 'bg-gray-50 border-gray-200'}`
+  }, React.createElement("p", {
+    className: "font-black text-gray-800 text-sm flex items-center gap-2"
+  }, React.createElement("span", {
+    "aria-hidden": "true"
+  }, it.level === 'ok' ? '✅' : it.level === 'warn' ? '⚠️' : '❌'), React.createElement("span", {
+    className: "sr-only"
+  }, it.level === 'ok' ? '問題ありません: ' : it.level === 'warn' ? '注意: ' : 'まだ済んでいません: '), it.title), React.createElement("p", {
+    className: "text-sm text-gray-600 mt-1 leading-relaxed"
+  }, it.detail), it.key === 'inherited' && React.createElement("button", {
+    onClick: () => setConfirmConfig({
+      isOpen: true,
+      title: "引き継がれた記録を消す",
+      text: `コピー元から引き継がれた 名簿 ${it.members} 人ぶんと 提出 ${it.journals} 件を消します。\n見出しの行と、テーマ・設定はそのまま残ります。\n\nこの操作は取り消せません。`,
+      confirmText: "消す",
+      onConfirm: handleClearInherited,
+      onCancel: () => setConfirmConfig({
+        isOpen: false
+      })
+    }),
+    className: "mt-3 min-h-[44px] text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Trash,
+    className: "w-4 h-4"
+  }), " \u5F15\u304D\u7D99\u304C\u308C\u305F\u8A18\u9332\u3092\u6D88\u3059")))), React.createElement("button", {
+    onClick: loadSetupStatus,
+    className: "min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"
+  }, React.createElement(Icon, {
+    path: Icons.Refresh,
+    className: "w-4 h-4"
+  }), " \u78BA\u304B\u3081\u76F4\u3059"))), React.createElement("div", {
     className: `p-8 rounded-[2rem] shadow-premium border ${sheetIssues.length ? 'bg-amber-50 border-amber-300' : 'bg-white border-gray-100'}`
   }, React.createElement("h3", {
     className: "font-black text-gray-800 flex items-center gap-2 text-lg mb-2"
@@ -2426,15 +2493,6 @@ const App = () => {
   }, "\u3044\u307E\u3001\u3060\u308C\u304C\u4F7F\u3063\u3066\u3044\u308B\u304B\u3092 \u305F\u3057\u304B\u3081\u3089\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002 \u5B66\u6821\u306E\u30A2\u30AB\u30A6\u30F3\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u304B\u3089\u3001\u3082\u3046\u3044\u3061\u3069 \u3053\u306EURL\u3092\u3072\u3089\u3044\u3066\u304F\u3060\u3055\u3044\u3002"), React.createElement("p", {
     className: "text-xs text-gray-500 leading-relaxed"
   }, "\u5148\u751F\u3078: \u30C7\u30D7\u30ED\u30A4\u306E\u300C\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u308B\u30E6\u30FC\u30B6\u30FC\u300D\u3092\u300C\u540C\u3058\u7D44\u7E54\u5185\u306E\u5168\u54E1\u300D\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002 \u300C\u5168\u54E1\uFF08\u533F\u540D\u30E6\u30FC\u30B6\u30FC\u3092\u542B\u3080\uFF09\u300D\u3067\u306F\u3001\u8AB0\u304C\u66F8\u3044\u305F\u304B\u3092\u78BA\u304B\u3081\u3089\u308C\u307E\u305B\u3093\u3002"));
-  if (!boot.setupDone) return React.createElement(CenterCard, {
-    icon: "\u23F3"
-  }, React.createElement("h1", {
-    className: "text-2xl font-black text-gray-800 mb-3"
-  }, "\u307E\u3060", React.createElement("ruby", null, "\u6E96\u5099\u4E2D", React.createElement("rp", null, "("), React.createElement("rt", null, "\u3058\u3085\u3093\u3073\u3061\u3085\u3046"), React.createElement("rp", null, ")")), "\u3067\u3059"), React.createElement("p", {
-    className: "text-sm text-gray-600 font-medium leading-relaxed mb-4"
-  }, "\u5148\u751F\u306E \u3058\u3085\u3093\u3073\u304C \u304A\u308F\u308B\u307E\u3067 \u307E\u3063\u3066\u306D\u3002"), React.createElement("p", {
-    className: "text-xs text-gray-500 leading-relaxed"
-  }, "\u5148\u751F\u3078: \u30B9\u30D7\u30EC\u30C3\u30C9\u30B7\u30FC\u30C8\u3092\u958B\u304D\u3001\u30E1\u30CB\u30E5\u30FC\u300C\u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB\u300D\uFF1E\u300C\u306F\u3058\u3081\u306E\u8A2D\u5B9A\u300D\u3092 1 \u56DE\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002"));
   return boot.mode === 'member' ? React.createElement(MemberRoot, null) : React.createElement(OwnerRoot, null);
 };
 const root = ReactDOM.createRoot(document.getElementById('root'));

@@ -215,7 +215,8 @@ function makeHtmlService(rendered) {
 let uuidSeq = 0;
 
 /** .gs を読み込んで、中の関数を取り出す */
-function load({ sheetDefs = healthySheets(), activeEmail = 'sensei@school.example' } = {}) {
+function load({ sheetDefs = healthySheets(), activeEmail = 'sensei@school.example',
+                effectiveEmail = 'sensei@school.example' } = {}) {
   uuidSeq = 0;
   const ss = makeSpreadsheet(sheetDefs);
   const rendered = {};
@@ -227,7 +228,7 @@ function load({ sheetDefs = healthySheets(), activeEmail = 'sensei@school.exampl
     },
     Session: {
       getActiveUser: () => ({ getEmail: () => activeEmail }),
-      getEffectiveUser: () => ({ getEmail: () => 'sensei@school.example' })
+      getEffectiveUser: () => ({ getEmail: () => effectiveEmail })
     },
     LockService: {
       getScriptLock: () => ({ tryLock: () => true, waitLock: () => true, releaseLock: () => {} })
@@ -251,11 +252,12 @@ function load({ sheetDefs = healthySheets(), activeEmail = 'sensei@school.exampl
 const call = (sandbox, name, ...args) => JSON.parse(vm.runInContext(
   `${name}(${args.map((a) => JSON.stringify(a)).join(',')})`, sandbox));
 
-/** 先生として「はじめの設定」済みの状態にする */
+/** すでに 1 回開かれ、先生が控えられている状態にする */
 function setUp(sandbox, ss) {
   const meta = ss.getSheetByName('_meta');
   meta.appendRow(['ownerEmail', 'sensei@school.example']);
   meta.appendRow(['className', '3年2組']);
+  meta.appendRow(['fileId', 'ss-test']);
   const roster = ss.getSheetByName('児童名簿');
   roster.appendRow(['担任', '先生', 'sensei@school.example', 'active']);
 }
@@ -490,11 +492,34 @@ test('参加申請は、既定で承認待ちにしかならない', () => {
   assert.equal(res.status, 'pending');
 });
 
-test('先生が「はじめの設定」を押すまでは、誰も先生になれない', () => {
-  const { sandbox } = load({ activeEmail: 'yuto@school.example' });   // _meta は空のまま
+test('配ったばかりのファイルでも、児童は先生になれない', () => {
+  // _meta は空。以前はここで「押すまで待つ」形にしていたが、いまは
+  // resolveOwner_ がデプロイした本人を控えるので、待たせずに、かつ児童は入れない。
+  const { sandbox, ss } = load({
+    activeEmail: 'yuto@school.example',            // 開いたのは児童
+    effectiveEmail: 'sensei@school.example'        // 動かしているのは先生
+  });
   const res = call(sandbox, 'opGetClassData');
   assert.equal(res.success, false);
-  assert.equal(res.code, 'SETUP_REQUIRED');
+  assert.equal(res.code, 'FORBIDDEN', res.error);
+  // 控えられたのは先生であって、呼んだ児童ではない
+  const meta = ss.getSheetByName('_meta')._grid.find((r) => String(r[0]) === 'ownerEmail');
+  assert.equal(String(meta[1]), 'sensei@school.example');
+});
+
+test('実行ユーザーの設定ミスは、API でも止まる（画面だけの防御にしない）', () => {
+  // 画面が出ない状態でも google.script.run は呼べる。doGet だけで見ていると素通りする。
+  const { sandbox, ss } = load({
+    activeEmail: 'yuto@school.example',
+    effectiveEmail: 'yuto@school.example'          // 児童の権限で動いている
+  });
+  setUp(sandbox, ss);
+  ss.getSheetByName('児童名簿').appendRow(['児童', 'ゆうと', 'yuto@school.example', 'active']);
+  for (const fn of ['opGetClassData', 'opResetData', 'opGetSetupStatus', 'mbGetStatus', 'mbSync']) {
+    const res = call(sandbox, fn);
+    assert.equal(res.success, false, `${fn} が設定ミスのまま通っています`);
+    assert.equal(res.code, 'OWNER_MISMATCH', `${fn}: ${res.error}`);
+  }
 });
 
 test('児童は先生の API を呼べない', () => {
@@ -541,7 +566,7 @@ test('児童へ返す一覧に、ほかの児童のメールアドレスが出�
 test('先生用メニューは、画面が無い文脈（ウェブアプリ）では1セルも書かない', () => {
   const { sandbox, ss } = load({ activeEmail: 'yuto@school.example' });
   const before = JSON.stringify(ss._sheets.map((s) => s._grid));
-  for (const fn of ['setupAsTeacher', 'showSheetCheck', 'showSheetRepair']) {
+  for (const fn of ['showSetupStatus', 'showSheetCheck', 'showSheetRepair']) {
     assert.throws(() => vm.runInContext(`${fn}()`, sandbox), /画面がありません/, fn);
   }
   assert.equal(JSON.stringify(ss._sheets.map((s) => s._grid)), before);
@@ -612,7 +637,6 @@ test('doGet が落ちずに画面を返す（先生）', () => {
   const boot = JSON.parse(rendered.template.bootJson);
   assert.equal(boot.mode, 'owner');
   assert.equal(boot.signedIn, true);
-  assert.equal(boot.setupDone, true);
   assert.equal(boot.className, '3年2組');
   assert.equal(rendered.template.bootMode, 'owner');
 });
@@ -644,7 +668,157 @@ test('束ねられたファイルが無くても doGet は落ちず、理由を�
   vm.runInContext('doGet({ parameter: {} })', sandbox);
   const boot = JSON.parse(rendered.template.bootJson);
   assert.match(boot.bootError, /束ねられていません/);
-  assert.equal(boot.setupDone, false);
+});
+
+// ════════════════════════════════════════════════════════════════
+// 7. 先生を「デプロイした本人」から導く（設定作業を無くしたぶん、ここが要）
+// ════════════════════════════════════════════════════════════════
+
+const metaOf = (ss, key) => {
+  const grid = ss.getSheetByName('_meta')._grid;
+  const row = grid.find((r) => String(r[0]) === key);
+  return row ? String(row[1]) : '';
+};
+
+test('初回は、デプロイした本人が自動で先生になる（押すものは無い）', () => {
+  // setUp を呼ばない ＝ _meta が空。配ったばかりのコピーと同じ状態
+  const { sandbox, ss, rendered } = load({ activeEmail: 'sensei@school.example' });
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.equal(boot.mode, 'owner');
+  assert.equal(metaOf(ss, 'ownerEmail'), 'sensei@school.example');
+  assert.equal(metaOf(ss, 'fileId'), 'ss-test', 'コピーを見分けるための ID が控えられていない');
+});
+
+test('児童が先生より先に開いても、先生になるのはデプロイした人', () => {
+  // これが getActiveUser を控える形との決定的な違い。
+  // 旧構成では、先生より先に開いた児童が恒久的に先生になった。
+  const { sandbox, ss, rendered } = load({
+    activeEmail: 'yuto@school.example',            // 開いたのは児童
+    effectiveEmail: 'sensei@school.example'        // 動かしているのは先生（実行:自分）
+  });
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+
+  assert.equal(metaOf(ss, 'ownerEmail'), 'sensei@school.example', '児童が先生になってしまった');
+  assert.equal(JSON.parse(rendered.template.bootJson).mode, 'member');
+});
+
+test('クラス名は、控えが無ければスプレッドシートの名前を使う（「のコピー」は落とす）', () => {
+  const { sandbox, ss, rendered } = load();
+  ss.getName = () => 'ふりかえりジャーナル のコピー';
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+  assert.equal(JSON.parse(rendered.template.bootJson).className, 'ふりかえりジャーナル');
+});
+
+test('コピーされたら、前の持ち主の控えを自動で貼り替える', () => {
+  // 配布テンプレートに前の持ち主の _meta が残っていても、コピーした先生が入れる。
+  const { sandbox, ss, rendered } = load({
+    activeEmail: 'newteacher@school.example',
+    effectiveEmail: 'newteacher@school.example'
+  });
+  const meta = ss.getSheetByName('_meta');
+  meta.appendRow(['ownerEmail', 'oldteacher@school.example']);
+  meta.appendRow(['fileId', 'the-template-file']);      // コピー元の ID
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.equal(boot.mode, 'owner', 'コピーした先生が先生になれていない');
+  assert.equal(boot.copied, true);
+  assert.equal(metaOf(ss, 'ownerEmail'), 'newteacher@school.example');
+  assert.equal(metaOf(ss, 'fileId'), 'ss-test');
+  assert.ok(metaOf(ss, 'copiedAt'), 'コピーの目印が残っていない');
+});
+
+test('実行ユーザーが「自分」でないと、画面を出さずに理由を出す', () => {
+  // 「実行するユーザー: アプリケーションにアクセスしているユーザー」にすると、
+  // getEffectiveUser が開いた本人を返す。その形では全員が自分を先生と名乗れる。
+  const { sandbox, ss, rendered } = load({
+    activeEmail: 'yuto@school.example',
+    effectiveEmail: 'yuto@school.example'      // 児童の権限で動いている
+  });
+  setUp(sandbox, ss);                          // 先生は sensei で控えられている。ファイルは同じ
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.match(boot.bootError, /実行するユーザー/);
+  assert.notEqual(boot.mode, 'owner', '設定ミスのまま先生画面を出している');
+  assert.equal(metaOf(ss, 'ownerEmail'), 'sensei@school.example', '先生が書き換えられている');
+});
+
+test('動かしているアカウントが取れなくても、控えがあれば先生は変わらない', () => {
+  const { sandbox, ss, rendered } = load({ activeEmail: 'sensei@school.example', effectiveEmail: '' });
+  setUp(sandbox, ss);
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+  assert.equal(JSON.parse(rendered.template.bootJson).mode, 'owner');
+  assert.equal(metaOf(ss, 'ownerEmail'), 'sensei@school.example');
+});
+
+// ════════════════════════════════════════════════════════════════
+// 8. 準備の状態と、コピー元から引き継いだ記録
+// ════════════════════════════════════════════════════════════════
+
+test('準備の状態は、済んでいないものを名指しする', () => {
+  const { sandbox, ss } = load();
+  setUp(sandbox, ss);
+  const res = call(sandbox, 'opGetSetupStatus');
+  assert.equal(res.success, true, res.error);
+  const keys = res.status.items.map((it) => it.key);
+  for (const want of ['owner', 'className', 'executeAs', 'access', 'sheets', 'gemini']) {
+    assert.ok(keys.includes(want), want + ' が準備の状態に出ていない');
+  }
+  assert.equal(res.status.ok, true);
+  assert.equal(res.status.ownerEmail, 'sensei@school.example');
+});
+
+test('準備の状態は、児童からは読めない', () => {
+  const { sandbox, ss } = load({ activeEmail: 'yuto@school.example' });
+  setUp(sandbox, ss);
+  ss.getSheetByName('児童名簿').appendRow(['児童', 'ゆうと', 'yuto@school.example', 'active']);
+  const res = call(sandbox, 'opGetSetupStatus');
+  assert.equal(res.success, false);
+  assert.equal(res.code, 'FORBIDDEN');
+});
+
+test('コピーで引き継いだ記録は、数えるだけで勝手に消さない', () => {
+  const { sandbox, ss, rendered } = load({
+    activeEmail: 'newteacher@school.example', effectiveEmail: 'newteacher@school.example'
+  });
+  const meta = ss.getSheetByName('_meta');
+  meta.appendRow(['ownerEmail', 'oldteacher@school.example']);
+  meta.appendRow(['fileId', 'the-template-file']);
+  ss.getSheetByName('児童名簿').appendRow(['児童', 'まえのこ', 'old@school.example', 'active']);
+  ss.getSheetByName('ジャーナルデータ').appendRow(['j1', new Date(), 'old@school.example', 'テーマ', '本文']);
+
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+  assert.equal(JSON.parse(rendered.template.bootJson).copied, true);
+
+  // doGet を通しただけでは 1 行も消えていない
+  assert.equal(ss.getSheetByName('ジャーナルデータ')._grid.length - 1, 1, '勝手に消している');
+
+  const st = call(sandbox, 'opGetSetupStatus');
+  const inherited = st.status.items.find((it) => it.key === 'inherited');
+  assert.ok(inherited, '引き継ぎが準備の状態に出ていない');
+  assert.equal(inherited.journals, 1);
+
+  // 先生が押したときだけ消える
+  const res = call(sandbox, 'opClearInheritedData');
+  assert.equal(res.success, true, res.error);
+  assert.equal(ss.getSheetByName('ジャーナルデータ')._grid.length - 1, 0);
+  assert.equal(ss.getSheetByName('児童名簿')._grid.length - 1, 0);
+  // 見出し行は残っている
+  assert.equal(String(ss.getSheetByName('ジャーナルデータ')._grid[0][0]), 'journalId');
+});
+
+test('引き継いだ記録の掃除は、児童からは呼べない', () => {
+  const { sandbox, ss } = load({ activeEmail: 'yuto@school.example' });
+  setUp(sandbox, ss);
+  ss.getSheetByName('児童名簿').appendRow(['児童', 'ゆうと', 'yuto@school.example', 'active']);
+  const before = ss.getSheetByName('児童名簿')._grid.length;
+  const res = call(sandbox, 'opClearInheritedData');
+  assert.equal(res.success, false);
+  assert.equal(res.code, 'FORBIDDEN');
+  assert.equal(ss.getSheetByName('児童名簿')._grid.length, before, '児童の呼び出しで消えている');
 });
 
 test('boot の JSON は < を潰してある（クラス名で画面が切れない）', () => {

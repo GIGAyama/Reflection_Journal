@@ -20,9 +20,7 @@ function mbGetStatus() {
   try {
     const email = requireEmail_();                        // ①
     const ss = getDb_();
-    if (!ownerEmailOf_(ss)) {
-      throw new Error('SETUP_REQUIRED: このクラスはまだ準備中です。先生に確認してください');
-    }
+    resolveOwner_(ss);          // 実行ユーザーの設定ミスは、名簿に載る前の経路でも止める
     const row = getMemberRow_(ss, email);                 // ②（照合のみ・拒否はしない）
     return jsonOk_({
       className: String(readMeta_(ss, META_KEYS.CLASS_NAME) || CONFIG.APP_NAME),
@@ -45,9 +43,7 @@ function mbRequestJoin(displayName) {
   try {
     const email = requireEmail_();                        // ①
     const ss = getDb_();
-    if (!ownerEmailOf_(ss)) {
-      throw new Error('SETUP_REQUIRED: このクラスはまだ準備中です。先生に確認してください');
-    }
+    resolveOwner_(ss);          // 実行ユーザーの設定ミスは、名簿に載る前の経路でも止める
     if (getTenantSetting_(ss, 'JOIN_CLOSED') === '1') {
       throw new Error('JOIN_CLOSED: いまは参加の受付が止まっています。先生に確認してください');
     }
