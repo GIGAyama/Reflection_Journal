@@ -465,12 +465,39 @@ function gasFunctions() {
     : pass('G9', `GAS の列挙子 ${checked} か所はすべて実在する名前`);
 }
 
-// ── G8: 配布テンプレートの ID（落とさない。埋めるまで案内ページのボタンが効かない） ──
+// ── G8: 配布テンプレートのコピーリンクが、どこも同じ 1 つを指している ──
+//
+// コピーリンクは案内ページ・README（2 か所）・紹介記事の 4 か所にある。
+// テンプレートを作り直すと ID が変わるが、**変えるのは人の手**なので、
+// 1 か所だけ古い ID が残る形で必ずずれる。古い ID を踏んだ先生は、
+// 前のテンプレート（＝別人の _meta が入ったままのファイル）をコピーしてしまう。
+// 埋まっていない（PUT-TEMPLATE-FILE-ID-HERE のまま）ときは注意にとどめる。
 {
-  if (read('docs/index.html').includes('PUT-TEMPLATE-FILE-ID-HERE')) {
+  const SITES = [
+    'docs/index.html',
+    'README.md',
+    'docs/note/reflection-journal-note-article.md'
+  ];
+  const RE = /docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]+)\/copy/g;
+  const found = [];
+  for (const f of SITES) {
+    if (!has(f)) continue;
+    for (const m of read(f).matchAll(RE)) found.push({ file: f, id: m[1] });
+  }
+  const placeholder = found.filter((x) => x.id === 'PUT-TEMPLATE-FILE-ID-HERE');
+  const real = found.filter((x) => x.id !== 'PUT-TEMPLATE-FILE-ID-HERE');
+  const ids = [...new Set(real.map((x) => x.id))];
+
+  if (!found.length) {
+    fail('G8', '配布テンプレートのコピーリンクが 1 つも無い（案内ページ・README・紹介記事のどこにも）');
+  } else if (placeholder.length && real.length) {
+    fail('G8', `コピーリンクの一部だけ ID が入っている（未設定: ${placeholder.map((x) => x.file).join(' / ')}）`);
+  } else if (placeholder.length) {
     notes.push('G8: 案内ページの「コピーして始める」がテンプレート未設定のままです（docs/copy-distribution.md の手順で ID を差し替えてください）');
+  } else if (ids.length > 1) {
+    fail('G8', `コピーリンクが別々のテンプレートを指している（${real.map((x) => `${x.file}=${x.id.slice(0, 12)}…`).join(' / ')}）`);
   } else {
-    pass('G8', '案内ページのコピーリンクにテンプレートの ID が入っている');
+    pass('G8', `コピーリンク ${found.length} か所は、すべて同じテンプレートを指している`);
   }
 }
 

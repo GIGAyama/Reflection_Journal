@@ -33,7 +33,7 @@ const CACHE_PREFIX = 'rj-shell-';
 //    手書きだったころは上げるのが人の仕事で、2026-08-21 に12リポジトリで同時に
 //    上げ忘れる事故が起きた。上げ忘れると古いシェルのキャッシュが掃除されず、
 //    直した画面が児童の端末に届かない。
-const APP_VERSION = 'vff0267ae'; /* __APP_VERSION__ */
+const APP_VERSION = 'v8d85144c'; /* __APP_VERSION__ */
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
