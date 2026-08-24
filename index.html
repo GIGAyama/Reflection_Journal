@@ -24,10 +24,10 @@
   <!-- 実行コード（React / ReactDOM / canvas-confetti）は自分側に持つ。
        学校のネットワークが unpkg / jsDelivr / cdn.tailwindcss.com を塞いでいても画面が出るようにするため。
        生成物なので手で編集しない（npm run build で作り直す）。 -->
-  <?!= include('vendor'); ?>
+  <?!= include_('vendor'); ?>
   <!-- QR生成は先生の画面だけ。児童端末の初回JSには含めない。 -->
-  <? if (bootMode === 'owner') { ?><?!= include('qr'); ?><? } ?>
-  <?!= include('css'); ?>
+  <? if (bootMode === 'owner') { ?><?!= include_('qr'); ?><? } ?>
+  <?!= include_('css'); ?>
 
   <!-- フォントは「届かなくても字の形が変わるだけ」なので CDN のままでよい。
        ただし端末側の日本語フォントを必ず後ろに並べる（tools/extra.css の --font-ui）。 -->
@@ -97,6 +97,6 @@
   <div id="root"></div>
 
   <!-- 本編。JSX の翻訳はビルド時に済ませてある（原本は src/app.jsx）。 -->
-  <?!= include('app'); ?>
+  <?!= include_('app'); ?>
 </body>
 </html>

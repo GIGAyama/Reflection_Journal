@@ -63,7 +63,7 @@ const gsFiles = readdirSync(ROOT).filter((f) => f.endsWith('.gs')).sort();
     fail('B8', 'QR生成のため児童用URLを外部サービスへ送っている');
   } else if (!has('qr.html')) {
     fail('B8', 'ローカルQR生成の生成物 qr.html が無い（npm run build を実行）');
-  } else if (!/bootMode\s*===\s*'owner'[\s\S]{0,120}include\('qr'\)/.test(shell)) {
+  } else if (!/bootMode\s*===\s*'owner'[\s\S]{0,120}include_\('qr'\)/.test(shell)) {
     fail('B8', 'QR生成コードが先生の画面だけの読み込みになっていない（児童の初回JSに混ざる）');
   } else {
     pass('B8', 'QRはブラウザ内で生成し、生成コードは先生の画面だけに配信');
@@ -276,9 +276,10 @@ function gasFunctions() {
 // ── G1: 公開エンドポイント（末尾 `_` 無し）はすべて認可を通る ──
 // google.script.run は末尾 `_` の無い関数を誰でも直接呼べる。1 つの抜けで境界が破れる。
 {
-  // doGet / onOpen / include は入口。メニュー用の関数は先に getUi() を取ることで
+  // doGet / onOpen は入口。メニュー用の関数は先に getUi() を取ることで
   // 「画面が無い文脈（ウェブアプリ）では 1 行も進まない」ことを保証している。
-  const ENTRY = new Set(['doGet', 'onOpen', 'include']);
+  // 差し込み（include_）は末尾 `_` なので、そもそも公開されていない。
+  const ENTRY = new Set(['doGet', 'onOpen']);
   const GUARDS = ['assertOwner_(', 'guardMember_(', 'requireEmail_(', 'SpreadsheetApp.getUi()'];
   const bad = [];
   for (const fn of gasFunctions()) {
@@ -394,6 +395,37 @@ function gasFunctions() {
   bad.length
     ? fail('G10', `GAS が差し込むファイルに「<?」がある（スクリプトレットと解釈され、貼り合わせた1枚が壊れる）: ${bad.join(' / ')}`)
     : pass('G10', `GAS が差し込む ${gasGenerated.length} ファイルに「<?」なし`);
+}
+
+// ── G11: 差し込みは、中身を読み直さずそのまま渡す ──
+//
+// include は 2 通り書ける。見た目はほぼ同じで、片方だけが本番を壊す。
+//
+//   ❌ HtmlService.createHtmlOutputFromFile(name).getContent()
+//        中身を **HTML として読み直し、組み立て直して** 返す。
+//   ✅ HtmlService.createTemplateFromFile(name).getRawContent()
+//        ファイルの中身をそのまま返す（解釈を挟まない）。
+//
+// app.html の中身は <script> 1 個ぶんの JavaScript で、その中には HTML の断片を
+// 組み立てる文字列がある。読み直されるとその断片が本物のタグとして扱われ、
+// バッククォートの対応が崩れた JavaScript が返ってくる。
+//
+// 2026-08-24、これで画面が出なくなった。ブラウザは app.html の 1315 行目
+// （QR の保存名 `ふりかえりジャーナル_${...}_QR.svg`）を構文エラーとして指した。
+// ファイル単位の検査も、手元で貼り合わせた 1 枚も、すべて緑のままだった。
+// 手元には「読み直し」が無いので、手元では再現しない種類の事故である。
+{
+  const src = has('Main.gs') ? stripComments(read('Main.gs')) : '';
+  const bad = [];
+  if (/createHtmlOutputFromFile\s*\(/.test(src)) {
+    bad.push('createHtmlOutputFromFile(...).getContent() を使っている（中身が読み直される）');
+  }
+  if (!/getRawContent\s*\(\)/.test(src)) {
+    bad.push('getRawContent() で差し込んでいない');
+  }
+  bad.length
+    ? fail('G11', `差し込みが中身を読み直している: ${bad.join(' / ')}`)
+    : pass('G11', '差し込みは getRawContent（中身を読み直さない）');
 }
 
 // ── G9: GAS の列挙子に、実在しない名前を書いていない ──

@@ -2,7 +2,7 @@
  * GAS が組み立てる 1 枚の HTML を、手元で作り直す。
  *
  * doGet は index.html を「テンプレート」として評価し、その中の
- * `<?!= include('vendor') ?>` などが app / css / vendor / qr を差し込む。
+ * `<?!= include_('vendor') ?>` などが app / css / vendor / qr を差し込む。
  * つまり**ブラウザが受け取るのは 5 ファイルを貼り合わせた 1 枚**である。
  *
  * ファイル単位で構文を見ても、この 1 枚が壊れていないことは分からない。
@@ -37,10 +37,10 @@ export function assembleGasPage(mode = 'owner', boot = {}) {
   let out = read('index.html');
   out = put(out, '<?!= bootJson ?>', bootJson);
   // 先生の画面のときだけ QR を読む、という分岐
-  out = put(out, "<? if (bootMode === 'owner') { ?><?!= include('qr'); ?><? } ?>",
+  out = put(out, "<? if (bootMode === 'owner') { ?><?!= include_('qr'); ?><? } ?>",
     mode === 'owner' ? read('qr.html') : '');
   for (const name of ['vendor', 'css', 'app']) {
-    out = put(out, `<?!= include('${name}'); ?>`, read(`${name}.html`));
+    out = put(out, `<?!= include_('${name}'); ?>`, read(`${name}.html`));
   }
 
   // 差し込みが 1 つでも取りこぼされていたら、そこで気づく

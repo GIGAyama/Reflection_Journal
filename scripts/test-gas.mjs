@@ -191,11 +191,24 @@ function makeHtmlService(rendered) {
     XFrameOptionsMode: Object.freeze({ ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' }),
     SandboxMode: Object.freeze({ IFRAME: 'IFRAME' }),
     createTemplateFromFile: (name) => {
-      const template = { _file: requireArg('file', name) };
+      const file = requireArg('file', name);
+      const template = {
+        _file: file,
+        // 本物と同じく、ファイルの中身をそのまま返す（解釈を挟まない）
+        getRawContent: () => fs.readFileSync(path.join(ROOT, file + '.html'), 'utf8')
+      };
       template.evaluate = () => { rendered.template = { ...template }; return makeOutput(template); };
       return template;
     },
-    createHtmlOutputFromFile: (name) => makeOutput({ _file: requireArg('file', name) })
+    // ★ わざと落とす。本物はここで中身を「HTML として読み直して組み立て直す」。
+    //   その読み直しが app.html の中の JavaScript を壊し、2026-08-24 に
+    //   画面が 1 つも出なくなった。手元にはその読み直しが無いので、
+    //   偽物を素通りさせると「手元だけ緑」が再び起きる。使わせない。
+    createHtmlOutputFromFile: () => {
+      throw new Error(
+        'createHtmlOutputFromFile は使わないこと（中身が HTML として読み直され、' +
+        'app.html の中の JavaScript が壊れる）。createTemplateFromFile(...).getRawContent() を使う。');
+    }
   };
 }
 
@@ -554,6 +567,35 @@ test('先頭が = + - @ の入力は、CSV で数式にならないよう無害�
 // ════════════════════════════════════════════════════════════════
 // 6. doGet — ここが落ちると、画面が 1 つも開かない
 // ════════════════════════════════════════════════════════════════
+
+test('差し込みは、ファイルの中身をそのまま返す（読み直さない）', () => {
+  const { sandbox } = load();
+  for (const name of ['app', 'vendor', 'css', 'qr']) {
+    const got = vm.runInContext(`include_(${JSON.stringify(name)})`, sandbox);
+    const want = fs.readFileSync(path.join(ROOT, name + '.html'), 'utf8');
+    assert.equal(got, want, `${name}.html が 1 バイトでも変わって届いている`);
+  }
+});
+
+test('差し込んだ app.html が、そのままで JavaScript として読める', () => {
+  // ブラウザが受け取るのは <script> 1 個ぶんの中身である。
+  // 2026-08-24 の事故では、ここが壊れた状態で届き、
+  // 1315 行目（QR の保存名）を構文エラーとして指された。
+  const { sandbox } = load();
+  const html = vm.runInContext("include_('app')", sandbox);
+  const open = html.indexOf('>', html.indexOf('<script'));
+  const close = html.lastIndexOf('</script');
+  assert.ok(open > 0 && close > open, 'app.html が <script> 1 個の形になっていない');
+  const js = html.slice(open + 1, close);
+  assert.doesNotThrow(() => new Function(js), 'app.html の中の JavaScript が読めない');
+});
+
+test('中身を読み直す差し込み方（createHtmlOutputFromFile）は使えない', () => {
+  const { sandbox } = load();
+  assert.throws(
+    () => vm.runInContext("HtmlService.createHtmlOutputFromFile('app').getContent()", sandbox),
+    /createHtmlOutputFromFile は使わないこと/);
+});
 
 test('doGet が落ちずに画面を返す（先生）', () => {
   const { sandbox, ss, rendered } = load({ activeEmail: 'sensei@school.example' });

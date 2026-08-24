@@ -576,41 +576,67 @@ const { useState, useEffect, useRef, useMemo } = React;
       return { students: Object.values(studentMap).sort((a,b) => b.alerts.length - a.alerts.length), dates: past14Days };
     };
 
-    // 学期末の記録用: ブラウザの印刷ダイアログから PDF 保存できる帳票を開く
+    /**
+     * 学期末の記録用: ブラウザの印刷ダイアログから PDF 保存できる帳票を開く。
+     *
+     * ⚠️ ここで HTML の文字列を組み立てないこと。
+     *    この画面は app.html として index.html に差し込まれ、GAS が 1 枚の HTML にして
+     *    document.write で流し込む。生のタグを文字列で持つと、その 1 枚を組み立てる
+     *    どこかで解釈され、**貼り合わせた側だけが壊れる**（2026-08-24 に発生）。
+     *    DOM で組み立てれば、ソースに生のタグは 1 つも現れない。
+     *    textContent は中身をそのまま入れるので、escapeHtml も要らなくなる。
+     */
+    const PRINT_CSS = [
+      "body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }",
+      'section.student { page-break-after: always; }',
+      'h2 { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 8px; }',
+      'article { border-bottom: 1px dashed #cbd5e1; padding: 12px 0; }',
+      'h3 { margin: 0 0 4px; font-size: 14px; }',
+      '.theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }',
+      // 改行はタグではなく CSS で残す（pre-wrap）。これも生のタグを増やさないため。
+      '.content { line-height: 1.9; white-space: pre-wrap; }',
+      '.comment { background: #eff6ff; border-radius: 8px; padding: 10px; white-space: pre-wrap; }'
+    ].join('\n');
+
     const openPrintView = (journals, className) => {
       const grouped = {};
       journals.slice().sort((a,b) => (a.studentName||'').localeCompare(b.studentName||'') || new Date(a.timestamp) - new Date(b.timestamp))
         .forEach(j => { const k = j.studentName || '不明'; (grouped[k] = grouped[k] || []).push(j); });
-      const pages = Object.keys(grouped).map(name => `
-        <section class="student">
-          <h2>${escapeHtml(name)}</h2>
-          ${grouped[name].map(j => `
-            <article>
-              <h3>📅 ${escapeHtml(j.date || '')}</h3>
-              ${j.theme ? `<p class="theme">テーマ: ${escapeHtml(j.theme)}</p>` : ''}
-              <p class="content">${escapeHtml(j.content || '').replace(/\n/g, '<br>')}</p>
-              ${j.teacherComment ? `<p class="comment">💬 先生より<br>${escapeHtml(j.teacherComment).replace(/\n/g, '<br>')}</p>` : ''}
-            </article>`).join('')}
-        </section>`).join('');
+
       const w = window.open('', '_blank');
       if (!w) return false;
-      w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(className || '')}</title>
-        <style>
-          body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }
-          section.student { page-break-after: always; }
-          h2 { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 8px; }
-          article { border-bottom: 1px dashed #cbd5e1; padding: 12px 0; }
-          h3 { margin: 0 0 4px; font-size: 14px; }
-          .theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }
-          .content { line-height: 1.9; white-space: normal; }
-          .comment { background: #eff6ff; border-radius: 8px; padding: 10px; }
-        </style></head><body>${pages}</body></html>`);
-      w.document.close();
-      // ⚠️ 印刷用の窓へ <script> を書き込まない。この文字列は GAS が組み立てる
-      //    1 枚の HTML の中に入るので、タグの形をした文字列を増やさない。
-      //    開いたこちら側から呼べば同じことができる。
-      w.onload = () => { try { w.print(); } catch (e) {} };
-      if (w.document.readyState === 'complete') { try { w.print(); } catch (e) {} }
+      const d = w.document;
+      d.documentElement.lang = 'ja';
+      d.title = `ふりかえりジャーナル_${className || ''}`;
+
+      const el = (tag, cls, text) => {
+        const node = d.createElement(tag);
+        if (cls) node.className = cls;
+        if (text !== undefined && text !== null) node.textContent = text;
+        return node;
+      };
+
+      const style = d.createElement('style');
+      style.textContent = PRINT_CSS;
+      d.head.appendChild(style);
+
+      Object.keys(grouped).forEach(name => {
+        const section = el('section', 'student');
+        section.appendChild(el('h2', null, name));
+        grouped[name].forEach(j => {
+          const article = d.createElement('article');
+          article.appendChild(el('h3', null, '📅 ' + (j.date || '')));
+          if (j.theme) article.appendChild(el('p', 'theme', 'テーマ: ' + j.theme));
+          article.appendChild(el('p', 'content', j.content || ''));
+          if (j.teacherComment) article.appendChild(el('p', 'comment', '💬 先生より\n' + j.teacherComment));
+          section.appendChild(article);
+        });
+        d.body.appendChild(section);
+      });
+
+      // 開いたこちら側から印刷を呼ぶ（相手の窓へスクリプトを書き込まない）
+      const print = () => { try { w.print(); } catch (e) {} };
+      if (d.readyState === 'complete') print(); else w.onload = print;
       return true;
     };
 
@@ -826,7 +852,25 @@ const { useState, useEffect, useRef, useMemo } = React;
         // ⚠️ XML 宣言（<?xml ... ?>）を書かないこと。`<?` は GAS のスクリプトレットの
         //    開き記号で、このファイルは index.html に差し込まれて 1 枚の HTML になる。
         //    Blob の SVG に XML 宣言は要らない（付けなくてもブラウザも編集ソフトも読む）。
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
+        // ⚠️ ここも生のタグを文字列で持たない（上の openPrintView と同じ理由）。
+        //    DOM で組み立てて XMLSerializer で文字列にする。
+        const NS = 'http://www.w3.org/2000/svg';
+        const svgEl = document.createElementNS(NS, 'svg');
+        svgEl.setAttribute('xmlns', NS);
+        svgEl.setAttribute('viewBox', `${-quietZone} ${-quietZone} ${viewSize} ${viewSize}`);
+        svgEl.setAttribute('shape-rendering', 'crispEdges');
+        const bg = document.createElementNS(NS, 'rect');
+        bg.setAttribute('x', String(-quietZone));
+        bg.setAttribute('y', String(-quietZone));
+        bg.setAttribute('width', String(viewSize));
+        bg.setAttribute('height', String(viewSize));
+        bg.setAttribute('fill', 'white');
+        const path = document.createElementNS(NS, 'path');
+        path.setAttribute('d', inviteQr.path);
+        path.setAttribute('fill', '#111827');
+        svgEl.appendChild(bg);
+        svgEl.appendChild(path);
+        const svg = new XMLSerializer().serializeToString(svgEl);
         const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
         const a = document.createElement('a');
         const safeName = String(data.klass.className || 'クラス').replace(/[\\/:*?"<>|]/g, '_');

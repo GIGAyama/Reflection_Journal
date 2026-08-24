@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** 壊し方と、そのとき落ちてほしい検査 ID */
 const CASES = [
   ['B6',  'docs/index.html',      (s) => s.replace('</head>', '<script src="https://cdn.tailwindcss.com"></script></head>')],
-  ['B8',  'index.html',           (s) => s.replace("<? if (bootMode === 'owner') { ?><?!= include('qr'); ?><? } ?>", "<?!= include('qr'); ?>")],
+  ['B8',  'index.html',           (s) => s.replace("<? if (bootMode === 'owner') { ?><?!= include_('qr'); ?><? } ?>", "<?!= include_('qr'); ?>")],
   ['D14', 'docs/index.html',      (s) => s.replace('initial-scale=1.0, viewport-fit=cover', 'initial-scale=1.0, maximum-scale=1, user-scalable=no')],
   ['D1',  'docs/index.html',      (s) => s.replace(', viewport-fit=cover', '')],
   ['D2',  'tools/extra.css',      (s) => s.replace('@supports (height: 100dvh) {', '@supports (height: 1px) {')
@@ -51,8 +51,11 @@ const CASES = [
   // 列を番号で引く形に戻す
   ['G6',  'Db.gs',                (s) => s.replace('function headerMap_(sheet) {', 'function headerMapDisabled_(sheet) {')],
   // GAS のスクリプトレットの開き記号を、差し込まれる側に入れる
-  ['G10', 'app.html',             (s) => s.replace('const svg = `<svg xmlns=',
-                                                   'const svg = `<?xml version="1.0"?>\\n<svg xmlns=')],
+  ['G10', 'app.html',             (s) => s.replace('const svg = new XMLSerializer().serializeToString(svgEl);',
+                                                   'const svg = \'<?xml version="1.0"?>\' + new XMLSerializer().serializeToString(svgEl);')],
+  // 差し込みを「中身を読み直す」形に戻す（app.html の中の JavaScript が壊れて届く）
+  ['G11', 'Main.gs',              (s) => s.replace('HtmlService.createTemplateFromFile(filename).getRawContent()',
+                                                   'HtmlService.createHtmlOutputFromFile(filename).getContent()')],
   // 実在しない列挙子（undefined が渡り、その画面が開かなくなる）
   ['G9',  'Main.gs',              (s) => s.replace('HtmlService.XFrameOptionsMode.DEFAULT',
                                                    'HtmlService.XFrameOptionsMode.SAMEORIGIN')],

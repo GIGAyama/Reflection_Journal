@@ -35,17 +35,41 @@ GIGA Standard v5 の改修モード（`/rollout`）の作業記録。
 `google.script.run` から誰でも呼べる状態だった（G1）。
 正本ゲートの 38 項目に GAS 関連は 1 つも無いので、ここは自前で持つしかない。
 
-**GAS の `<?` は、差し込まれる側のファイルにも効く。**
-QR の SVG に `<?xml version="1.0" encoding="UTF-8"?>` を書いていた。
-doGet は index.html をテンプレートとして評価し、`<?!= include('app') ?>` で
-app/css/vendor/qr を差し込むので、ブラウザが受け取るのは貼り合わせた 1 枚である。
-その 1 枚の中で `<?` はスクリプトレットの開き記号になる。
-**app.html にあった唯一の `<?` と唯一の `?>` がこれで、貼り合わせた側だけが壊れた。**
+**`include()` の書き方 2 通りのうち、片方だけが本番を壊す。**
+GAS の入門記事はどれも次のように書く。見た目は同じで、結果が違う。
+
+```js
+// ❌ 中身を「HTML として読み直し、組み立て直して」返す
+function include(name) { return HtmlService.createHtmlOutputFromFile(name).getContent(); }
+// ✅ ファイルの中身をそのまま返す（解釈を挟まない）
+function include_(name) { return HtmlService.createTemplateFromFile(name).getRawContent(); }
+```
+
+`app.html` の中身は `<script>` 1 個ぶんの JavaScript で、その中には HTML の断片を
+組み立てる文字列がある（印刷用の別ウィンドウを `<!DOCTYPE html><html><head>…` から作っていた）。
+読み直されると、その断片が本物のタグとして扱われる。返ってくるのは
+**バッククォートの対応が崩れた JavaScript** で、テンプレート文字列の開きが閉じに化け、
+その先が code 位置に出てくる。
+
 症状は「タブに題は出るが画面が出ない」＋
 `Uncaught SyntaxError: Unexpected identifier 'ふりかえりジャーナル_$'`。
-テンプレート文字列の開きのバッククォートごと食われると、次のバッククォートまでが
-文字列になり、その先が code 位置に出てくる、という壊れ方である。
-`include()` を使う GAS アプリすべてに同じ形がある。G10 で名指しして止めた。
+`include` を使う GAS アプリすべてに同じ形がある。G11 で名指しして止めた。
+
+**エラー行の数え方を間違えると、丸 2 回はずす。**
+ブラウザは `userCodeAppPanel…:1314` と出した。貼り合わせた 1 枚は 3603 行あり、
+その 1314 行目は React の描画コードで、`ふりかえりジャーナル_` はどこにも無い。
+ここで「貼り合わせた側が壊れている」と読み、`<?xml` を消す仮説（G10）を出したが**外れた**。
+実際は **`app.html` 単体の 1315 行目**が当たりで、ブラウザは
+`<script>` の中身を 1 行目として数えていた（`<script>` は `app.html` の 1 行目にある）。
+**インラインスクリプトの構文エラーは、文書の行ではなくスクリプトの行で出ることがある。**
+1 引けば合う、と気づくまでに 2 回、当てずっぽうの修正を本番へ出した。
+
+**手元で再現しない事故は、手元に無い工程が原因である。**
+このとき `app.html` 単体は `node --check` も通り、`scripts/assemble-gas-page.mjs` で
+貼り合わせた 1 枚も本物のブラウザで動いた。手元の貼り合わせに無かったのは
+「GAS が中身を HTML として読み直す」工程そのもので、**そこが犯人だった**。
+偽物の `HtmlService` は `getContent: () => ''` を返していて、読み直しを真似ていなかった。
+いまは `getRawContent()` が実ファイルを返し、`createHtmlOutputFromFile` は例外を投げる。
 
 **ファイル単位の検査では、貼り合わせた 1 枚が動くことは一度も見ていない。**
 このとき app.html 単体は `node --check` も通り、8 つのスクリプトブロックも全部妥当で、
