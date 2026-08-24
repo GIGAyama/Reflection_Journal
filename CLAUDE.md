@@ -46,6 +46,14 @@ node /home/user/GIGAyama.github.io/standards/check-drift.mjs --standards /home/u
 - **点検（`inspectSheets_`）は 1 セルも書き換えません。** 見出しだけ正しくすると、
   ずれた列に正しいラベルが付いて事故が見えなくなります。G7 が見ています。
 - **修整（`repairSheets_`）は右端に足すだけ。** 既にある列を動かさず、名前も変えず、何も消しません。
+- **GAS の列挙子は、無い名前を書いても JavaScript が黙って undefined を返します。**
+  `HtmlService.XFrameOptionsMode` は `ALLOWALL` と `DEFAULT` の 2 つだけ。
+  `SAMEORIGIN` と書いたら doGet が「引数は null にできません: mode」で落ち、
+  **画面が 1 つも開かなくなりました**（2026-08-23）。G9 が名前の表と突き合わせています。
+- **テストの偽物を本物より寛容にしないこと。** 上の事故のとき、偽の HtmlService は
+  `evaluate: () => ({})` で、`setXFrameOptionsMode` を呼びもしませんでした。
+  テストは 23 件すべて緑のまま、開かない画面を通しました。
+  `scripts/test-gas.mjs` の `makeHtmlService` は、GAS と同じように undefined で落ちます。
 - `Gemini.gs` / `scripts/gas-deploy.mjs` / `.github/workflows/deploy.yml` /
   `tools/build-sw.mjs` / `tools/check-secrets.mjs` は**正本のコピー**です
   （`standards-map.json`）。直すときは `GIGAyama.github.io/standards/` を直してから配ること。

@@ -313,7 +313,12 @@ function doGet(e) {
   t.bootMode = boot.mode;
   return t.evaluate()
     .setTitle(CONFIG.APP_NAME)
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.SAMEORIGIN)
+    // ⚠️ XFrameOptionsMode に SAMEORIGIN は無い。ALLOWALL と DEFAULT の 2 つだけで、
+    //    無い名前を書くと undefined が渡り、doGet が
+    //    「引数は null にできません: mode」で落ちて画面が一切開かなくなる。
+    //    旧構成では GitHub Pages のシェルが iframe で包むため ALLOWALL が要ったが、
+    //    いまは自分の URL を直接開くので DEFAULT（＝他サイトからの埋め込みを許さない）でよい。
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
     // ⚠️ viewport は index.html の <meta> にもある。addMetaTag はサーバー側の処理なので、
     //    index.html だけ直しても反映されない。必ず両方を同じ値にすること。
     //    拡大は禁止しない（誤ズーム防止より、見えづらい子が拡大できない害のほうが大きい）。
