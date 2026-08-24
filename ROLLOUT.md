@@ -35,6 +35,20 @@ GIGA Standard v5 の改修モード（`/rollout`）の作業記録。
 `google.script.run` から誰でも呼べる状態だった（G1）。
 正本ゲートの 38 項目に GAS 関連は 1 つも無いので、ここは自前で持つしかない。
 
+**GAS の列挙子は、無い名前を書いても静かに undefined になる。**
+`HtmlService.XFrameOptionsMode.SAMEORIGIN` と書いた（実在するのは `ALLOWALL` と `DEFAULT` だけ）。
+`setXFrameOptionsMode(undefined)` は「引数は null にできません: mode」で落ちるので、
+**doGet がまるごと死に、画面が 1 つも開かない**。ゲートも 26 項目すべて緑、
+テストも 23 件すべて緑、CI も 3 ジョブすべて緑のまま本番に出た。
+名前の表と突き合わせる検査（G9）を足した。ほかの repo でも
+`ContentService.MimeType` / `Utilities.DigestAlgorithm` / `ui.ButtonSet` は同じ形で壊れる。
+
+**テストの偽物を、本物より寛容にしないこと。** これがいちばんの教訓。
+当時の偽 HtmlService は `createTemplateFromFile: () => ({ evaluate: () => ({}) })` で、
+`setXFrameOptionsMode` を**呼びもしなかった**。だから壊れた行はテストに一度も触れられず、
+23 件の緑は「doGet が動く」ことを 1 ミリも保証していなかった。
+偽物は、本物が落ちるところで落ちる形にする（undefined を黙って受けない）。
+
 **`onOpen` のメニュー関数も公開エンドポイントである。** `SpreadsheetApp.getUi()` を
 関数の**先頭**で取ることが、そのまま「画面が無い文脈では 1 セルも書かない」保証になる。
 `setupAsTeacher` は先生を決める関数なので、ここが逆順だと最初に開いた児童が先生になる。

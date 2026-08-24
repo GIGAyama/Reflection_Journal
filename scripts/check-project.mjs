@@ -371,6 +371,43 @@ function gasFunctions() {
   } else pass('G7', '点検は読むだけ、修整は人が押したときだけ');
 }
 
+// ── G9: GAS の列挙子に、実在しない名前を書いていない ──
+//
+// 2026-08-23、doGet が HtmlService.XFrameOptionsMode.SAMEORIGIN を渡していた。
+// この名前は無い（ALLOWALL と DEFAULT の 2 つだけ）ので undefined になり、GAS は
+// 「引数は null にできません: mode」で落ちた。**画面が 1 つも開かない**状態である。
+// JavaScript は存在しないプロパティを undefined として黙って通すので、
+// 目でも動かしても気づけない。名前の表と突き合わせるしかない。
+{
+  const GAS_ENUMS = {
+    'HtmlService.XFrameOptionsMode': ['ALLOWALL', 'DEFAULT'],
+    'HtmlService.SandboxMode': ['IFRAME'],
+    'ContentService.MimeType': ['ATOM', 'CSV', 'ICAL', 'JAVASCRIPT', 'JSON', 'RSS', 'TEXT', 'VCARD', 'XML'],
+    'Utilities.DigestAlgorithm': ['MD2', 'MD5', 'SHA_1', 'SHA_256', 'SHA_384', 'SHA_512'],
+    'Utilities.Charset': ['US_ASCII', 'UTF_8'],
+    // メニューのダイアログ。ui は SpreadsheetApp.getUi() の戻り値なので接頭辞が違う
+    'ui.ButtonSet': ['OK', 'OK_CANCEL', 'YES_NO', 'YES_NO_CANCEL'],
+    'ui.Button': ['CLOSE', 'OK', 'CANCEL', 'YES', 'NO']
+  };
+  const bad = [];
+  let checked = 0;
+  for (const f of gsFiles) {
+    const src = stripComments(read(f));
+    for (const [path, members] of Object.entries(GAS_ENUMS)) {
+      const re = new RegExp(`\\b${path.replace('.', '\\.')}\\.([A-Za-z0-9_]+)`, 'g');
+      for (const m of src.matchAll(re)) {
+        checked++;
+        if (!members.includes(m[1])) {
+          bad.push(`${f}: ${path}.${m[1]}（実在するのは ${members.join(' / ')}）`);
+        }
+      }
+    }
+  }
+  bad.length
+    ? fail('G9', `実在しない GAS の列挙子を使っている（undefined が渡り、その画面が開かなくなる）: ${bad.join(' / ')}`)
+    : pass('G9', `GAS の列挙子 ${checked} か所はすべて実在する名前`);
+}
+
 // ── G8: 配布テンプレートの ID（落とさない。埋めるまで案内ページのボタンが効かない） ──
 {
   if (read('docs/index.html').includes('PUT-TEMPLATE-FILE-ID-HERE')) {

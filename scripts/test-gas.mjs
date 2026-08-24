@@ -154,12 +154,58 @@ function healthySheets() {
   ];
 }
 
+/**
+ * GAS の HtmlService を、ここで事故になった点だけ忠実に真似る。
+ *
+ * ★ なぜ忠実さが要るか ★
+ * 2026-08-23、doGet が `HtmlService.XFrameOptionsMode.SAMEORIGIN` を渡していた。
+ * この列挙子は **存在しない**（ALLOWALL と DEFAULT の 2 つだけ）ので undefined になり、
+ * GAS は「引数は null にできません: mode」で落ちた。**画面が一切開かない**状態である。
+ * 当時の偽物は `evaluate: () => ({})` で、setXFrameOptionsMode を呼びもしなかったため
+ * テストは 23 件すべて緑のまま通した。**偽物が本物より寛容だと、テストは嘘をつく。**
+ */
+function makeHtmlService(rendered) {
+  const requireArg = (name, value) => {
+    // GAS と同じ形で落とす。undefined を黙って受けると、この事故を再び見逃す。
+    if (value === undefined || value === null) {
+      throw new Error('引数は null にできません: ' + name);
+    }
+    return value;
+  };
+  const makeOutput = (template) => {
+    const out = {
+      _template: template,
+      setTitle: (t) => { rendered.title = requireArg('title', t); return out; },
+      setXFrameOptionsMode: (mode) => { rendered.xFrameOptionsMode = requireArg('mode', mode); return out; },
+      addMetaTag: (name, content) => {
+        requireArg('name', name);
+        (rendered.metaTags = rendered.metaTags || {})[name] = requireArg('content', content);
+        return out;
+      },
+      getContent: () => ''
+    };
+    return out;
+  };
+  return {
+    // ★ 実在する 2 つだけ。SAMEORIGIN を書けば undefined になり、上で落ちる。
+    XFrameOptionsMode: Object.freeze({ ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' }),
+    SandboxMode: Object.freeze({ IFRAME: 'IFRAME' }),
+    createTemplateFromFile: (name) => {
+      const template = { _file: requireArg('file', name) };
+      template.evaluate = () => { rendered.template = { ...template }; return makeOutput(template); };
+      return template;
+    },
+    createHtmlOutputFromFile: (name) => makeOutput({ _file: requireArg('file', name) })
+  };
+}
+
 let uuidSeq = 0;
 
 /** .gs を読み込んで、中の関数を取り出す */
 function load({ sheetDefs = healthySheets(), activeEmail = 'sensei@school.example' } = {}) {
   uuidSeq = 0;
   const ss = makeSpreadsheet(sheetDefs);
+  const rendered = {};
   const sandbox = {
     console,
     SpreadsheetApp: {
@@ -181,12 +227,12 @@ function load({ sheetDefs = healthySheets(), activeEmail = 'sensei@school.exampl
       DigestAlgorithm: { SHA_256: 'SHA_256' },
       Charset: { UTF_8: 'UTF_8' }
     },
-    HtmlService: { createTemplateFromFile: () => ({ evaluate: () => ({}) }) },
+    HtmlService: makeHtmlService(rendered),
     GigaGemini: { callAll: () => [], callRaw: () => ({ ok: true, text: 'OK' }), parseJsonText: () => ({}) }
   };
   vm.createContext(sandbox);
   for (const src of GS) vm.runInContext(src, sandbox);
-  return { sandbox, ss };
+  return { sandbox, ss, rendered };
 }
 
 const call = (sandbox, name, ...args) => JSON.parse(vm.runInContext(
@@ -503,4 +549,68 @@ test('先頭が = + - @ の入力は、CSV で数式にならないよう無害�
   ]) {
     assert.equal(vm.runInContext(`csvSafe_(${JSON.stringify(input)})`, sandbox), expected);
   }
+});
+
+// ════════════════════════════════════════════════════════════════
+// 6. doGet — ここが落ちると、画面が 1 つも開かない
+// ════════════════════════════════════════════════════════════════
+
+test('doGet が落ちずに画面を返す（先生）', () => {
+  const { sandbox, ss, rendered } = load({ activeEmail: 'sensei@school.example' });
+  setUp(sandbox, ss);
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+
+  assert.equal(rendered.title, 'ふりかえりジャーナル');
+  // 実在しない列挙子を書くと undefined が渡り、GAS は
+  // 「引数は null にできません: mode」で落ちる。名前まで見る。
+  assert.equal(rendered.xFrameOptionsMode, 'DEFAULT');
+  assert.match(rendered.metaTags.viewport, /viewport-fit=cover/);
+  assert.doesNotMatch(rendered.metaTags.viewport, /user-scalable\s*=\s*no/);
+
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.equal(boot.mode, 'owner');
+  assert.equal(boot.signedIn, true);
+  assert.equal(boot.setupDone, true);
+  assert.equal(boot.className, '3年2組');
+  assert.equal(rendered.template.bootMode, 'owner');
+});
+
+test('doGet が落ちずに画面を返す（児童）', () => {
+  const { sandbox, ss, rendered } = load({ activeEmail: 'yuto@school.example' });
+  setUp(sandbox, ss);
+  ss.getSheetByName('児童名簿').appendRow(['児童', 'ゆうと', 'yuto@school.example', 'active']);
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.equal(boot.mode, 'member');
+  assert.equal(rendered.template.bootMode, 'member');
+});
+
+test('ログインが確かめられなくても doGet は画面を返す（理由を渡す）', () => {
+  const { sandbox, ss, rendered } = load({ activeEmail: '' });
+  setUp(sandbox, ss);
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.equal(boot.signedIn, false);
+  assert.equal(boot.mode, 'member');
+});
+
+test('束ねられたファイルが無くても doGet は落ちず、理由を画面へ渡す', () => {
+  const { sandbox, rendered } = load();
+  // 独立スクリプトとして貼られた状態
+  vm.runInContext('SpreadsheetApp.getActiveSpreadsheet = () => null;', sandbox);
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+  const boot = JSON.parse(rendered.template.bootJson);
+  assert.match(boot.bootError, /束ねられていません/);
+  assert.equal(boot.setupDone, false);
+});
+
+test('boot の JSON は < を潰してある（クラス名で画面が切れない）', () => {
+  const { sandbox, ss, rendered } = load();
+  setUp(sandbox, ss);
+  // 先生が「</script>」を含む名前を付けても、テンプレートが途中で切れない
+  vm.runInContext(`upsertKeyValue_(getDb_().getSheetByName('_meta'), 'className', '3年2組</script><b>');`, sandbox);
+  vm.runInContext('doGet({ parameter: {} })', sandbox);
+  assert.doesNotMatch(rendered.template.bootJson, /<\/script/i);
+  assert.equal(JSON.parse(rendered.template.bootJson).className, '3年2組</script><b>');
 });
