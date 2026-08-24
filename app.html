@@ -993,47 +993,46 @@ const analyzeVitals = (journals, roster) => {
     dates: past14Days
   };
 };
+const PRINT_CSS = ["body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }", 'section.student { page-break-after: always; }', 'h2 { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 8px; }', 'article { border-bottom: 1px dashed #cbd5e1; padding: 12px 0; }', 'h3 { margin: 0 0 4px; font-size: 14px; }', '.theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }', '.content { line-height: 1.9; white-space: pre-wrap; }', '.comment { background: #eff6ff; border-radius: 8px; padding: 10px; white-space: pre-wrap; }'].join('\n');
 const openPrintView = (journals, className) => {
   const grouped = {};
   journals.slice().sort((a, b) => (a.studentName || '').localeCompare(b.studentName || '') || new Date(a.timestamp) - new Date(b.timestamp)).forEach(j => {
     const k = j.studentName || '不明';
     (grouped[k] = grouped[k] || []).push(j);
   });
-  const pages = Object.keys(grouped).map(name => `
-        <section class="student">
-          <h2>${escapeHtml(name)}</h2>
-          ${grouped[name].map(j => `
-            <article>
-              <h3>📅 ${escapeHtml(j.date || '')}</h3>
-              ${j.theme ? `<p class="theme">テーマ: ${escapeHtml(j.theme)}</p>` : ''}
-              <p class="content">${escapeHtml(j.content || '').replace(/\n/g, '<br>')}</p>
-              ${j.teacherComment ? `<p class="comment">💬 先生より<br>${escapeHtml(j.teacherComment).replace(/\n/g, '<br>')}</p>` : ''}
-            </article>`).join('')}
-        </section>`).join('');
   const w = window.open('', '_blank');
   if (!w) return false;
-  w.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>ふりかえりジャーナル_${escapeHtml(className || '')}</title>
-        <style>
-          body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; color: #1f2937; margin: 24px; }
-          section.student { page-break-after: always; }
-          h2 { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 8px; }
-          article { border-bottom: 1px dashed #cbd5e1; padding: 12px 0; }
-          h3 { margin: 0 0 4px; font-size: 14px; }
-          .theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }
-          .content { line-height: 1.9; white-space: normal; }
-          .comment { background: #eff6ff; border-radius: 8px; padding: 10px; }
-        </style></head><body>${pages}</body></html>`);
-  w.document.close();
-  w.onload = () => {
+  const d = w.document;
+  d.documentElement.lang = 'ja';
+  d.title = `ふりかえりジャーナル_${className || ''}`;
+  const el = (tag, cls, text) => {
+    const node = d.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  };
+  const style = d.createElement('style');
+  style.textContent = PRINT_CSS;
+  d.head.appendChild(style);
+  Object.keys(grouped).forEach(name => {
+    const section = el('section', 'student');
+    section.appendChild(el('h2', null, name));
+    grouped[name].forEach(j => {
+      const article = d.createElement('article');
+      article.appendChild(el('h3', null, '📅 ' + (j.date || '')));
+      if (j.theme) article.appendChild(el('p', 'theme', 'テーマ: ' + j.theme));
+      article.appendChild(el('p', 'content', j.content || ''));
+      if (j.teacherComment) article.appendChild(el('p', 'comment', '💬 先生より\n' + j.teacherComment));
+      section.appendChild(article);
+    });
+    d.body.appendChild(section);
+  });
+  const print = () => {
     try {
       w.print();
     } catch (e) {}
   };
-  if (w.document.readyState === 'complete') {
-    try {
-      w.print();
-    } catch (e) {}
-  }
+  if (d.readyState === 'complete') print();else w.onload = print;
   return true;
 };
 const TeacherApp = ({
@@ -1305,7 +1304,23 @@ const TeacherApp = ({
     if (!inviteQr) return showToast('QRコードを生成できませんでした', 'error');
     const quietZone = 4;
     const viewSize = inviteQr.count + quietZone * 2;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svgEl = document.createElementNS(NS, 'svg');
+    svgEl.setAttribute('xmlns', NS);
+    svgEl.setAttribute('viewBox', `${-quietZone} ${-quietZone} ${viewSize} ${viewSize}`);
+    svgEl.setAttribute('shape-rendering', 'crispEdges');
+    const bg = document.createElementNS(NS, 'rect');
+    bg.setAttribute('x', String(-quietZone));
+    bg.setAttribute('y', String(-quietZone));
+    bg.setAttribute('width', String(viewSize));
+    bg.setAttribute('height', String(viewSize));
+    bg.setAttribute('fill', 'white');
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', inviteQr.path);
+    path.setAttribute('fill', '#111827');
+    svgEl.appendChild(bg);
+    svgEl.appendChild(path);
+    const svg = new XMLSerializer().serializeToString(svgEl);
     const url = URL.createObjectURL(new Blob([svg], {
       type: 'image/svg+xml;charset=utf-8'
     }));

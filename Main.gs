@@ -332,7 +332,15 @@ function doGet(e) {
  *
  * vendor / css / app は npm run build が作る生成物。手で編集しないこと
  * （原本は src/app.jsx・tools/extra.css・tailwind.config.js）。
+ *
+ * ⚠️ createHtmlOutputFromFile(...).getContent() を使わないこと。
+ *    あれは中身を「HTML として読み直して組み立て直す」。app.html の中身は
+ *    <script> 1 個ぶんの JavaScript で、その中には HTML の断片を組み立てる
+ *    文字列がある。読み直されると、その断片が本物のタグとして扱われ、
+ *    バッククォートの対応が崩れた状態で返ってくる。
+ *    getRawContent() はファイルの中身をそのまま返す（解釈を挟まない）。
+ *    G11 が見ている。
  */
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+function include_(filename) {
+  return HtmlService.createTemplateFromFile(filename).getRawContent();
 }
