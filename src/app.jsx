@@ -887,6 +887,25 @@ const { useState, useEffect, useRef, useMemo } = React;
         else showToast(failMsg(res, '変更できませんでした'), 'error');
       };
 
+      // 準備の状態。設定作業は無くなったが、「無くなった」ことが先生に見えている必要がある。
+      // 「押すものが無い」と「押し忘れている」は、先生から見ると区別がつかない。
+      const [setupStatus, setSetupStatus] = useState(null);
+
+      const loadSetupStatus = async () => {
+        const res = await call('opGetSetupStatus');
+        if (res && res.success) setSetupStatus(res.status);
+        else showToast(failMsg(res, '準備の状態を読めませんでした'), 'error');
+      };
+
+      useEffect(() => { loadSetupStatus(); }, []);
+
+      const handleClearInherited = async () => {
+        setConfirmConfig({ isOpen: false });
+        const res = await call('opClearInheritedData');
+        if (res && res.success) { showToast(res.message); loadSetupStatus(); refresh(); }
+        else showToast(failMsg(res, '消せませんでした'), 'error');
+      };
+
       // シートの点検・修整。直せなかったものは必ず画面に出す（黙って握りつぶさない）
       const [sheetReport, setSheetReport] = useState(null);
       const sheetIssues = sheetReport ? sheetReport.left : (data.sheetIssues || []);
@@ -905,6 +924,7 @@ const { useState, useEffect, useRef, useMemo } = React;
         if (res && res.success) {
           setSheetReport({ fixed: res.fixed || [], left: res.left || [] });
           showToast(res.message);
+          loadSetupStatus();
           refresh();
         } else showToast(failMsg(res, '直せませんでした'), 'error');
       };
@@ -1110,6 +1130,43 @@ const { useState, useEffect, useRef, useMemo } = React;
 
           {activeTab === 'admin' && (
              <div className="flex flex-col gap-6 animate-fade-in h-full">
+
+                {/* ✅ 準備の状態。設定作業そのものは要らないが、要らないことが分かる必要がある。
+                    ❌ が 1 つでもあれば、児童はまだ使えない。 */}
+                <div className={`p-8 rounded-[2rem] shadow-premium border ${setupStatus && !setupStatus.ok ? 'bg-rose-50 border-rose-300' : 'bg-white border-gray-100'}`}>
+                  <h3 className="font-black text-gray-800 flex items-center gap-2 text-lg mb-2">
+                    <div className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg"><Icon path={Icons.Check} className="w-5 h-5"/></div> 準備の状態
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+                    このアプリに<strong>初期設定はありません</strong>。コピーして公開した時点で使えます。
+                    ここは「本当に全部そろっているか」を確かめるための一覧です。
+                  </p>
+
+                  {!setupStatus ? (
+                    <p className="text-sm text-gray-500 font-medium">読み込んでいます…</p>
+                  ) : (
+                    <>
+                      <ul className="mb-4 flex flex-col gap-2">
+                        {setupStatus.items.map((it, i) => (
+                          <li key={i} className={`rounded-2xl p-4 border ${it.level === 'ng' ? 'bg-white border-rose-300' : it.level === 'warn' ? 'bg-white border-amber-300' : 'bg-gray-50 border-gray-200'}`}>
+                            <p className="font-black text-gray-800 text-sm flex items-center gap-2">
+                              <span aria-hidden="true">{it.level === 'ok' ? '✅' : it.level === 'warn' ? '⚠️' : '❌'}</span>
+                              <span className="sr-only">{it.level === 'ok' ? '問題ありません: ' : it.level === 'warn' ? '注意: ' : 'まだ済んでいません: '}</span>
+                              {it.title}
+                            </p>
+                            <p className="text-sm text-gray-600 mt-1 leading-relaxed">{it.detail}</p>
+                            {it.key === 'inherited' && (
+                              <button
+                                onClick={()=>setConfirmConfig({isOpen:true, title:"引き継がれた記録を消す", text:`コピー元から引き継がれた 名簿 ${it.members} 人ぶんと 提出 ${it.journals} 件を消します。\n見出しの行と、テーマ・設定はそのまま残ります。\n\nこの操作は取り消せません。`, confirmText:"消す", onConfirm: handleClearInherited, onCancel: ()=>setConfirmConfig({isOpen:false})})}
+                                className="mt-3 min-h-[44px] text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Trash} className="w-4 h-4"/> 引き継がれた記録を消す</button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                      <button onClick={loadSetupStatus} className="min-h-[44px] text-sm font-bold text-gray-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl px-4 py-2.5 transition-colors flex items-center gap-2"><Icon path={Icons.Refresh} className="w-4 h-4"/> 確かめ直す</button>
+                    </>
+                  )}
+                </div>
 
                 {/* 🧰 シートの作り。列は見出しの名前で探しているので、並べ替えは害にならない。
                     無くなった列と、名前を変えられた列だけが問題になる。 */}
@@ -1541,17 +1598,8 @@ const { useState, useEffect, useRef, useMemo } = React;
         </CenterCard>
       );
 
-      // 先生が「はじめの設定」を押していない。ここで誰かを先生にしてしまうと、
-      // 先生より先に開いた児童が恒久的に先生になる。だから待つ。
-      if (!boot.setupDone) return (
-        <CenterCard icon="⏳">
-          <h1 className="text-2xl font-black text-gray-800 mb-3">まだ<ruby>準備中<rp>(</rp><rt>じゅんびちゅう</rt><rp>)</rp></ruby>です</h1>
-          <p className="text-sm text-gray-600 font-medium leading-relaxed mb-4">先生の じゅんびが おわるまで まってね。</p>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            先生へ: スプレッドシートを開き、メニュー「ふりかえりジャーナル」＞「はじめの設定」を 1 回押してください。
-          </p>
-        </CenterCard>
-      );
+      // 「はじめの設定」の門は無くした。先生はデプロイした本人と決まっているので、
+      // 待たせる理由が無い。児童は名簿に載っていなければ参加申請の画面へ進む。
 
       return boot.mode === 'member' ? <MemberRoot /> : <OwnerRoot />;
     };

@@ -56,6 +56,14 @@ const CASES = [
   // 差し込みを「中身を読み直す」形に戻す（app.html の中の JavaScript が壊れて届く）
   ['G11', 'Main.gs',              (s) => s.replace('HtmlService.createTemplateFromFile(filename).getRawContent()',
                                                    'HtmlService.createHtmlOutputFromFile(filename).getContent()')],
+  // 先生を「開いた本人」から導く（先に開いた児童が先生になる）
+  ['G12', 'Main.gs',            (s) => s.replace('const effective = effectiveEmail_();',
+                                                 'const effective = activeEmail_();')],
+  // 実行ユーザーが「アクセスしているユーザー」に戻る（全員が先生を名乗れる）
+  ['G12', 'appsscript.json',    (s) => s.replace('"USER_DEPLOYING"', '"USER_ACCESSING"')],
+  // スプレッドシート側に設定作業が戻る
+  ['G13', 'Main.gs',            (s) => s.replace(".addItem('準備の状態を見る', 'showSetupStatus')",
+                                                 ".addItem('はじめの設定', 'setupAsTeacher')")],
   // コピーリンクの 1 か所だけ古い ID が残る（前のテンプレートを配ってしまう）
   ['G8',  'README.md',            (s) => s.replace('15yVHzXFrPQudGZu9nLt5zXJRtAEwJrdgW-3pub-KJWU',
                                                    '1OLDoldOLDoldOLDoldOLDoldOLDoldOLDoldOLDold')],

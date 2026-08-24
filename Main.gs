@@ -9,7 +9,7 @@
  * 1 ファイル = 1 クラスで、先生ご自身の Google ドライブに置かれる。
  * 中央のレジストリもクラスコードも運営者のアカウントも無い。
  *
- *   先生: コピー → メニュー「ふりかえりジャーナル」＞「はじめの設定」→ デプロイ → URL を配る
+ *   先生: コピー → デプロイ → URL を配る（スプレッドシート側で押すものは 1 つも無い）
  *   児童: 配られた URL を開く。学校の Google アカウントでログインしていれば、それが本人確認になる
  *
  * ── 本人確認 ────────────────────────────────────────────────────
@@ -18,12 +18,27 @@
  * 「全員（匿名ユーザーを含む）」を選ぶと空になるので、そのときは画面で理由を出して止める
  * （名前を騙れる状態で学習記録を書かせない）。
  *
- * ── 誰が先生か ──────────────────────────────────────────────────
- * **ウェブアプリからは、誰も先生になれない。** 先生の登録は、スプレッドシートを開ける人
- * （＝ファイルの持ち主）がメニューから 1 回行う（setupAsTeacher）。児童にはスプレッドシート
- * 自体を渡さないので、この経路には入れない。
- * 「未設定のときは最初に開いた人を先生にする」形にすると、先生が開く前に URL を配った学級で
- * 最初の児童が恒久的に先生になる。その事故は取り消しがきかないので、初回でも通さない。
+ * ── 誰が先生か（登録しない。デプロイした本人がそのまま先生） ──────────
+ * executeAs は USER_DEPLOYING なので、**誰が開いても** Session.getEffectiveUser() は
+ * 「デプロイした人」を返す。児童が開いたときも返るのは児童ではなく先生である。
+ * だから先生は「登録する」ものではなく、**デプロイの時点で決まっている**。
+ * resolveOwner_() は、_meta が空なら getEffectiveUser() をそのまま控える。
+ *
+ * 「最初に開いた人を先生にする」形（＝ getActiveUser を控える形）は採らない。それだと
+ * 先生より先に URL を開いた児童が恒久的に先生になる。getEffectiveUser はその競争が
+ * そもそも起きない。**誰が最初に開いても、控えられるのは同じ 1 人**だからである。
+ *
+ * ── 実行ユーザーの設定ミスを、ここで止める ────────────────────────
+ * デプロイを「実行するユーザー: アプリケーションにアクセスしているユーザー」にすると、
+ * getEffectiveUser() は開いた本人を返すようになる。その形では全員が自分を先生として
+ * 名乗れてしまう。控えてある先生と effective が食い違ったら、それが起きた証拠なので、
+ * 画面を出さずに理由を出して止める（OWNER_MISMATCH）。
+ *
+ * ── コピーを見分ける ────────────────────────────────────────────
+ * 配布用テンプレートに前の持ち主の _meta が残っていると、コピーした先生が
+ * OWNER_MISMATCH で入れなくなる。そこで控えるときに fileId も一緒に書いておき、
+ * **いま開いているファイルの ID と違えば「これはコピーだ」と判る**。
+ * コピーと判ったら先生とクラス名を貼り替える。記録は消さない（消すのは先生が押したときだけ）。
  */
 
 const CONFIG = {
@@ -34,10 +49,12 @@ const CONFIG = {
 
 /** _meta シートに置く鍵。ScriptProperties は使わない（コピーには付いてこないため） */
 const META_KEYS = {
-  OWNER_EMAIL: 'ownerEmail',      // このクラスの先生
+  OWNER_EMAIL: 'ownerEmail',      // このクラスの先生（デプロイした本人。自動で入る）
   CLASS_NAME: 'className',
   SCHEMA: 'schemaVersion',
-  SETUP_AT: 'setupAt'
+  SETUP_AT: 'setupAt',
+  FILE_ID: 'fileId',              // 控えた時点のファイル ID。コピーを見分けるために使う
+  COPIED_AT: 'copiedAt'           // コピーと判って貼り替えた時刻（引き継ぎの掃除の目印）
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -92,9 +109,102 @@ function requireEmail_() {
   return email;
 }
 
+/**
+ * このスクリプトを動かしているアカウント。
+ *
+ * executeAs = USER_DEPLOYING なので、**誰が開いてもデプロイした人**が返る。
+ * 児童が開いたときも返るのは児童ではない。だからこれが「先生は誰か」の根拠になる。
+ */
+function effectiveEmail_() {
+  try { return String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase(); }
+  catch (e) { return ''; }
+}
+
+/** _meta に控えてある先生のアドレス。まだ何も控えていなければ空文字 */
+function storedOwnerOf_(ss) {
+  return String(readMeta_(ss, META_KEYS.OWNER_EMAIL) || '').trim().toLowerCase();
+}
+
+/**
+ * このクラスの先生を決める。**設定作業は無い。**
+ *
+ * 1. まだ何も控えていない → いま動かしているアカウントを控える（初回）
+ * 2. 控えたときと**ファイル ID が違う** → これはコピー。先生を貼り替える
+ * 3. ファイルは同じなのに動かしているアカウントが違う → デプロイの実行ユーザーの
+ *    設定ミス。ここで止める（黙って通すと全員が先生になれる）
+ *
+ * 戻り値 { email, className, copied, inheritedFrom }。
+ * 読み取りだけの経路からも呼ばれるので、書き込みは「必要になったときだけ」行う。
+ */
+function resolveOwner_(ss) {
+  const effective = effectiveEmail_();
+  const stored = storedOwnerOf_(ss);
+  const storedFileId = String(readMeta_(ss, META_KEYS.FILE_ID) || '').trim();
+  let fileId = '';
+  try { fileId = String(ss.getId() || ''); } catch (e) { fileId = ''; }
+
+  // 動かしているアカウントが取れない。ここで控えると空文字が先生になる
+  if (!effective) {
+    if (stored) return { email: stored, className: classNameOf_(ss), copied: false, inheritedFrom: '' };
+    throw new Error('NO_EFFECTIVE_USER: このアプリを動かしているアカウントを確かめられませんでした。' +
+      '「拡張機能 ＞ Apps Script ＞ デプロイ」を開き、「実行するユーザー」を「自分」にして デプロイし直してください');
+  }
+
+  // 初回。デプロイした本人をそのまま控える
+  if (!stored) {
+    writeMeta_(ss, {
+      ownerEmail: effective,
+      className: classNameOf_(ss),
+      schemaVersion: CONFIG.SCHEMA_VERSION,
+      setupAt: new Date().toISOString(),
+      fileId: fileId
+    });
+    return { email: effective, className: classNameOf_(ss), copied: false, inheritedFrom: '' };
+  }
+
+  // コピーされた。前の持ち主の控えが残っているので貼り替える。
+  // 記録は消さない（消すのは先生が「準備の状態」で押したときだけ）
+  if (storedFileId && fileId && storedFileId !== fileId) {
+    writeMeta_(ss, {
+      ownerEmail: effective,
+      schemaVersion: CONFIG.SCHEMA_VERSION,
+      fileId: fileId,
+      copiedAt: new Date().toISOString()
+    });
+    return { email: effective, className: classNameOf_(ss), copied: true, inheritedFrom: stored };
+  }
+
+  // 同じファイルなのに動かしているアカウントが違う。実行ユーザーの設定ミスである
+  if (stored !== effective) {
+    throw new Error('OWNER_MISMATCH: デプロイの「実行するユーザー」が「自分」になっていません。' +
+      'いまの設定では、開いた人それぞれの権限で動くので、誰が先生かを決められません。' +
+      '「拡張機能 ＞ Apps Script ＞ デプロイ ＞ デプロイを管理」から、' +
+      '「実行するユーザー: 自分」「アクセスできるユーザー: 同じ組織内の全員」にしてください');
+  }
+
+  // 控えはあるがファイル ID が無い（この仕組みより前に作られたファイル）。いま書き足す
+  if (!storedFileId && fileId) writeMeta_(ss, { fileId: fileId });
+
+  return { email: stored, className: classNameOf_(ss), copied: false, inheritedFrom: '' };
+}
+
+/**
+ * クラス名。控えが無ければ**スプレッドシートの名前をそのまま使う**。
+ * 「クラス名を入れてください」と尋ねる画面を無くすため。先生はあとから画面で変えられる。
+ */
+function classNameOf_(ss) {
+  const stored = String(readMeta_(ss, META_KEYS.CLASS_NAME) || '').trim();
+  if (stored) return stored;
+  let name = '';
+  try { name = String(ss.getName() || '').trim(); } catch (e) { name = ''; }
+  // 「〜 のコピー」はそのまま出すと恥ずかしいので落とす
+  name = name.replace(/\s*のコピー$/, '').trim();
+  return name || CONFIG.APP_NAME;
+}
+
 /** このクラスの先生のアドレス（_meta）。未設定なら空文字 */
 function ownerEmailOf_(ss) {
-  return String(readMeta_(ss, META_KEYS.OWNER_EMAIL) || '').trim().toLowerCase();
+  return storedOwnerOf_(ss);
 }
 
 /**
@@ -121,7 +231,7 @@ function onOpen(e) {
   try {
     SpreadsheetApp.getUi()
       .createMenu(CONFIG.APP_NAME)
-      .addItem('はじめの設定（最初に1回）', 'setupAsTeacher')
+      .addItem('準備の状態を見る', 'showSetupStatus')
       .addSeparator()
       .addItem('シートを点検する', 'showSheetCheck')
       .addItem('シートを直せる範囲で直す', 'showSheetRepair')
@@ -132,54 +242,110 @@ function onOpen(e) {
 }
 
 /**
- * 「はじめの設定」。シートを作り、押した人をこのクラスの先生として控える。
+ * 「準備の状態を見る」。**1 セルも書き換えない**（resolveOwner_ の初回の控えを除く）。
  *
- * ⚠️ google.script.run は末尾 `_` の無い関数を誰でも呼べるので、この関数も児童から
- *    呼べてしまう。**先に getUi() を取る**のはそのため。画面が無い文脈（ウェブアプリ）では
- *    ここで例外になり、1 セルも書かずに終わる。
- *    加えて、すでに先生が決まっている場合は、たとえ画面があっても上書きしない。
+ * スプレッドシート側で押すものはもう無いが、シートで作業する先生のために、
+ * 同じ内容をここからも読めるようにしておく。中身はアプリの「準備の状態」と同じ。
  */
-function setupAsTeacher() {
+function showSetupStatus() {
   const ui = SpreadsheetApp.getUi();          // 画面が無ければ、ここで止まる
-  const ss = getDb_();
+  let status;
+  try {
+    status = buildSetupStatus_(getDb_());
+  } catch (err) {
+    ui.alert(CONFIG.APP_NAME, (err && err.message) ? err.message : String(err), ui.ButtonSet.OK);
+    return;
+  }
+  ui.alert(CONFIG.APP_NAME, setupStatusText_(status), ui.ButtonSet.OK);
+}
+
+/**
+ * 「準備の状態」。先生が「何がまだ済んでいないか」を 1 か所で見られるようにする。
+ *
+ * 設定作業そのものは要らなくなったが、**要らなくなったことが分かる**必要がある。
+ * 「押すものが無い」と「押し忘れている」は、先生から見ると区別がつかないためである。
+ *
+ * level は 'ok' / 'warn' / 'ng'。ng が 1 つでもあれば、児童はまだ使えない。
+ */
+function buildSetupStatus_(ss) {
+  const items = [];
+  const owner = resolveOwner_(ss);          // ここで OWNER_MISMATCH なら呼び元へ投げる
   const me = activeEmail_();
-  if (!me) {
-    ui.alert(CONFIG.APP_NAME, 'Google アカウントを確かめられませんでした。'
-      + 'スプレッドシートを開き直してからもう一度お試しください。', ui.ButtonSet.OK);
-    return;
-  }
 
-  const current = ownerEmailOf_(ss);
-  if (current && current !== me) {
-    ui.alert(CONFIG.APP_NAME,
-      'このクラスの先生はすでに ' + current + ' で登録されています。\n\n'
-      + '付け替えるときは「_meta」シートの ' + META_KEYS.OWNER_EMAIL + ' の行を書き直してください。',
-      ui.ButtonSet.OK);
-    return;
-  }
-
-  const answer = ui.prompt(CONFIG.APP_NAME,
-    'クラスの名前を入れてください（例: 3年2組）。\nあとから「_meta」シートで変えられます。',
-    ui.ButtonSet.OK_CANCEL);
-  if (answer.getSelectedButton() !== ui.Button.OK) return;
-  const className = String(answer.getResponseText() || '').trim().slice(0, 50) || 'わたしたちのクラス';
-
-  writeMeta_(ss, {
-    ownerEmail: me,
-    className: className,
-    schemaVersion: CONFIG.SCHEMA_VERSION,
-    setupAt: new Date().toISOString()
+  items.push({
+    key: 'owner', level: 'ok', title: 'このクラスの先生',
+    detail: owner.email + '（デプロイしたアカウントです。設定作業はありません）'
   });
-  upsertMember_(ss, { email: me, name: '先生', role: '担任', status: 'active' });
 
-  ui.alert(CONFIG.APP_NAME,
-    '「' + className + '」として設定しました。\n\n'
-    + '次に「拡張機能 ＞ Apps Script」を開き、右上の「デプロイ ＞ 新しいデプロイ」から\n'
-    + '　種類: ウェブアプリ\n'
-    + '　実行するユーザー: 自分\n'
-    + '　アクセスできるユーザー: 同じ組織内の全員\n'
-    + 'で公開し、出てきた URL を児童に配ってください。',
-    ui.ButtonSet.OK);
+  items.push({
+    key: 'className', level: 'ok', title: 'クラスの名前',
+    detail: owner.className + '（この画面で変えられます）'
+  });
+
+  // 実行ユーザー。ここまで来ている時点で resolveOwner_ を通っているので「自分」で動いている
+  items.push({
+    key: 'executeAs', level: 'ok', title: 'デプロイの「実行するユーザー」',
+    detail: '「自分」で動いています'
+  });
+
+  // アクセス範囲。匿名で開けると誰が書いたか確かめられない
+  items.push(me
+    ? { key: 'access', level: 'ok', title: 'デプロイの「アクセスできるユーザー」',
+        detail: 'ログインした人として開けています（' + me + '）' }
+    : { key: 'access', level: 'ng', title: 'デプロイの「アクセスできるユーザー」',
+        detail: '誰が使っているかを確かめられません。「同じ組織内の全員」にしてください' });
+
+  // シートの作り
+  const issues = inspectSheets_(ss);
+  items.push(issues.length === 0
+    ? { key: 'sheets', level: 'ok', title: 'シートの作り', detail: '6 枚とも想定どおりです' }
+    : { key: 'sheets', level: issues.some(function (f) { return !f.fixable; }) ? 'ng' : 'warn',
+        title: 'シートの作り',
+        detail: issues.length + ' 件、想定と違うところがあります（この画面で直せます）',
+        issues: issues });
+
+  // コピー元から引き継いだ記録
+  const copiedAt = String(readMeta_(ss, META_KEYS.COPIED_AT) || '').trim();
+  const inherited = copiedAt ? countInheritedRows_(ss) : { members: 0, journals: 0 };
+  const inheritedTotal = inherited.members + inherited.journals;
+  if (copiedAt) {
+    items.push(inheritedTotal === 0
+      ? { key: 'inherited', level: 'ok', title: 'コピー元から引き継いだ記録', detail: '残っていません' }
+      : { key: 'inherited', level: 'warn', title: 'コピー元から引き継いだ記録',
+          detail: '名簿 ' + inherited.members + ' 人ぶん、提出 ' + inherited.journals + ' 件が残っています。'
+            + '前の学級のものなら、この画面で消せます',
+          members: inherited.members, journals: inherited.journals });
+  }
+
+  // 承認待ち
+  const pending = getMembers_(ss).filter(function (m) { return m.status === 'pending'; }).length;
+  if (pending) {
+    items.push({ key: 'pending', level: 'warn', title: '参加の承認待ち',
+      detail: pending + ' 人が待っています', count: pending });
+  }
+
+  // Gemini（任意）
+  const key = String(getTenantSetting_(ss, 'GEMINI_API_KEY') || '').trim();
+  items.push({ key: 'gemini', level: 'ok', title: 'AI のおへんじ（任意）',
+    detail: key ? '使う設定になっています' : '使わない設定です（無くても全部の機能が動きます）' });
+
+  return {
+    ok: !items.some(function (it) { return it.level === 'ng'; }),
+    ownerEmail: owner.email,
+    className: owner.className,
+    copiedAt: copiedAt,
+    items: items
+  };
+}
+
+/** 「準備の状態」を、そのまま読める日本語にする */
+function setupStatusText_(status) {
+  const mark = function (level) {
+    return level === 'ok' ? '✅' : (level === 'warn' ? '⚠️' : '❌');
+  };
+  return status.items.map(function (it) {
+    return mark(it.level) + ' ' + it.title + '\n　' + it.detail;
+  }).join('\n\n');
 }
 
 /** 点検の結果を見せるだけ。1 セルも書き換えない */
@@ -290,19 +456,21 @@ function doGet(e) {
   try {
     const ss = getDb_();
     const email = activeEmail_();
-    const owner = ownerEmailOf_(ss);
+    // 先生は「登録されている人」ではなく「デプロイした人」。ここで決まる。
+    // 実行ユーザーの設定ミス（OWNER_MISMATCH）はここで例外になり、下の catch が理由を出す。
+    const owner = resolveOwner_(ss);
     boot = {
-      mode: isOwnerEmail_(ss, email) ? 'owner' : 'member',
-      className: String(readMeta_(ss, META_KEYS.CLASS_NAME) || CONFIG.APP_NAME),
+      mode: (email && email === owner.email) || isOwnerEmail_(ss, email) ? 'owner' : 'member',
+      className: owner.className,
       // 空なら「ログインが確かめられない」ことが確定する。画面で理由を出す
       signedIn: !!email,
-      // 先生がまだ「はじめの設定」を押していない
-      setupDone: !!owner,
+      // このファイルが別のファイルのコピーで、前の学級の記録が残っているかもしれない
+      copied: !!owner.copied,
       webAppUrl: ScriptApp.getService().getUrl() || ''
     };
   } catch (err) {
     boot = {
-      mode: 'member', className: CONFIG.APP_NAME, signedIn: false, setupDone: false,
+      mode: 'member', className: CONFIG.APP_NAME, signedIn: false, copied: false,
       webAppUrl: '', bootError: (err && err.message) ? err.message : String(err)
     };
   }

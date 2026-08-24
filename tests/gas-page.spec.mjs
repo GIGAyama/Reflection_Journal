@@ -48,8 +48,12 @@ test('ログインが確かめられないときは、その理由が画面に�
   await expect(page.getByText('学校のアカウントでログインしてから')).toBeVisible();
 });
 
-test('先生が「はじめの設定」を押す前は、準備中とだけ出る', async ({ page }) => {
-  const errors = await open(page, 'member', { setupDone: false });
+test('実行ユーザーの設定ミスは、画面に理由が出る', async ({ page }) => {
+  // 「はじめの設定」を押す前の「準備中」画面は無くなった（押すものが無いため）。
+  // 代わりに、画面が出ない唯一の理由がこれになる。
+  const errors = await open(page, 'member', {
+    bootError: 'デプロイの「実行するユーザー」が「自分」になっていません。'
+  });
   expect(errors.filter((e) => /SyntaxError/i.test(e)), errors.join('\n')).toEqual([]);
-  await expect(page.getByText('先生の じゅんびが おわるまで まってね。')).toBeVisible();
+  await expect(page.getByText('実行するユーザー')).toBeVisible();
 });

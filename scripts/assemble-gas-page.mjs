@@ -22,7 +22,7 @@ export function assembleGasPage(mode = 'owner', boot = {}) {
     mode,
     className: '3年2組',
     signedIn: true,
-    setupDone: true,
+    copied: false,
     webAppUrl: 'https://script.google.com/macros/s/AAA/exec',
     ...boot
   };

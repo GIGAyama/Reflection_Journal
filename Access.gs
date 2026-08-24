@@ -55,6 +55,7 @@ function assertActiveMember_(ss, email) {
 function guardMember_() {
   const email = requireEmail_();               // ① 本人確認
   const ss = getDb_();
+  resolveOwner_(ss);                           // 実行ユーザーの設定ミスは、児童 API でも止める
   const member = assertActiveMember_(ss, email); // ② 名簿照合
   return { email: email, ss: ss, member: member };
 }
@@ -62,20 +63,21 @@ function guardMember_() {
 /**
  * 先生 API 共通ガード（①③）。
  *
- * 先生かどうかは _meta の ownerEmail か、名簿の「担任」で決まる。どちらも
- * スプレッドシートを開ける人しか書けない場所なので、ウェブアプリから先生になる道は無い。
+ * 先生かどうかは resolveOwner_ が決める（＝デプロイした本人）。名簿の「担任」も認める。
+ * どちらもウェブアプリから書き替える道は無い。
+ *
+ * ⚠️ ownerEmailOf_（控えを読むだけ）で済ませないこと。**resolveOwner_ を通す**のは、
+ *    実行ユーザーの設定ミス（OWNER_MISMATCH）を、画面だけでなく API でも止めるためである。
+ *    doGet だけで見ていると、画面が出ない状態でも google.script.run は素通りする。
  */
 function assertOwner_() {
   const email = requireEmail_();               // ① 本人確認
   const ss = getDb_();
-  if (!ownerEmailOf_(ss)) {
-    throw new Error('SETUP_REQUIRED: このクラスはまだ設定されていません。' +
-      '（先生へ: スプレッドシートを開き、メニュー「' + CONFIG.APP_NAME + '」＞「はじめの設定」を 1 回押してください）');
-  }
-  if (!isOwnerEmail_(ss, email)) {             // ③ 役割チェック
+  const owner = resolveOwner_(ss);             // 設定ミスならここで止まる
+  if (email !== owner.email && !isOwnerEmail_(ss, email)) {   // ③ 役割チェック
     throw new Error('FORBIDDEN: この操作ができるのは、このクラスの先生だけです');
   }
-  return { email: email, ss: ss };
+  return { email: email, ss: ss, owner: owner };
 }
 
 /**

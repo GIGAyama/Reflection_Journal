@@ -372,6 +372,41 @@ function readKeyValue_(sheet, key) {
 // クラス内設定（設定シート）— 先生の Gemini API キー・曜日別テーマ等
 // ────────────────────────────────────────────────────────────────
 
+/**
+ * コピー元から引き継がれた行の数。**1 セルも書き換えない。**
+ *
+ * コピーで配ると、テンプレートに残っていた名簿や提出がそのまま付いてくる。
+ * 消すかどうかは先生が決めることなので、ここでは数えるだけにする。
+ */
+function countInheritedRows_(ss) {
+  const roster = ss.getSheetByName(ROSTER_SHEET_NAME);
+  const journal = ss.getSheetByName(JOURNAL_SHEET_NAME);
+  const rows = function (sheet) {
+    if (!sheet) return 0;
+    return Math.max(0, sheet.getLastRow() - 1);   // 1 行目は見出し
+  };
+  return { members: rows(roster), journals: rows(journal) };
+}
+
+/**
+ * コピー元から引き継がれた行を消す。**先生が押したときだけ呼ばれる。**
+ *
+ * 見出し行は残す。列は 1 本も動かさない。消すのは「児童名簿」「ジャーナルデータ」
+ * 「画像データ」の中身だけで、設定とテーマには触らない
+ * （テーマの案は使い回せるし、Gemini の鍵は先生自身のものだから）。
+ */
+function clearInheritedRows_(ss) {
+  const cleared = {};
+  [ROSTER_SHEET_NAME, JOURNAL_SHEET_NAME, IMAGE_SHEET_NAME].forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) { cleared[name] = 0; return; }
+    const n = sheet.getLastRow() - 1;
+    if (n > 0) sheet.deleteRows(2, n);
+    cleared[name] = Math.max(0, n);
+  });
+  return cleared;
+}
+
 function getTenantSetting_(ss, key) {
   return readKeyValue_(ss.getSheetByName(SETTINGS_SHEET_NAME), key);
 }
