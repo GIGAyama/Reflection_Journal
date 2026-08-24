@@ -35,6 +35,30 @@ GIGA Standard v5 の改修モード（`/rollout`）の作業記録。
 `google.script.run` から誰でも呼べる状態だった（G1）。
 正本ゲートの 38 項目に GAS 関連は 1 つも無いので、ここは自前で持つしかない。
 
+**GAS の `<?` は、差し込まれる側のファイルにも効く。**
+QR の SVG に `<?xml version="1.0" encoding="UTF-8"?>` を書いていた。
+doGet は index.html をテンプレートとして評価し、`<?!= include('app') ?>` で
+app/css/vendor/qr を差し込むので、ブラウザが受け取るのは貼り合わせた 1 枚である。
+その 1 枚の中で `<?` はスクリプトレットの開き記号になる。
+**app.html にあった唯一の `<?` と唯一の `?>` がこれで、貼り合わせた側だけが壊れた。**
+症状は「タブに題は出るが画面が出ない」＋
+`Uncaught SyntaxError: Unexpected identifier 'ふりかえりジャーナル_$'`。
+テンプレート文字列の開きのバッククォートごと食われると、次のバッククォートまでが
+文字列になり、その先が code 位置に出てくる、という壊れ方である。
+`include()` を使う GAS アプリすべてに同じ形がある。G10 で名指しして止めた。
+
+**ファイル単位の検査では、貼り合わせた 1 枚が動くことは一度も見ていない。**
+このとき app.html 単体は `node --check` も通り、8 つのスクリプトブロックも全部妥当で、
+テスト 85 件・ゲート 27 項目・CI 3 ジョブがすべて緑だった。
+`scripts/assemble-gas-page.mjs` で doGet と同じ貼り合わせを再現し、
+`tests/gas-page.spec.mjs` が本物のブラウザに読ませる形にした。
+**組み立てたものを一度もブラウザに読ませていないなら、画面が出ることは誰も見ていない。**
+
+**貼り合わせを `String.replace(文字列, 文字列)` で書かないこと。**
+置換文字列の中の `$&` や `$'` が特殊記号として解釈される。
+React の minify 済みコードには実際に `$'` が入っており、
+差し込んだはずの中身が別のものに化けた。置換は関数で渡す。
+
 **GAS の列挙子は、無い名前を書いても静かに undefined になる。**
 `HtmlService.XFrameOptionsMode.SAMEORIGIN` と書いた（実在するのは `ALLOWALL` と `DEFAULT` だけ）。
 `setXFrameOptionsMode(undefined)` は「引数は null にできません: mode」で落ちるので、

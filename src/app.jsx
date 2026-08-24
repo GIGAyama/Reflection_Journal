@@ -604,8 +604,13 @@ const { useState, useEffect, useRef, useMemo } = React;
           .theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }
           .content { line-height: 1.9; white-space: normal; }
           .comment { background: #eff6ff; border-radius: 8px; padding: 10px; }
-        </style></head><body>${pages}<script>window.onload = function(){ window.print(); };<\/script></body></html>`);
+        </style></head><body>${pages}</body></html>`);
       w.document.close();
+      // ⚠️ 印刷用の窓へ <script> を書き込まない。この文字列は GAS が組み立てる
+      //    1 枚の HTML の中に入るので、タグの形をした文字列を増やさない。
+      //    開いたこちら側から呼べば同じことができる。
+      w.onload = () => { try { w.print(); } catch (e) {} };
+      if (w.document.readyState === 'complete') { try { w.print(); } catch (e) {} }
       return true;
     };
 
@@ -818,7 +823,10 @@ const { useState, useEffect, useRef, useMemo } = React;
         if (!inviteQr) return showToast('QRコードを生成できませんでした', 'error');
         const quietZone = 4;
         const viewSize = inviteQr.count + quietZone * 2;
-        const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
+        // ⚠️ XML 宣言（<?xml ... ?>）を書かないこと。`<?` は GAS のスクリプトレットの
+        //    開き記号で、このファイルは index.html に差し込まれて 1 枚の HTML になる。
+        //    Blob の SVG に XML 宣言は要らない（付けなくてもブラウザも編集ソフトも読む）。
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
         const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
         const a = document.createElement('a');
         const safeName = String(data.klass.className || 'クラス').replace(/[\\/:*?"<>|]/g, '_');

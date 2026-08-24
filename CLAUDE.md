@@ -46,6 +46,15 @@ node /home/user/GIGAyama.github.io/standards/check-drift.mjs --standards /home/u
 - **点検（`inspectSheets_`）は 1 セルも書き換えません。** 見出しだけ正しくすると、
   ずれた列に正しいラベルが付いて事故が見えなくなります。G7 が見ています。
 - **修整（`repairSheets_`）は右端に足すだけ。** 既にある列を動かさず、名前も変えず、何も消しません。
+- **`<?` を、GAS が差し込むファイル（app/css/vendor/qr.html）に入れないこと。**
+  doGet は index.html をテンプレートとして評価し、`<?!= include('app') ?>` で
+  4 つを差し込みます。**ブラウザが受け取るのは貼り合わせた 1 枚**で、`<?` は
+  スクリプトレットの開き記号です。QR の SVG に XML 宣言を書いていたせいで、
+  貼り合わせた側だけが壊れ「タブに題は出るが画面が出ない」状態になりました（2026-08-24）。
+  G10 が見ています。
+- **ファイル単位の検査では、貼り合わせた 1 枚が動くことは分かりません。**
+  上の事故のとき app.html 単体は `node --check` も通り、テストも 85 件すべて緑でした。
+  `tests/gas-page.spec.mjs` が、組み立てた 1 枚を本物のブラウザに読ませています。
 - **GAS の列挙子は、無い名前を書いても JavaScript が黙って undefined を返します。**
   `HtmlService.XFrameOptionsMode` は `ALLOWALL` と `DEFAULT` の 2 つだけ。
   `SAMEORIGIN` と書いたら doGet が「引数は null にできません: mode」で落ち、

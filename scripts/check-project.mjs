@@ -371,6 +371,31 @@ function gasFunctions() {
   } else pass('G7', '点検は読むだけ、修整は人が押したときだけ');
 }
 
+// ── G10: GAS が組み立てるファイルに `<?` を入れない ──
+//
+// doGet は index.html を「テンプレート」として評価し、`<?!= include('app') ?>` などで
+// app / css / vendor / qr を差し込む。ブラウザが受け取るのは貼り合わせた 1 枚である。
+// `<?` は GAS のスクリプトレットの開き記号なので、差し込まれる側に置いてはいけない。
+//
+// 2026-08-24、QR の SVG に XML 宣言（<?xml version="1.0" encoding="UTF-8"?>）が入っていた。
+// これが app.html にある唯一の `<?` と唯一の `?>` で、貼り合わせた 1 枚だけが壊れ、
+// 「タブに題は出るが画面が出ない」状態になった。ファイル単位の構文検査は全部通っていた。
+{
+  const bad = [];
+  for (const f of gasGenerated) {
+    if (!has(f)) continue;
+    const src = read(f);
+    const hits = [...src.matchAll(/<\?/g)];
+    if (hits.length) {
+      const line = src.slice(0, hits[0].index).split('\n').length;
+      bad.push(`${f}:${line}（${hits.length} か所）`);
+    }
+  }
+  bad.length
+    ? fail('G10', `GAS が差し込むファイルに「<?」がある（スクリプトレットと解釈され、貼り合わせた1枚が壊れる）: ${bad.join(' / ')}`)
+    : pass('G10', `GAS が差し込む ${gasGenerated.length} ファイルに「<?」なし`);
+}
+
 // ── G9: GAS の列挙子に、実在しない名前を書いていない ──
 //
 // 2026-08-23、doGet が HtmlService.XFrameOptionsMode.SAMEORIGIN を渡していた。
