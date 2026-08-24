@@ -50,6 +50,9 @@ const CASES = [
                                                    '"https://www.googleapis.com/auth/drive"')],
   // 列を番号で引く形に戻す
   ['G6',  'Db.gs',                (s) => s.replace('function headerMap_(sheet) {', 'function headerMapDisabled_(sheet) {')],
+  // GAS のスクリプトレットの開き記号を、差し込まれる側に入れる
+  ['G10', 'app.html',             (s) => s.replace('const svg = `<svg xmlns=',
+                                                   'const svg = `<?xml version="1.0"?>\\n<svg xmlns=')],
   // 実在しない列挙子（undefined が渡り、その画面が開かなくなる）
   ['G9',  'Main.gs',              (s) => s.replace('HtmlService.XFrameOptionsMode.DEFAULT',
                                                    'HtmlService.XFrameOptionsMode.SAMEORIGIN')],

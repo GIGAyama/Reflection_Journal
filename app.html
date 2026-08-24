@@ -1022,8 +1022,18 @@ const openPrintView = (journals, className) => {
           .theme { color: #6b7280; font-size: 12px; margin: 0 0 8px; }
           .content { line-height: 1.9; white-space: normal; }
           .comment { background: #eff6ff; border-radius: 8px; padding: 10px; }
-        </style></head><body>${pages}<script>window.onload = function(){ window.print(); };<\/script></body></html>`);
+        </style></head><body>${pages}</body></html>`);
   w.document.close();
+  w.onload = () => {
+    try {
+      w.print();
+    } catch (e) {}
+  };
+  if (w.document.readyState === 'complete') {
+    try {
+      w.print();
+    } catch (e) {}
+  }
   return true;
 };
 const TeacherApp = ({
@@ -1295,7 +1305,7 @@ const TeacherApp = ({
     if (!inviteQr) return showToast('QRコードを生成できませんでした', 'error');
     const quietZone = 4;
     const viewSize = inviteQr.count + quietZone * 2;
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-quietZone} ${-quietZone} ${viewSize} ${viewSize}" shape-rendering="crispEdges"><rect x="${-quietZone}" y="${-quietZone}" width="${viewSize}" height="${viewSize}" fill="white"/><path d="${inviteQr.path}" fill="#111827"/></svg>`;
     const url = URL.createObjectURL(new Blob([svg], {
       type: 'image/svg+xml;charset=utf-8'
     }));
