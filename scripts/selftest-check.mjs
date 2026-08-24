@@ -56,6 +56,9 @@ const CASES = [
   // 差し込みを「中身を読み直す」形に戻す（app.html の中の JavaScript が壊れて届く）
   ['G11', 'Main.gs',              (s) => s.replace('HtmlService.createTemplateFromFile(filename).getRawContent()',
                                                    'HtmlService.createHtmlOutputFromFile(filename).getContent()')],
+  // コピーリンクの 1 か所だけ古い ID が残る（前のテンプレートを配ってしまう）
+  ['G8',  'README.md',            (s) => s.replace('15yVHzXFrPQudGZu9nLt5zXJRtAEwJrdgW-3pub-KJWU',
+                                                   '1OLDoldOLDoldOLDoldOLDoldOLDoldOLDoldOLDold')],
   // 実在しない列挙子（undefined が渡り、その画面が開かなくなる）
   ['G9',  'Main.gs',              (s) => s.replace('HtmlService.XFrameOptionsMode.DEFAULT',
                                                    'HtmlService.XFrameOptionsMode.SAMEORIGIN')],

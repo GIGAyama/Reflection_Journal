@@ -22,8 +22,8 @@
 
 ### 手順A：スプレッドシートをコピーする（おすすめ）
 
-1. 配布用スプレッドシートのコピーリンクを開き、「コピーを作成」を選びます。
-   （リンクは案内ページと、下の「配布用テンプレート」節にあります。）
+1. [配布用スプレッドシートのコピーリンク](https://docs.google.com/spreadsheets/d/15yVHzXFrPQudGZu9nLt5zXJRtAEwJrdgW-3pub-KJWU/copy) を開き、「コピーを作成」を選びます。
+   （同じリンクは[案内ページ](https://reflection-journal.giga-school.com/)にもあります。）
 2. できたファイルを開き、メニュー **「ふりかえりジャーナル」＞「はじめの設定」** を 1 回押します。
    承認をたずねられたら許可してください。クラス名を入れると、必要なシートが作られ、
    **押したご本人がこのクラスの先生として登録されます。**
@@ -150,8 +150,13 @@
 
 ## 配布用テンプレート
 
-配布用スプレッドシートの作り方と、コピーリンクを差し替える場所は
-[docs/copy-distribution.md](docs/copy-distribution.md) にあります。
+配るリンクはこれです。
+
+```
+https://docs.google.com/spreadsheets/d/15yVHzXFrPQudGZu9nLt5zXJRtAEwJrdgW-3pub-KJWU/copy
+```
+
+作り方と、差し替える場所は [docs/copy-distribution.md](docs/copy-distribution.md) にあります。
 
 ## 本番ソース
 
