@@ -19,3 +19,5 @@
 !index.html
 !qr.html
 !vendor.html
+# 書体（生成物）。index.html が include_() で読むので、送らないと当たりません。
+!fonts.html

@@ -29,11 +29,24 @@
   <? if (bootMode === 'owner') { ?><?!= include_('qr'); ?><? } ?>
   <?!= include_('css'); ?>
 
-  <!-- フォントは「届かなくても字の形が変わるだけ」なので CDN のままでよい。
-       ただし端末側の日本語フォントを必ず後ろに並べる（tools/extra.css の --font-ui）。 -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <!--
+    書体（Zen Maru Gothic）。生成物です。作り直すには npm run build:fonts。
+
+    以前は「届かなくても字の形が変わるだけなので CDN のままでよい」と書いて
+    ありましたが、それは**フィルタが拒否したとき**の話でした。
+    「握ったまま返さない」形で塞がれると、<head> のスタイルシートの読み込みが
+    終わらず script が動き出さず、真っ白のまま何も起きません
+    （Quarto で 2026-08-23 に実際に起きました）。
+
+    ⚠️ 収録は 500 の 1 ウェイトだけです。font-bold（75 か所）と font-black
+       （56 か所）は端末側の擬似ボールドになります。
+       700 も入れると 130KB → 262KB、900 まで入れると 392KB です（gzip 後、
+       1 ページあたり）。GAS のページはキャッシュされないので、開くたびに流れます。
+    ⚠️ 先生や児童が書いた振り返りの字は収録できません。端末フォントに落ちます
+       （書体が変わるだけで、豆腐にはなりません）。
+       端末側の日本語フォントは tools/extra.css の --font-ui に並べてあります。
+  -->
+  <?!= include_('fonts'); ?>
 
   <script>
     // ==========================================

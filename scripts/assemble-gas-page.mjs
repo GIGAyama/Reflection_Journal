@@ -39,7 +39,12 @@ export function assembleGasPage(mode = 'owner', boot = {}) {
   // 先生の画面のときだけ QR を読む、という分岐
   out = put(out, "<? if (bootMode === 'owner') { ?><?!= include_('qr'); ?><? } ?>",
     mode === 'owner' ? read('qr.html') : '');
-  for (const name of ['vendor', 'css', 'app']) {
+  // ⚠️ 差し込む名前は index.html 自身から読む。決め打ちの一覧にしない。
+  //    2026-08-28 に fonts を足したとき、['vendor','css','app'] のままだと
+  //    fonts.html だけが貼り合わされないまま検査が通る形になりかけた
+  //    （下の「取りこぼし」の番人が拾ってはくれるが、名前を足す手間を
+  //     忘れないための仕掛けをコード側に持たせておく）。
+  for (const [, name] of out.matchAll(/<\?!= include_\('([^']+)'\); \?>/g)) {
     out = put(out, `<?!= include_('${name}'); ?>`, read(`${name}.html`));
   }
 
