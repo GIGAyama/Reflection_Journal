@@ -34,7 +34,19 @@ const stripComments = (s) =>
 const siteHtml = ['docs/index.html', 'docs/offline.html', 'docs/privacy.html', 'docs/terms.html'];
 // GAS が配る画面（外枠は原本、app/css/vendor/qr は生成物）
 const gasHtml = ['index.html'];
-const gasGenerated = ['app.html', 'css.html', 'vendor.html', 'qr.html'];
+// index.html が差し込んでいるファイルを、index.html 自身から読む。
+// ⚠️ 決め打ちの一覧にしない。2026-08-28 に fonts.html を足したとき、
+//    一覧が ['app','css','vendor','qr'] のままだったので G10 は
+//    「4 ファイルに <? なし」と緑を出しつづけた。**足したファイルだけが
+//    検査されない**という、いちばん気づけない形になる。
+const gasGenerated = (() => {
+  const src = existsSync(join(ROOT, 'index.html'))
+    ? readFileSync(join(ROOT, 'index.html'), 'utf8')
+    : '';
+  const found = [...src.matchAll(/include_?\(\s*'([^']+)'\s*\)/g)].map((m) => m[1] + '.html');
+  // index.html から読めなかったときのために、もとの 4 つを下限として残す
+  return [...new Set([...found, 'app.html', 'css.html', 'vendor.html', 'qr.html'])].sort();
+})();
 // 児童の端末が最初に読み込む JS（GAS 側）。qr.html は先生の画面だけなので含めない
 const memberJs = ['vendor.html', 'app.html'];
 // サーバー側（.gs）。ここが CI に守られていない領域
