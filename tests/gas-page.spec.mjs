@@ -16,14 +16,29 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** 組み立てた 1 枚を dist/ へ置き、ブラウザに読ませて、出たエラーを全部返す */
 async function open(page, mode, boot) {
-  const dir = join(ROOT, 'dist/gas-page', mode);
+  /* ⚠️ テストごとに別のディレクトリへ書く。置き場を mode だけで決めてはいけない。
+   *
+   *    2026-08-29 まで `dist/gas-page/<mode>/` に書いていた。ところが
+   *    mode='member' を使うテストが 3 つあり、それぞれ別の boot を渡している
+   *    （既定 / signedIn:false / bootError）。playwright.config は
+   *    fullyParallel なので、3 つが**同じ index.html を互いに上書き**し、
+   *    書いた本人とは違う中身を読みにいくことがあった。
+   *
+   *    そのため「ログインが確かめられないときは、その理由が画面に出る」が
+   *    ときどきだけ落ちる。手元で --workers=4 にして 10 回走らせると 4 回落ちた。
+   *    CI でも 2026-08-27 以降、成功と失敗が無関係なコミットで交互に出ていた。
+   *
+   *    ⚠️ これは「たまに落ちる検査」ではなく、**検査どうしがぶつかっていた**。
+   *       落ちた回は、見たかった画面をそもそも見ていない。 */
+  const key = `${mode}-${test.info().testId}`.replace(/[^A-Za-z0-9_-]/g, '');
+  const dir = join(ROOT, 'dist/gas-page', key);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'index.html'), assembleGasPage(mode, boot));
 
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e.message)));
   // 外部の書体やアイコンが届かないのは想定内。画面が出るかどうかだけを見る。
-  await page.goto(`/dist/gas-page/${mode}/`, { waitUntil: 'load' });
+  await page.goto(`/dist/gas-page/${key}/`, { waitUntil: 'load' });
   await page.waitForTimeout(500);
   return errors;
 }
