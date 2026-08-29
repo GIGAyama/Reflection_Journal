@@ -1,5 +1,11 @@
 # CLAUDE.md — このリポジトリを触るときに先に読むこと
 
+@.agents/rules/gigaschool-standards.md
+
+⚠️ **上の 1 行を消さないこと。** 艦隊共通のルール（Zero-CDN・Zero-PII・正本同期）は
+正本 `GIGAyama.github.io/standards/agents/rules/` に 1 本だけ置いてある。
+Claude Code はこの取りこみを通して読む。以下はこのリポジトリ固有の話。
+
 ## 何が本番か（2026-08-23 に入れ替わった）
 
 **本番は、スプレッドシートにコンテナバインドした Google Apps Script です。**
