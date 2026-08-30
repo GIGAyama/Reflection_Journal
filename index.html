@@ -111,5 +111,16 @@
 
   <!-- 本編。JSX の翻訳はビルド時に済ませてある（原本は src/app.jsx）。 -->
   <?!= include_('app'); ?>
+
+  <!-- 利用規約・プライバシーへの行き先。中身は正本の部品
+       standards/web/giga-app-links.js（配布物 web/giga-app-links.js）を
+       tools/build-app-links.mjs が焼き込んだもの。
+       src/app.jsx のフッターに置いた <span data-giga-links> の中に出す。
+
+       ⚠️ 本編（include_('app')）より後に置くこと。フッターは React が
+          描いてから現れるので、部品は置き場所が出てくるのを待って出す。
+       ⚠️ slug は焼き込みのときに渡してある。GAS の画面はホスト名から
+          自分が何のアプリか分からないため。 -->
+  <?!= include_('giga-links'); ?>
 </body>
 </html>

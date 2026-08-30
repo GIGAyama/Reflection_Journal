@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
-    "check": "node tools/check-secrets.mjs && node scripts/check-project.mjs",
+    "check": "node tools/build-app-links.mjs --check && node tools/check-secrets.mjs && node scripts/check-project.mjs",
     "test": "node scripts/test-qr.mjs && node --test scripts/test-gas.mjs scripts/test-legacy-drive-kit.mjs scripts/test-legacy-drive-core.mjs scripts/test-legacy-drive-api.mjs scripts/test-legacy-drive-ui.mjs",
     "verify": "npm run build && node scripts/check-generated.mjs && node tools/build-sw.mjs --check && npm test && npm run check",
     "gas:install": "npm install --no-save --no-package-lock --no-audit --no-fund @google/clasp@3.3.0",
@@ -18,7 +18,8 @@
     "deploy": "node scripts/gas-deploy.mjs deploy",
     "build:sw": "node tools/build-sw.mjs",
     "check:secrets": "node tools/check-secrets.mjs",
-    "build:fonts": "node tools/fonts/build-fonts.mjs"
+    "build:fonts": "node tools/fonts/build-fonts.mjs",
+    "build:app-links": "node tools/build-app-links.mjs"
   },
   "devDependencies": {
     "@babel/core": "7.28.4",

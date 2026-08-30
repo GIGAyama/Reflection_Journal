@@ -21,3 +21,6 @@
 !vendor.html
 # 書体（生成物）。index.html が include_() で読むので、送らないと当たりません。
 !fonts.html
+# 利用規約・プライバシーへの行き先（生成物）。index.html が include_() で読むので、
+# 送らないと当たりません。中身は tools/build-app-links.mjs が焼き込みます。
+!giga-links.html
