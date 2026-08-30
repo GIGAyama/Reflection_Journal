@@ -2299,18 +2299,17 @@ const OwnerRoot = () => {
     server: server,
     refresh: load
   }))), React.createElement("footer", {
-    className: "flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm"
-  }, React.createElement("span", null, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
+    className: "flex-none flex flex-nowrap items-center justify-center gap-2 min-w-0 w-full text-center text-gray-500 py-1 bg-white border-t border-gray-100 text-sm"
+  }, React.createElement("span", {
+    className: "min-w-0 truncate"
+  }, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
     href: "https://giga-school.com",
     target: "_blank",
     rel: "noopener noreferrer",
     className: "tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity"
-  }, "GIGA\u5C71")), React.createElement("span", null, " ", React.createElement("a", {
-    href: "https://giga-school.com/apps/reflection-journal/",
-    target: "_blank",
-    rel: "noopener noreferrer",
-    className: "tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity"
-  }, "\u4F7F\u3044\u65B9\u3092\u8AAD\u3080"))));
+  }, "GIGA\u5C71")), React.createElement("span", {
+    "data-giga-links": true
+  })));
 };
 const MemberRoot = () => {
   const server = useServer();
@@ -2472,13 +2471,17 @@ const MemberRoot = () => {
     server: server,
     refresh: sync
   }))), React.createElement("footer", {
-    className: "flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm"
-  }, React.createElement("span", null, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
+    className: "flex-none flex flex-nowrap items-center justify-center gap-2 min-w-0 w-full text-center text-gray-500 py-1 bg-white border-t border-gray-100 text-sm"
+  }, React.createElement("span", {
+    className: "min-w-0 truncate"
+  }, "\xA9 2026 \u3075\u308A\u304B\u3048\u308A\u30B8\u30E3\u30FC\u30CA\u30EB ", React.createElement("a", {
     href: "https://giga-school.com",
     target: "_blank",
     rel: "noopener noreferrer",
     className: "tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity"
-  }, "GIGA\u5C71"))));
+  }, "GIGA\u5C71")), React.createElement("span", {
+    "data-giga-links": true
+  })));
 };
 const App = () => {
   const boot = window.BOOT || {};

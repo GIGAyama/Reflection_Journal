@@ -1460,11 +1460,15 @@ const { useState, useEffect, useRef, useMemo } = React;
           <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
             <TeacherApp data={classData} server={server} refresh={load} />
           </div></main>
-          <footer className="flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm">
-            <span>© 2026 ふりかえりジャーナル <a href="https://giga-school.com" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
-            {/* 紹介記事は先生に向けて書いてあるので、先生の画面にだけ出す。
-                子どもの画面（下の StudentApp のフッター）には足さない。 */}
-            <span> <a href="https://giga-school.com/apps/reflection-journal/" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">使い方を読む</a></span>
+          {/* フッターは 1 行に収める。2 行になると、そのぶん本文の場所を奪う。
+              幅が足りなくなったら切るのはクレジットのほうで、利用規約と
+              プライバシーへの行き先は必ず残す。画面からそこへ辿れるのは
+              ここだけしかない。中身は正本の部品が出す（giga-links.html）。
+              ⚠️ min-w-0 を落とさないこと。行き先は折り返さないので、
+                 これが無いと最小幅が段を押し広げ、横に溢れる。 */}
+          <footer className="flex-none flex flex-nowrap items-center justify-center gap-2 min-w-0 w-full text-center text-gray-500 py-1 bg-white border-t border-gray-100 text-sm">
+            <span className="min-w-0 truncate">© 2026 ふりかえりジャーナル <a href="https://giga-school.com" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+            <span data-giga-links></span>
           </footer>
         </div>
       );
@@ -1566,8 +1570,11 @@ const { useState, useEffect, useRef, useMemo } = React;
           <main className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8"><div className="max-w-[1400px] mx-auto h-full">
             <StudentApp data={data} server={server} refresh={sync} />
           </div></main>
-          <footer className="flex-none w-full text-center text-gray-500 py-3 bg-white border-t border-gray-100 text-sm">
-            <span>© 2026 ふりかえりジャーナル <a href="https://giga-school.com" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+          {/* 子どもの画面のフッター。上の先生の画面と同じ作り（1 行に収める）。
+              利用規約とプライバシーは、使う人が子どもでも辿れなければならない。 */}
+          <footer className="flex-none flex flex-nowrap items-center justify-center gap-2 min-w-0 w-full text-center text-gray-500 py-1 bg-white border-t border-gray-100 text-sm">
+            <span className="min-w-0 truncate">© 2026 ふりかえりジャーナル <a href="https://giga-school.com" target="_blank" rel="noopener noreferrer" className="tap-44 inline-block no-underline text-inherit hover:opacity-80 transition-opacity">GIGA山</a></span>
+            <span data-giga-links></span>
           </footer>
         </div>
       );

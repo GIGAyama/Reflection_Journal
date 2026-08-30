@@ -17,6 +17,10 @@
       "local": "tools/build-sw.mjs"
     },
     {
+      "canonical": "web/giga-app-links.js",
+      "local": "web/giga-app-links.js"
+    },
+    {
       "canonical": "lib/check-secrets.mjs",
       "local": "tools/check-secrets.mjs"
     },
