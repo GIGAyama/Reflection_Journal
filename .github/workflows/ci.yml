@@ -51,9 +51,12 @@ jobs:
           cache: npm
       - name: 基本依存を入れる
         run: npm ci
+      # ⚠️ ubuntu-latest は Ubuntu 26.04。Playwright は 1.61 から対応していて、
+      #    それより古いと `install --with-deps` が「does not support chromium on
+      #    ubuntu26.04-x64」で落ちる（2026-11-10 に 1.55.0 で落ちた）。
       - name: Chromiumテスト環境を入れる
         run: |
-          npm install --no-save --package-lock=false @playwright/test@1.55.0
+          npm install --no-save --package-lock=false @playwright/test@1.62.1
           npx playwright install --with-deps chromium
       - name: 導入案内ページと退役版UIのE2E
         run: npx playwright test
